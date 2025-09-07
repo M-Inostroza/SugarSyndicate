@@ -1,0 +1,63 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 3
+  tags: []
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - 
+  - Water
+  - UI
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Default
+    uniqueID: 0
+    locked: 0
+  - name: UI
+    uniqueID: 3889849611
+    locked: 0
+  - name: Items
+    uniqueID: 1893790991
+    locked: 0
+  - name: Machines
+    uniqueID: 928821453
+    locked: 0
+  - name: Conveyors
+    uniqueID: 2992988387
+    locked: 0
+  - name: Floor
+    uniqueID: 959923091
+    locked: 0
+  - name: Background
+    uniqueID: 3765990643
+    locked: 0
+  m_RenderingLayers:
+  - Default

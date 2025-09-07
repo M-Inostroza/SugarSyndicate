@@ -1,0 +1,55 @@
+# Archivos y carpetas generados por Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+UserSettings/
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de Visual Studio
+.vs/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+
+# Archivos de configuración de Rider
+.idea/
+*.sln.iml
+
+# Archivos de configuración de MonoDevelop
+*.pidb
+*.userprefs
+
+# Archivos de configuración de VS Code
+.vscode/
+
+# Archivos de compilación de Unity
+*.apk
+*.aab
+*.unitypackage
+
+# Archivos de caché de Unity
+*.pidb.meta
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Archivos de configuración de Crashlytics
+crashlytics-build.properties
+
+# Archivos de configuración de gradle
+.gradle/
