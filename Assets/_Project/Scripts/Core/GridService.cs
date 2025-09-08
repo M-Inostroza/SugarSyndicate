@@ -9,7 +9,14 @@ public class GridService : MonoBehaviour
     [SerializeField, Min(0.01f)] float cellSize = 1f;
     [SerializeField] Vector2Int gridSize = new Vector2Int(20, 12);
 
+    // Runtime toggle to show grid to player
+    [Header("Runtime Debug")]
+    public bool showRuntimeGrid = false;
+    public Color runtimeGridColor = new Color(1f, 1f, 1f, 0.08f);
+
     readonly Dictionary<Vector2Int, Cell> cells = new();
+
+    Material runtimeGridMat;
 
     public class Cell
     {
@@ -18,6 +25,9 @@ public class GridService : MonoBehaviour
         public bool hasConveyor;
         public bool hasMachine;
         public int itemCount; // items in transit/center
+
+        // cached conveyor component if any
+        public Conveyor conveyor;
     }
 
     void Awake()
@@ -26,6 +36,10 @@ public class GridService : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         WarmCells();
+
+        // Show grid by default in Play mode to aid debugging/placement
+        if (Application.isPlaying)
+            showRuntimeGrid = true;
     }
 
     void WarmCells()
@@ -53,6 +67,75 @@ public class GridService : MonoBehaviour
 
     public Cell GetCell(Vector2Int c) =>
         cells.TryGetValue(c, out var cell) ? cell : null;
+
+    // Conveyor registration helpers
+    public void SetConveyor(Vector2Int c, Conveyor conveyor)
+    {
+        if (!InBounds(c)) return;
+        var cell = GetCell(c);
+        if (cell == null) return;
+        cell.conveyor = conveyor;
+        cell.hasConveyor = conveyor != null;
+    }
+
+    public Conveyor GetConveyor(Vector2Int c)
+    {
+        var cell = GetCell(c);
+        return cell != null ? cell.conveyor : null;
+    }
+
+    // Create a simple material for GL rendering
+    void EnsureRuntimeMaterial()
+    {
+        if (runtimeGridMat != null) return;
+        var shader = Shader.Find("Hidden/Internal-Colored");
+        if (shader == null) return;
+        runtimeGridMat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+        // enable alpha blending
+        runtimeGridMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        runtimeGridMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        runtimeGridMat.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+        runtimeGridMat.SetInt("_ZWrite", 0);
+    }
+
+    // Draw grid in play mode using GL lines when showRuntimeGrid is enabled
+    void OnRenderObject()
+    {
+        if (!showRuntimeGrid) return;
+        EnsureRuntimeMaterial();
+        if (runtimeGridMat == null) return;
+
+        runtimeGridMat.SetPass(0);
+        GL.PushMatrix();
+        // match transform identity
+        GL.MultMatrix(Matrix4x4.identity);
+        GL.Begin(GL.LINES);
+        GL.Color(runtimeGridColor);
+
+        float left = origin.x;
+        float bottom = origin.y;
+        float width = gridSize.x * cellSize;
+        float height = gridSize.y * cellSize;
+
+        // vertical lines
+        for (int x = 0; x <= gridSize.x; x++)
+        {
+            float px = left + x * cellSize;
+            GL.Vertex(new Vector3(px, bottom, 0));
+            GL.Vertex(new Vector3(px, bottom + height, 0));
+        }
+
+        // horizontal lines
+        for (int y = 0; y <= gridSize.y; y++)
+        {
+            float py = bottom + y * cellSize;
+            GL.Vertex(new Vector3(left, py, 0));
+            GL.Vertex(new Vector3(left + width, py, 0));
+        }
+
+        GL.End();
+        GL.PopMatrix();
+    }
 
 #if UNITY_EDITOR
     void OnDrawGizmos()

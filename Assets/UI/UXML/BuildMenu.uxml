@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/UI/USS/BuildMenu.uss?fileID=7433441132597879392&amp;guid=d371fe51568245648b5374f9cbf81b29&amp;type=3#BuildMenu" />
+    <ui:VisualElement name="Root">
+        <ui:VisualElement name="BuildAnchor" class="build-anchor">
+            <ui:Button name="BuildFab" text="+" class="fab" />
+            <ui:VisualElement name="BuildMenu" class="menu">
+                <ui:Button name="BtnConveyor" text="Conveyor" class="menu-item" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>
