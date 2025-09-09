@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public class GridService : MonoBehaviour
@@ -9,25 +10,27 @@ public class GridService : MonoBehaviour
     [SerializeField, Min(0.01f)] float cellSize = 1f;
     [SerializeField] Vector2Int gridSize = new Vector2Int(20, 12);
 
-    // Runtime toggle to show grid to player
-    [Header("Runtime Debug")]
-    public bool showRuntimeGrid = false;
-    public Color runtimeGridColor = new Color(1f, 1f, 1f, 0.08f);
+    [Header("Debug")]
+    [SerializeField] bool debugLogging = false;
 
     readonly Dictionary<Vector2Int, Cell> cells = new();
-
-    Material runtimeGridMat;
+    readonly Dictionary<Vector2Int, List<Intent>> intents = new();
+    readonly Dictionary<Vector2Int, Direction> lastServed = new();
 
     public class Cell
     {
-        // Simple occupancy flags; expand later (belts, machines, items)
         public bool hasFloor;
         public bool hasConveyor;
         public bool hasMachine;
-        public int itemCount; // items in transit/center
-
-        // cached conveyor component if any
         public Conveyor conveyor;
+    }
+
+    public struct Intent
+    {
+        public ItemAgent agent;
+        public Vector2Int from;
+        public Vector2Int to;
+        public Direction incoming;
     }
 
     void Awake()
@@ -37,9 +40,24 @@ public class GridService : MonoBehaviour
         DontDestroyOnLoad(gameObject);
         WarmCells();
 
-        // Show grid by default in Play mode to aid debugging/placement
-        if (Application.isPlaying)
-            showRuntimeGrid = true;
+        GameTick.OnTickStart += OnTickStart;
+        GameTick.OnTickEnd += OnTickEnd;
+    }
+
+    void OnDestroy()
+    {
+        GameTick.OnTickStart -= OnTickStart;
+        GameTick.OnTickEnd -= OnTickEnd;
+    }
+
+    void OnTickStart()
+    {
+        intents.Clear();
+    }
+
+    void OnTickEnd()
+    {
+        ResolveIntents();
     }
 
     void WarmCells()
@@ -62,13 +80,10 @@ public class GridService : MonoBehaviour
         return new Vector3(w.x, w.y, z);
     }
 
-    public bool InBounds(Vector2Int c) =>
-        c.x >= 0 && c.y >= 0 && c.x < gridSize.x && c.y < gridSize.y;
+    public bool InBounds(Vector2Int c) => c.x >= 0 && c.y >= 0 && c.x < gridSize.x && c.y < gridSize.y;
 
-    public Cell GetCell(Vector2Int c) =>
-        cells.TryGetValue(c, out var cell) ? cell : null;
+    public Cell GetCell(Vector2Int c) => cells.TryGetValue(c, out var cell) ? cell : null;
 
-    // Conveyor registration helpers
     public void SetConveyor(Vector2Int c, Conveyor conveyor)
     {
         if (!InBounds(c)) return;
@@ -84,71 +99,163 @@ public class GridService : MonoBehaviour
         return cell != null ? cell.conveyor : null;
     }
 
-    // Create a simple material for GL rendering
-    void EnsureRuntimeMaterial()
+    public void SubmitIntent(ItemAgent agent, Vector2Int from, Vector2Int to, Direction incoming)
     {
-        if (runtimeGridMat != null) return;
-        var shader = Shader.Find("Hidden/Internal-Colored");
-        if (shader == null) return;
-        runtimeGridMat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
-        // enable alpha blending
-        runtimeGridMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        runtimeGridMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        runtimeGridMat.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
-        runtimeGridMat.SetInt("_ZWrite", 0);
+        if (!InBounds(to)) return;
+        if (!intents.TryGetValue(to, out var list))
+        {
+            list = new List<Intent>(2);
+            intents[to] = list;
+        }
+        list.Add(new Intent { agent = agent, from = from, to = to, incoming = incoming });
     }
 
-    // Draw grid in play mode using GL lines when showRuntimeGrid is enabled
-    void OnRenderObject()
+    void ResolveIntents()
     {
-        if (!showRuntimeGrid) return;
-        EnsureRuntimeMaterial();
-        if (runtimeGridMat == null) return;
+        // 1. SETUP: Collect all initial state
+        var allAgents = Object.FindObjectsByType<ItemAgent>(FindObjectsSortMode.None);
 
-        runtimeGridMat.SetPass(0);
-        GL.PushMatrix();
-        // match transform identity
-        GL.MultMatrix(Matrix4x4.identity);
-        GL.Begin(GL.LINES);
-        GL.Color(runtimeGridColor);
-
-        float left = origin.x;
-        float bottom = origin.y;
-        float width = gridSize.x * cellSize;
-        float height = gridSize.y * cellSize;
-
-        // vertical lines
-        for (int x = 0; x <= gridSize.x; x++)
+        var cellOccupants = new Dictionary<Vector2Int, ItemAgent>();
+        foreach (var agent in allAgents)
         {
-            float px = left + x * cellSize;
-            GL.Vertex(new Vector3(px, bottom, 0));
-            GL.Vertex(new Vector3(px, bottom + height, 0));
-        }
-
-        // horizontal lines
-        for (int y = 0; y <= gridSize.y; y++)
-        {
-            float py = bottom + y * cellSize;
-            GL.Vertex(new Vector3(left, py, 0));
-            GL.Vertex(new Vector3(left + width, py, 0));
-        }
-
-        GL.End();
-        GL.PopMatrix();
-    }
-
-#if UNITY_EDITOR
-    void OnDrawGizmos()
-    {
-        // Draw grid in editor for alignment
-        Gizmos.matrix = Matrix4x4.identity;
-        Gizmos.color = new Color(1, 1, 1, 0.15f);
-        for (int y = 0; y < gridSize.y; y++)
-            for (int x = 0; x < gridSize.x; x++)
+            if (!cellOccupants.ContainsKey(agent.CurrentCell))
             {
-                Vector3 center = CellToWorld(new Vector2Int(x, y));
-                Gizmos.DrawWireCube(center, new Vector3(cellSize, cellSize, 0));
+                cellOccupants[agent.CurrentCell] = agent;
             }
+            else
+            {
+                if(debugLogging) Debug.LogWarning($"Merge detected at {agent.CurrentCell} during setup. Ignoring duplicate agent.");
+            }
+        }
+
+        var agentIntents = new Dictionary<ItemAgent, Intent>();
+        var allSubmittedAgents = new HashSet<ItemAgent>();
+        foreach (var intentList in intents.Values)
+        {
+            foreach (var intent in intentList)
+            {
+                allSubmittedAgents.Add(intent.agent);
+                if (cellOccupants.TryGetValue(intent.from, out var occupant) && occupant == intent.agent)
+                {
+                    agentIntents[intent.agent] = intent;
+                }
+            }
+        }
+
+        var grants = new Dictionary<ItemAgent, Vector2Int>();
+        var processedAgents = new HashSet<ItemAgent>();
+
+        // 2. PHASE 1: Detect and resolve cycles
+        var path = new List<ItemAgent>();
+        var visited = new HashSet<ItemAgent>();
+        foreach (var agent in agentIntents.Keys)
+        {
+            if (!visited.Contains(agent))
+            {
+                FindCycles(agent, agentIntents, cellOccupants, path, visited, processedAgents, grants);
+            }
+        }
+
+        // 3. PHASE 2: Resolve chains iteratively
+        bool changedInPass;
+        do
+        {
+            changedInPass = false;
+            foreach (var agent in agentIntents.Keys)
+            {
+                if (processedAgents.Contains(agent)) continue;
+
+                var intent = agentIntents[agent];
+                var targetCell = intent.to;
+
+                bool targetIsAvailable = !cellOccupants.ContainsKey(targetCell) ||
+                                         (cellOccupants.TryGetValue(targetCell, out var occupant) && grants.ContainsKey(occupant));
+
+                if (targetIsAvailable)
+                {
+                    var contenders = new List<Intent>();
+                    if (intents.TryGetValue(targetCell, out var intentListForTarget))
+                    {
+                        foreach (var contenderIntent in intentListForTarget)
+                        {
+                            if (!processedAgents.Contains(contenderIntent.agent) && agentIntents.ContainsKey(contenderIntent.agent))
+                            {
+                                contenders.Add(contenderIntent);
+                            }
+                        }
+                    }
+
+                    if (contenders.Count > 0)
+                    {
+                        ItemAgent winner;
+                        if (contenders.Count == 1)
+                        {
+                            winner = contenders[0].agent;
+                        }
+                        else
+                        {
+                            Direction lastDir = lastServed.TryGetValue(targetCell, out var d) ? d : Direction.Left;
+                            winner = contenders.FirstOrDefault(c => c.incoming != lastDir).agent ?? contenders[0].agent;
+                        }
+
+                        grants[winner] = targetCell;
+                        lastServed[targetCell] = agentIntents[winner].incoming;
+
+                        foreach (var contender in contenders)
+                        {
+                            processedAgents.Add(contender.agent);
+                        }
+                        changedInPass = true;
+                    }
+                }
+            }
+        } while (changedInPass);
+
+        // 4. FINALIZATION: Notify all agents
+        foreach (var agent in allSubmittedAgents)
+        {
+            if (grants.TryGetValue(agent, out var grantedCell))
+            {
+                agent.ApplyGrantedMove(grantedCell);
+            }
+            else
+            {
+                agent.OnDecisionProcessed();
+            }
+        }
     }
-#endif
+
+    private void FindCycles(ItemAgent currentAgent, Dictionary<ItemAgent, Intent> agentIntents,
+        Dictionary<Vector2Int, ItemAgent> cellOccupants, List<ItemAgent> path, HashSet<ItemAgent> visited,
+        HashSet<ItemAgent> processedAgents, Dictionary<ItemAgent, Vector2Int> grants)
+    {
+        path.Add(currentAgent);
+        visited.Add(currentAgent);
+
+        if (agentIntents.TryGetValue(currentAgent, out var intent))
+        {
+            var targetCell = intent.to;
+            if (cellOccupants.TryGetValue(targetCell, out var nextAgent))
+            {
+                int cycleStartIndex = path.IndexOf(nextAgent);
+                if (cycleStartIndex != -1) // Cycle detected
+                {
+                    for (int i = cycleStartIndex; i < path.Count; i++)
+                    {
+                        var agentInCycle = path[i];
+                        if (processedAgents.Contains(agentInCycle)) continue;
+
+                        var cycleIntent = agentIntents[agentInCycle];
+                        grants[agentInCycle] = cycleIntent.to;
+                        processedAgents.Add(agentInCycle);
+                    }
+                }
+                else if (!visited.Contains(nextAgent))
+                {
+                    FindCycles(nextAgent, agentIntents, cellOccupants, path, visited, processedAgents, grants);
+                }
+            }
+        }
+        path.RemoveAt(path.Count - 1);
+    }
 }

@@ -5,8 +5,8 @@ public class Spawner : MonoBehaviour
     public Direction outputDirection = Direction.Right;
 
     [Header("What to spawn")]
-    [SerializeField] GameObject itemPrefab;     // assign your item prefab
-    [SerializeField] Transform itemsParent;     // usually LevelRoot/Items
+    [SerializeField] GameObject itemPrefab;
+    [SerializeField] Transform itemsParent;
 
     [Header("When")]
     [SerializeField, Min(1)] int intervalTicks = 10;
@@ -15,17 +15,18 @@ public class Spawner : MonoBehaviour
     [Header("Pooling")]
     [SerializeField, Min(0)] int poolPrewarm = 8;
 
+    [Header("Debug")]
+    [SerializeField] bool debugLogging = false;
+    
     int tickCounter;
     bool running;
-
     Pool<ItemAgent> pool;
 
     void OnEnable()
     {
         running = autoStart;
-        GameTick.OnTick += OnTick;   // uses your existing tick
+        GameTick.OnTick += OnTick;
 
-        // Create pool if the prefab contains ItemAgent (support child components)
         if (itemPrefab != null && pool == null)
         {
             var agentPrefab = itemPrefab.GetComponentInChildren<ItemAgent>();
@@ -33,10 +34,6 @@ public class Spawner : MonoBehaviour
             {
                 var parent = itemsParent != null ? itemsParent : transform.parent;
                 pool = new Pool<ItemAgent>(agentPrefab, poolPrewarm, parent);
-            }
-            else
-            {
-                // no ItemAgent on prefab; fallback to Instantiate when spawning
             }
         }
     }
@@ -57,34 +54,39 @@ public class Spawner : MonoBehaviour
         }
     }
 
-    void Spawn()
+    bool IsCellOccupied()
     {
-        var parent = itemsParent != null ? itemsParent : transform.parent;
-
-        // If GridService exists, block spawn when cell occupied (traffic jam)
-        if (GridService.Instance != null)
+        if (GridService.Instance == null) return false;
+        
+        Vector2Int spawnCell = GridService.Instance.WorldToCell(transform.position);
+        
+        var agents = Object.FindObjectsByType<ItemAgent>(FindObjectsSortMode.None);
+        foreach (var agent in agents)
         {
-            var spawnCell = GridService.Instance.WorldToCell(transform.position);
-            var c = GridService.Instance.GetCell(spawnCell);
-            if (c != null && c.itemCount > 0)
+            if (agent.CurrentCell == spawnCell)
             {
-                return;
+                if (debugLogging) Debug.Log($"Spawn blocked: Cell {spawnCell} is occupied by {agent.name}");
+                return true;
             }
         }
+        return false;
+    }
 
-        // If we have a pool, use it
+    void Spawn()
+    {
+        if (IsCellOccupied()) return;
+
+        Vector2Int spawnCell = GridService.Instance?.WorldToCell(transform.position) ?? Vector2Int.zero;
+        
         if (pool != null)
         {
             var agent = pool.Get();
             var go = agent.gameObject;
-            go.transform.SetParent(parent);
+            go.transform.SetParent(itemsParent != null ? itemsParent : transform.parent);
 
-            // Snap spawn position to grid center if present
             if (GridService.Instance != null)
             {
-                var cell = GridService.Instance.WorldToCell(transform.position);
-                var world = GridService.Instance.CellToWorld(cell, transform.position.z);
-                go.transform.position = world;
+                go.transform.position = GridService.Instance.CellToWorld(spawnCell, transform.position.z);
             }
             else
             {
@@ -92,37 +94,9 @@ public class Spawner : MonoBehaviour
             }
 
             go.transform.rotation = Quaternion.identity;
-
-            // Pass a callback that returns the agent to the pool
             agent.SpawnAt(go.transform.position, DirectionUtil.DirVec(outputDirection), a => pool.Release(a));
-            return;
-        }
-
-        // Fallback: instantiate as before
-        var goFallback = Instantiate(itemPrefab, parent);
-
-        if (GridService.Instance != null)
-        {
-            var cell = GridService.Instance.WorldToCell(transform.position);
-            var world = GridService.Instance.CellToWorld(cell, transform.position.z);
-            goFallback.transform.position = world;
-        }
-        else
-        {
-            goFallback.transform.position = transform.position;
-        }
-
-        goFallback.transform.rotation = Quaternion.identity;
-
-        // Support ItemAgent on child objects
-        var agentFallback = goFallback.GetComponentInChildren<ItemAgent>();
-        if (agentFallback != null)
-        {
-            agentFallback.SpawnAt(goFallback.transform.position, DirectionUtil.DirVec(outputDirection));
-        }
-        else
-        {
-            // no ItemAgent found on instantiated prefab
+            
+            if (debugLogging) Debug.Log($"Spawned item at {spawnCell}");
         }
     }
 
