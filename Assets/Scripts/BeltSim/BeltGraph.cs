@@ -33,29 +33,37 @@ public class BeltGraph
                 else break;
             }
 
-            // 2) from head, grow forward to tail collecting cells
+            // 2) from head, grow forward to tail collecting cells; stop if we see a cycle
             var path = ListCache<Vector2Int>.Get();
+            var inPath = new HashSet<Vector2Int>();
             var cur = head;
             used.Add(cur.cell);
             path.Add(cur.cell);
+            inPath.Add(cur.cell);
             while (true)
             {
                 var nextCell = cur.cell + Dir2D.ToVec(cur.dir);
-                if (map.TryGetValue(nextCell, out var next))
+                if (!map.TryGetValue(nextCell, out var next)) break;
+                if (inPath.Contains(nextCell))
                 {
-                    path.Add(nextCell);
-                    used.Add(nextCell);
-                    cur = next;
+                    // cycle detected (e.g., two belts facing each other); stop here to avoid infinite loop
+                    break;
                 }
-                else break;
+                path.Add(nextCell);
+                inPath.Add(nextCell);
+                used.Add(nextCell);
+                cur = next;
             }
 
-            // 3) create run
-            var run = new BeltRun();
-            run.BuildFromCells(path);
-            runs.Add(run);
-            headCells.Add(path[0]);
-            tailCells.Add(path[path.Count - 1]);
+            // 3) create run only if we have at least two cells
+            if (path.Count >= 2)
+            {
+                var run = new BeltRun();
+                run.BuildFromCells(path);
+                runs.Add(run);
+                headCells.Add(path[0]);
+                tailCells.Add(path[path.Count - 1]);
+            }
             ListCache<Vector2Int>.Release(path);
         }
     }

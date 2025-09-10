@@ -13,7 +13,16 @@ public class BeltRoutingDriver : MonoBehaviour
 
     void Awake()
     {
-        if (tick == null) tick = FindObjectOfType<BeltTickService>();
+        if (tick == null)
+        {
+#if UNITY_2023_1_OR_NEWER
+            tick = UnityEngine.Object.FindFirstObjectByType<BeltTickService>();
+#else
+#pragma warning disable 0618
+            tick = UnityEngine.Object.FindObjectOfType<BeltTickService>();
+#pragma warning restore 0618
+#endif
+        }
         if (BeltGraphService.Instance != null)
             BeltGraphService.Instance.OnGraphRebuilt += OnGraphRebuilt;
     }

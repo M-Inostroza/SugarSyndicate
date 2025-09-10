@@ -16,19 +16,30 @@ public class BeltRun
     public float speed = 2f;      // units per second
     public float minSpacing = 0.6f; // minimal distance between item noses
 
-    // Build polyline from grid cells (size=1). points must contain at least two points.
-    public void BuildFromCells(IReadOnlyList<Vector2Int> cells)
+    // Build polyline from grid cells with optional converter (recommended). points must contain at least two points.
+    public void BuildFromCells(IReadOnlyList<Vector2Int> cells, Func<Vector2Int, Vector3> cellToWorld)
     {
         points.Clear(); segLen.Clear(); items.Clear(); totalLen = 0f;
         for (int i = 0; i < cells.Count; i++)
-            points.Add(new Vector3(cells[i].x + 0.5f, cells[i].y + 0.5f, 0f));
+        {
+            Vector3 p = cellToWorld != null
+                ? cellToWorld(cells[i])
+                : new Vector3(cells[i].x + 0.5f, cells[i].y + 0.5f, 0f);
+            points.Add(p);
+        }
         for (int i = 1; i < points.Count; i++)
         {
             float d = Vector3.Distance(points[i - 1], points[i]);
             segLen.Add(d);
             totalLen += d;
         }
+        // Make sure spacing is not larger than run length so at least one item can be admitted
+        if (totalLen > 0f && minSpacing > totalLen) minSpacing = totalLen;
     }
+
+    // Legacy helper for callers that don't pass a converter (assumes cell size=1 at origin)
+    public void BuildFromCells(IReadOnlyList<Vector2Int> cells)
+        => BuildFromCells(cells, null);
 
     // Get world position/forward at arc offset (clamped inside run)
     public void PositionAt(float offset, out Vector3 pos, out Vector3 fwd)
@@ -63,7 +74,7 @@ public class BeltRun
     }
 
     // Attempt to advance items by dt*speed while respecting spacing; returns ejected items at tail (offset>=totalLen)
-    public void Advance(float dt, List<BeltItem> ejected)
+    public void Advance(float dt, bool tailBlocked, List<BeltItem> ejected)
     {
         if (items.Count == 0) return;
         // forward pass: push by kinematics, backward pass: enforce spacing by clamping
@@ -73,6 +84,13 @@ public class BeltRun
             var it = items[i];
             it.offset += delta;
             items[i] = it;
+        }
+        // If tail is blocked, clamp last item to totalLen (can't go past end)
+        if (tailBlocked)
+        {
+            int last = items.Count - 1;
+            var tail = items[last];
+            if (tail.offset > totalLen) { tail.offset = totalLen; items[last] = tail; }
         }
         // enforce spacing from tail back to head: ensure next.offset - cur.offset >= minSpacing
         for (int i = items.Count - 2; i >= 0; i--)
@@ -86,15 +104,18 @@ public class BeltRun
                 items[i] = a;
             }
         }
-        // collect ejected from the end
-        for (int i = items.Count - 1; i >= 0; i--)
+        // collect ejected from the end (only if not blocked)
+        if (!tailBlocked)
         {
-            if (items[i].offset >= totalLen)
+            for (int i = items.Count - 1; i >= 0; i--)
             {
-                ejected.Add(items[i]);
-                items.RemoveAt(i);
+                if (items[i].offset >= totalLen)
+                {
+                    ejected.Add(items[i]);
+                    items.RemoveAt(i);
+                }
+                else break;
             }
-            else break;
         }
     }
 }

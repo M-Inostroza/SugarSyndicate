@@ -19,6 +19,7 @@ public class Spawner : MonoBehaviour
     {
         running = autoStart;
         GameTick.OnTick += OnTick;
+        if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
     }
 
     void OnDisable()
@@ -39,7 +40,11 @@ public class Spawner : MonoBehaviour
 
     void Spawn()
     {
-        if (GridService.Instance == null || BeltGraphService.Instance == null) return;
+        if (GridService.Instance == null || BeltGraphService.Instance == null)
+        {
+            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltGraphService.");
+            return;
+        }
         var gs = GridService.Instance;
         var baseCell = gs.WorldToCell(transform.position);
         var dir = DirectionUtil.DirVec(outputDirection);
@@ -47,10 +52,18 @@ public class Spawner : MonoBehaviour
         bool ok = BeltGraphService.Instance.TryProduceAtHead(headCell, nextItemId);
         if (!ok)
         {
+            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} failed, trying base {baseCell}");
             ok = BeltGraphService.Instance.TryProduceAtHead(baseCell, nextItemId);
         }
-        if (ok) nextItemId++;
-        if (debugLogging) Debug.Log(ok ? $"Produced item into run at {headCell} or {baseCell}" : $"No run head at {headCell} or {baseCell}, item skipped");
+        if (ok)
+        {
+            if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {headCell} or {baseCell}");
+            nextItemId++;
+        }
+        else if (debugLogging)
+        {
+            Debug.LogWarning($"[Spawner] No run head at {headCell} or {baseCell}, item skipped");
+        }
     }
 
 #if UNITY_EDITOR

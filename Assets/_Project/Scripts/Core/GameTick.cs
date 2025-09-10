@@ -10,8 +10,10 @@ public class GameTick : MonoBehaviour
     public static long TickIndex { get; private set; }
 
     [Range(5, 60)] public int ticksPerSecond = 15;
+    [SerializeField] bool debugLogs = false;
 
     float acc;
+    float debugTimer;
     static GameTick _instance;
     void Awake()
     {
@@ -31,6 +33,16 @@ public class GameTick : MonoBehaviour
             OnTick?.Invoke();
             OnTickEnd?.Invoke();
             TickIndex++;
+        }
+
+        if (debugLogs)
+        {
+            debugTimer += Time.deltaTime;
+            if (debugTimer >= 1f)
+            {
+                debugTimer = 0f;
+                Debug.Log($"[GameTick] tps={ticksPerSecond} tick={TickIndex}");
+            }
         }
     }
 }
