@@ -4,38 +4,21 @@ public class Spawner : MonoBehaviour
 {
     public Direction outputDirection = Direction.Right;
 
-    [Header("What to spawn")]
-    [SerializeField] GameObject itemPrefab;
-    [SerializeField] Transform itemsParent;
-
     [Header("When")]
     [SerializeField, Min(1)] int intervalTicks = 10;
     [SerializeField] bool autoStart = true;
 
-    [Header("Pooling")]
-    [SerializeField, Min(0)] int poolPrewarm = 8;
-
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
-    
+
     int tickCounter;
     bool running;
-    Pool<ItemAgent> pool;
+    int nextItemId = 1;
 
     void OnEnable()
     {
         running = autoStart;
         GameTick.OnTick += OnTick;
-
-        if (itemPrefab != null && pool == null)
-        {
-            var agentPrefab = itemPrefab.GetComponentInChildren<ItemAgent>();
-            if (agentPrefab != null)
-            {
-                var parent = itemsParent != null ? itemsParent : transform.parent;
-                pool = new Pool<ItemAgent>(agentPrefab, poolPrewarm, parent);
-            }
-        }
     }
 
     void OnDisable()
@@ -45,7 +28,7 @@ public class Spawner : MonoBehaviour
 
     void OnTick()
     {
-        if (!running || itemPrefab == null) return;
+        if (!running) return;
         tickCounter++;
         if (tickCounter >= intervalTicks)
         {
@@ -54,50 +37,20 @@ public class Spawner : MonoBehaviour
         }
     }
 
-    bool IsCellOccupied()
-    {
-        if (GridService.Instance == null) return false;
-        
-        Vector2Int spawnCell = GridService.Instance.WorldToCell(transform.position);
-        
-        var agents = Object.FindObjectsByType<ItemAgent>(FindObjectsSortMode.None);
-        foreach (var agent in agents)
-        {
-            if (agent.CurrentCell == spawnCell)
-            {
-                if (debugLogging) Debug.Log($"Spawn blocked: Cell {spawnCell} is occupied by {agent.name}");
-                return true;
-            }
-        }
-        return false;
-    }
-
     void Spawn()
     {
-        if (IsCellOccupied()) return;
-
-        Vector2Int spawnCell = GridService.Instance?.WorldToCell(transform.position) ?? Vector2Int.zero;
-        
-        if (pool != null)
+        if (GridService.Instance == null || BeltGraphService.Instance == null) return;
+        var gs = GridService.Instance;
+        var baseCell = gs.WorldToCell(transform.position);
+        var dir = DirectionUtil.DirVec(outputDirection);
+        var headCell = baseCell + dir; // preferred
+        bool ok = BeltGraphService.Instance.TryProduceAtHead(headCell, nextItemId);
+        if (!ok)
         {
-            var agent = pool.Get();
-            var go = agent.gameObject;
-            go.transform.SetParent(itemsParent != null ? itemsParent : transform.parent);
-
-            if (GridService.Instance != null)
-            {
-                go.transform.position = GridService.Instance.CellToWorld(spawnCell, transform.position.z);
-            }
-            else
-            {
-                go.transform.position = transform.position;
-            }
-
-            go.transform.rotation = Quaternion.identity;
-            agent.SpawnAt(go.transform.position, DirectionUtil.DirVec(outputDirection), a => pool.Release(a));
-            
-            if (debugLogging) Debug.Log($"Spawned item at {spawnCell}");
+            ok = BeltGraphService.Instance.TryProduceAtHead(baseCell, nextItemId);
         }
+        if (ok) nextItemId++;
+        if (debugLogging) Debug.Log(ok ? $"Produced item into run at {headCell} or {baseCell}" : $"No run head at {headCell} or {baseCell}, item skipped");
     }
 
 #if UNITY_EDITOR

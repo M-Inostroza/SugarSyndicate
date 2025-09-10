@@ -952,7 +952,6 @@ MonoBehaviour:
   origin: {x: -10, y: -5}
   cellSize: 1
   gridSize: {x: 20, y: 10}
-  debugLogging: 0
 --- !u!4 &1021027030
 Transform:
   m_ObjectHideFlags: 0
@@ -1530,7 +1529,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 65
   m_Sprite: {fileID: -3064479262514390526, guid: 15b46a81c0cd42e4ca017f697092f481, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0

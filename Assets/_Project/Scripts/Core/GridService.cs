@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public class GridService : MonoBehaviour
@@ -10,12 +9,7 @@ public class GridService : MonoBehaviour
     [SerializeField, Min(0.01f)] float cellSize = 1f;
     [SerializeField] Vector2Int gridSize = new Vector2Int(20, 12);
 
-    [Header("Debug")]
-    [SerializeField] bool debugLogging = false;
-
     readonly Dictionary<Vector2Int, Cell> cells = new();
-    readonly Dictionary<Vector2Int, List<Intent>> intents = new();
-    readonly Dictionary<Vector2Int, Direction> lastServed = new();
 
     public class Cell
     {
@@ -25,39 +19,12 @@ public class GridService : MonoBehaviour
         public Conveyor conveyor;
     }
 
-    public struct Intent
-    {
-        public ItemAgent agent;
-        public Vector2Int from;
-        public Vector2Int to;
-        public Direction incoming;
-    }
-
     void Awake()
     {
         if (Instance) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
         WarmCells();
-
-        GameTick.OnTickStart += OnTickStart;
-        GameTick.OnTickEnd += OnTickEnd;
-    }
-
-    void OnDestroy()
-    {
-        GameTick.OnTickStart -= OnTickStart;
-        GameTick.OnTickEnd -= OnTickEnd;
-    }
-
-    void OnTickStart()
-    {
-        intents.Clear();
-    }
-
-    void OnTickEnd()
-    {
-        ResolveIntents();
     }
 
     void WarmCells()
@@ -97,165 +64,5 @@ public class GridService : MonoBehaviour
     {
         var cell = GetCell(c);
         return cell != null ? cell.conveyor : null;
-    }
-
-    public void SubmitIntent(ItemAgent agent, Vector2Int from, Vector2Int to, Direction incoming)
-    {
-        if (!InBounds(to)) return;
-        if (!intents.TryGetValue(to, out var list))
-        {
-            list = new List<Intent>(2);
-            intents[to] = list;
-        }
-        list.Add(new Intent { agent = agent, from = from, to = to, incoming = incoming });
-    }
-
-    void ResolveIntents()
-    {
-        // 1. SETUP: Collect all initial state
-        var allAgents = Object.FindObjectsByType<ItemAgent>(FindObjectsSortMode.None);
-
-        var cellOccupants = new Dictionary<Vector2Int, ItemAgent>();
-        foreach (var agent in allAgents)
-        {
-            if (!cellOccupants.ContainsKey(agent.CurrentCell))
-            {
-                cellOccupants[agent.CurrentCell] = agent;
-            }
-            else
-            {
-                if(debugLogging) Debug.LogWarning($"Merge detected at {agent.CurrentCell} during setup. Ignoring duplicate agent.");
-            }
-        }
-
-        var agentIntents = new Dictionary<ItemAgent, Intent>();
-        var allSubmittedAgents = new HashSet<ItemAgent>();
-        foreach (var intentList in intents.Values)
-        {
-            foreach (var intent in intentList)
-            {
-                allSubmittedAgents.Add(intent.agent);
-                if (cellOccupants.TryGetValue(intent.from, out var occupant) && occupant == intent.agent)
-                {
-                    agentIntents[intent.agent] = intent;
-                }
-            }
-        }
-
-        var grants = new Dictionary<ItemAgent, Vector2Int>();
-        var processedAgents = new HashSet<ItemAgent>();
-
-        // 2. PHASE 1: Detect and resolve cycles
-        var path = new List<ItemAgent>();
-        var visited = new HashSet<ItemAgent>();
-        foreach (var agent in agentIntents.Keys)
-        {
-            if (!visited.Contains(agent))
-            {
-                FindCycles(agent, agentIntents, cellOccupants, path, visited, processedAgents, grants);
-            }
-        }
-
-        // 3. PHASE 2: Resolve chains iteratively
-        bool changedInPass;
-        do
-        {
-            changedInPass = false;
-            foreach (var agent in agentIntents.Keys)
-            {
-                if (processedAgents.Contains(agent)) continue;
-
-                var intent = agentIntents[agent];
-                var targetCell = intent.to;
-
-                bool targetIsAvailable = !cellOccupants.ContainsKey(targetCell) ||
-                                         (cellOccupants.TryGetValue(targetCell, out var occupant) && grants.ContainsKey(occupant));
-
-                if (targetIsAvailable)
-                {
-                    var contenders = new List<Intent>();
-                    if (intents.TryGetValue(targetCell, out var intentListForTarget))
-                    {
-                        foreach (var contenderIntent in intentListForTarget)
-                        {
-                            if (!processedAgents.Contains(contenderIntent.agent) && agentIntents.ContainsKey(contenderIntent.agent))
-                            {
-                                contenders.Add(contenderIntent);
-                            }
-                        }
-                    }
-
-                    if (contenders.Count > 0)
-                    {
-                        ItemAgent winner;
-                        if (contenders.Count == 1)
-                        {
-                            winner = contenders[0].agent;
-                        }
-                        else
-                        {
-                            Direction lastDir = lastServed.TryGetValue(targetCell, out var d) ? d : Direction.Left;
-                            winner = contenders.FirstOrDefault(c => c.incoming != lastDir).agent ?? contenders[0].agent;
-                        }
-
-                        grants[winner] = targetCell;
-                        lastServed[targetCell] = agentIntents[winner].incoming;
-
-                        foreach (var contender in contenders)
-                        {
-                            processedAgents.Add(contender.agent);
-                        }
-                        changedInPass = true;
-                    }
-                }
-            }
-        } while (changedInPass);
-
-        // 4. FINALIZATION: Notify all agents
-        foreach (var agent in allSubmittedAgents)
-        {
-            if (grants.TryGetValue(agent, out var grantedCell))
-            {
-                agent.ApplyGrantedMove(grantedCell);
-            }
-            else
-            {
-                agent.OnDecisionProcessed();
-            }
-        }
-    }
-
-    private void FindCycles(ItemAgent currentAgent, Dictionary<ItemAgent, Intent> agentIntents,
-        Dictionary<Vector2Int, ItemAgent> cellOccupants, List<ItemAgent> path, HashSet<ItemAgent> visited,
-        HashSet<ItemAgent> processedAgents, Dictionary<ItemAgent, Vector2Int> grants)
-    {
-        path.Add(currentAgent);
-        visited.Add(currentAgent);
-
-        if (agentIntents.TryGetValue(currentAgent, out var intent))
-        {
-            var targetCell = intent.to;
-            if (cellOccupants.TryGetValue(targetCell, out var nextAgent))
-            {
-                int cycleStartIndex = path.IndexOf(nextAgent);
-                if (cycleStartIndex != -1) // Cycle detected
-                {
-                    for (int i = cycleStartIndex; i < path.Count; i++)
-                    {
-                        var agentInCycle = path[i];
-                        if (processedAgents.Contains(agentInCycle)) continue;
-
-                        var cycleIntent = agentIntents[agentInCycle];
-                        grants[agentInCycle] = cycleIntent.to;
-                        processedAgents.Add(agentInCycle);
-                    }
-                }
-                else if (!visited.Contains(nextAgent))
-                {
-                    FindCycles(nextAgent, agentIntents, cellOccupants, path, visited, processedAgents, grants);
-                }
-            }
-        }
-        path.RemoveAt(path.Count - 1);
     }
 }
