@@ -33,10 +33,31 @@ public class MergerEndpoint : BeltEndpoint
     readonly List<int> round = new List<int>();
     int turn;
 
-    // Optional: when caller doesn't provide a source, fallback to base behavior
+    // Optional: include base queue as a source to prevent starvation
+    const int BASE_SRC = -1;
+
+    // Braiding with the belt stream (used for self-loops): when enabled, only output on alternate ticks
+    bool braidWithStream = false;
+    bool queueTurn = true;         // when false, it's stream's turn so we hold
+    long lastTickChecked = -1;
+
+    public void EnableStreamBraiding()
+    {
+        braidWithStream = true;
+        queueTurn = true;
+        lastTickChecked = -1;
+    }
+
+    // Optional: when caller doesn't provide a source, route to base-source so it participates in fairness
     public override void OnInputItem(int itemId)
     {
-        base.OnInputItem(itemId);
+        if (!sources.TryGetValue(BASE_SRC, out var q))
+        {
+            q = new Queue<int>(8);
+            sources[BASE_SRC] = q;
+            round.Add(BASE_SRC);
+        }
+        q.Enqueue(itemId);
     }
 
     // Source-aware admission used by TickService
@@ -53,9 +74,33 @@ public class MergerEndpoint : BeltEndpoint
 
     public override bool TryOutputTo(BeltRun run)
     {
-        // If we only have the base queue, use default behavior
+        // Braided junction handling: alternate with stream when enabled.
+        if (braidWithStream)
+        {
+            // Update once per game tick
+            long t = GameTick.TickIndex;
+            if (t != lastTickChecked)
+            {
+                lastTickChecked = t;
+                // If it was stream's turn and the stream exists, hand turn back to queue this tick
+                if (!queueTurn && run != null && run.items.Count > 0)
+                {
+                    queueTurn = true;
+                }
+                // If no items on belt, keep queueTurn as-is (defaults true on start)
+            }
+            if (!queueTurn)
+            {
+                return false; // wait for the stream to pass this tick
+            }
+        }
+
+        // If we only have the base queue, we still use the round list (it contains BASE_SRC)
         if (sources.Count == 0)
+        {
+            // Fallback to base queue behavior if no sources were ever registered
             return base.TryOutputTo(run);
+        }
 
         if (round.Count == 0) return false;
         int n = round.Count;
@@ -68,6 +113,11 @@ public class MergerEndpoint : BeltEndpoint
             {
                 q.Dequeue();
                 turn = (idx + 1) % n; // advance turn only on success
+                if (braidWithStream)
+                {
+                    // We just consumed the queue slot; give next turn to the stream
+                    queueTurn = false;
+                }
                 return true;
             }
         }

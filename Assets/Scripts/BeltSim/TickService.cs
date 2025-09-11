@@ -85,7 +85,20 @@ public class BeltTickService : MonoBehaviour
             runs[i].speed = fixedSpeed;
             runs[i].minSpacing = Mathf.Max(0f, itemSpacing);
             var ej = ejectedPerRun[i]; ej.Clear();
-            bool tailBlocked = outgoing[i].Count == 0 && tails[i] == null; // jam only if no connection
+
+            bool tailBlocked = false;
+            if (outgoing[i].Count == 0 && tails[i] == null)
+            {
+                tailBlocked = true; // dead end
+            }
+            else if (outgoing[i].Count == 1 && outgoing[i][0] == i)
+            {
+                // self-loop: only allow tail to eject when head has spacing
+                var run = runs[i];
+                bool headHasSpace = run.items.Count == 0 || run.items.First.Value.offset >= run.minSpacing;
+                tailBlocked = !headHasSpace;
+            }
+
             runs[i].Advance(dt, tailBlocked, ej);
             if (debugLogs && (i == 0 || ej.Count > 0))
             {
@@ -109,46 +122,19 @@ public class BeltTickService : MonoBehaviour
                 var headEp = heads[headIdx];
                 var targetRun = runs[headIdx];
 
-                if (headIdx == i)
+                for (int k = 0; k < ej.Count; k++)
                 {
-                    // self-loop: weave items back onto the run immediately when possible
-                    for (int k = 0; k < ej.Count; k++)
+                    var item = ej[k];
+                    if (headEp is MergerEndpoint me) me.OnInputItemFrom(i, item.id);
+                    else if (headEp != null) headEp.OnInputItem(item.id);
+                    else if (!targetRun.TryEnqueue(item.id))
                     {
-                        var item = ej[k];
-                        if (!targetRun.TryEnqueue(item.id))
-                        {
-                            if (headEp is MergerEndpoint me)
-                                me.OnInputItemFrom(i, item.id);
-                            else if (headEp != null)
-                                headEp.OnInputItem(item.id);
-                        }
+                        var mep = new MergerEndpoint();
+                        heads[headIdx] = mep;
+                        mep.OnInputItemFrom(i, item.id);
                     }
-                    ej.Clear();
                 }
-                else
-                {
-                    for (int k = 0; k < ej.Count; k++)
-                    {
-                        var item = ej[k];
-                        // If a merger is present, feed it with source info for round-robin fairness
-                        if (headEp is MergerEndpoint me)
-                        {
-                            me.OnInputItemFrom(i, item.id);
-                        }
-                        else if (headEp != null)
-                        {
-                            headEp.OnInputItem(item.id);
-                        }
-                        else if (!targetRun.TryEnqueue(item.id))
-                        {
-                            // create a merger and enqueue into it for fairness
-                            var mep = new MergerEndpoint();
-                            heads[headIdx] = mep;
-                            mep.OnInputItemFrom(i, item.id);
-                        }
-                    }
-                    ej.Clear();
-                }
+                ej.Clear();
             }
             else // splitter
             {
@@ -174,12 +160,8 @@ public class BeltTickService : MonoBehaviour
         for (int i = 0; i < runs.Count; i++)
         {
             var ep = heads[i]; if (ep == null) continue;
-            int before = runs[i].items.Count;
             int guard = 32;
             while (guard-- > 0 && ep.TryOutputTo(runs[i])) { }
-            int after = runs[i].items.Count;
-            if (debugLogs && after > before)
-                Debug.Log($"[BeltTickService] Admitted {after - before} items to run {i}");
         }
     }
 }

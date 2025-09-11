@@ -52,11 +52,16 @@ public class BeltGraph
             while (true)
             {
                 var nextCell = cur.cell + Dir2D.ToVec(cur.dir);
-                if (!map.TryGetValue(nextCell, out var next)) break;                
+                if (!map.TryGetValue(nextCell, out var next)) break;
                 if (inPath.Contains(nextCell)) { break; } // cycle guard
                 // stop extending if next cell is a junction (indegree != 1)
                 int d = indeg.TryGetValue(nextCell, out var v) ? v : 0;
-                if (d != 1) { path.Add(nextCell); used.Add(nextCell); break; }
+                if (d != 1)
+                {
+                    // Add the junction cell as the tail, but DON'T mark it used, so a new run can start there.
+                    path.Add(nextCell);
+                    break;
+                }
                 path.Add(nextCell); used.Add(nextCell); inPath.Add(nextCell);
                 cur = next;
             }
@@ -74,12 +79,20 @@ public class BeltGraph
             ListCache<Vector2Int>.Release(path);
         }
 
-        // 5) Build adjacency lists between runs (tail -> head); now heads are placed at all junctions and dead-ends
+        // 5) Build adjacency lists between runs (tail -> head)
         var headLookup = new Dictionary<Vector2Int, int>(headCells.Count);
         for (int i = 0; i < headCells.Count; i++) headLookup[headCells[i]] = i;
         for (int i = 0; i < tailCells.Count; i++)
         {
             var tail = tailCells[i];
+            // First, if a run starts at the same cell (junction), connect to it
+            if (headLookup.TryGetValue(tail, out var headAtSameCell))
+            {
+                outgoing[i].Add(headAtSameCell);
+                incoming[headAtSameCell].Add(i);
+                continue;
+            }
+            // Otherwise, connect to the head at the next cell along tail's direction (continuous/loop case)
             if (!map.TryGetValue(tail, out var tile)) continue;
             var next = tail + Dir2D.ToVec(tile.dir);
             if (headLookup.TryGetValue(next, out var headIdx))

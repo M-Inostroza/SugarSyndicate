@@ -1008,8 +1008,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbebe44bd9180c8488fc1872cbb6ba79, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  fixedSpeed: 2
-  itemSpacing: 0.6
+  fixedSpeed: 4
+  itemSpacing: 1
   debugLogs: 0
 --- !u!4 &880179788
 Transform:

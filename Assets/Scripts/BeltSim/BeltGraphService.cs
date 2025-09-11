@@ -148,7 +148,8 @@ public class BeltGraphService : MonoBehaviour
 
         for (int i = 0; i < inc.Count; i++)
         {
-            if (inc[i].Count > 1)
+            bool isSelfLoop = inc[i].Count == 1 && inc[i][0] == i;
+            if (inc[i].Count > 1 || isSelfLoop)
             {
                 if (!(tickService.heads[i] is MergerEndpoint)) tickService.heads[i] = new MergerEndpoint();
             }
