@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 
 // Central place to build BeltGraph from placed Conveyor tiles and push it into BeltTickService.
@@ -11,9 +10,15 @@ public class BeltGraphService : MonoBehaviour
     [Header("Runtime")]
     [SerializeField] BeltTickService tickService;
     [SerializeField] bool autoRebuildOnStart = true;
+    [SerializeField] MonoBehaviour gridServiceBehaviour;
 
     readonly BeltGraph graph = new BeltGraph();
+    // tiles are maintained incrementally as conveyors register with the service
+    readonly Dictionary<IConveyor, Vector2Int> conveyorCells = new Dictionary<IConveyor, Vector2Int>();
+    readonly Dictionary<Vector2Int, BeltTile> tileMap = new Dictionary<Vector2Int, BeltTile>();
     readonly List<BeltTile> tiles = new List<BeltTile>(256);
+
+    IGridService gridService;
 
     public event Action<BeltGraph> OnGraphRebuilt;
     public IReadOnlyList<BeltRun> Runs => graph.runs;
@@ -52,14 +57,16 @@ public class BeltGraphService : MonoBehaviour
             tickService = go.AddComponent<BeltTickService>();
             Debug.Log("[BeltGraphService] Created runtime BeltTickService because none was found in the scene.");
         }
-        if (autoRebuildOnStart) RebuildFromScene();
+        if (gridServiceBehaviour != null)
+            gridService = gridServiceBehaviour as IGridService;
+        if (autoRebuildOnStart) RebuildGraph();
     }
 
     void Update()
     {
         if (!dirty) return;
         dirty = false;
-        RebuildFromScene();
+        RebuildGraph();
     }
 
     public void MarkDirty()
@@ -67,30 +74,53 @@ public class BeltGraphService : MonoBehaviour
         dirty = true;
     }
 
-    public void RebuildFromScene()
+    public void RegisterConveyor(IConveyor conveyor)
     {
-        Debug.Log("[BeltGraphService] RebuildFromScene()");
-        var gs = FindGridService(out var miWorldToCell, out var miCellToWorld);
-        if (gs == null || miWorldToCell == null)
+        if (conveyor == null) return;
+        if (gridService == null) TryFindGridService();
+        var mb = conveyor as MonoBehaviour;
+        if (mb == null || gridService == null) return;
+        var cell = gridService.WorldToCell(mb.transform.position);
+        var dir = conveyor.DirVec();
+        Direction2D d = Direction2D.Right;
+        if (dir == Vector2Int.left) d = Direction2D.Left;
+        else if (dir == Vector2Int.up) d = Direction2D.Up;
+        else if (dir == Vector2Int.down) d = Direction2D.Down;
+        int tunnelId = 0;
+        if (mb.TryGetComponent<TunnelTag>(out var tunnel)) tunnelId = tunnel.tunnelId;
+
+        if (conveyorCells.TryGetValue(conveyor, out var oldCell) && oldCell != cell)
+            tileMap.Remove(oldCell);
+        tileMap[cell] = new BeltTile { cell = cell, dir = d, tunnelId = tunnelId };
+        conveyorCells[conveyor] = cell;
+        MarkDirty();
+    }
+
+    public void UnregisterConveyor(IConveyor conveyor)
+    {
+        if (conveyor == null) return;
+        if (conveyorCells.TryGetValue(conveyor, out var cell))
         {
-            Debug.LogWarning("[BeltGraphService] No GridService or WorldToCell method found. Belts cannot be built.");
-            return;
+            tileMap.Remove(cell);
+            conveyorCells.Remove(conveyor);
+            MarkDirty();
         }
+    }
+
+    public void RebuildGraph()
+    {
+        Debug.Log("[BeltGraphService] RebuildGraph()");
+        TryFindGridService();
         tiles.Clear();
-        BuildTilesFromSceneConveyors(gs, miWorldToCell, tiles);
-        Debug.Log($"[BeltGraphService] Found {tiles.Count} Conveyor tiles in scene.");
+        foreach (var kv in tileMap) tiles.Add(kv.Value);
         graph.BuildRuns(tiles);
-        // Rebuild the polyline positions using the grid's CellToWorld so visuals align with the grid origin/scale
-        if (miCellToWorld != null)
+        // Rebuild polyline positions using grid service if available
+        if (gridService != null)
         {
             for (int i = 0; i < graph.runs.Count; i++)
             {
-                var cells = GetRunCells(graph, i); // helper to reconstruct cells of the run
-                Vector3 Converter(Vector2Int c)
-                {
-                    var w = miCellToWorld.Invoke(gs, new object[] { c, 0f });
-                    return w is Vector3 v ? v : new Vector3(c.x + 0.5f, c.y + 0.5f, 0f);
-                }
+                var cells = GetRunCells(graph, i);
+                Vector3 Converter(Vector2Int c) => gridService.CellToWorld(c, 0f);
                 graph.runs[i].BuildFromCells(cells, Converter);
             }
         }
@@ -98,15 +128,60 @@ public class BeltGraphService : MonoBehaviour
         if (tickService != null)
         {
             tickService.SetGraph(graph, preserveItems: true);
-            // attach default head endpoints so producers can feed immediately
-            for (int i = 0; i < graph.runs.Count; i++)
-            {
-                if (tickService.heads[i] == null) tickService.heads[i] = new HeadQueueEndpoint();
-                // do NOT attach default tails; leaving null means tail is blocked -> jam
-            }
+            AutoWireEndpoints();
             Debug.Log($"[BeltGraphService] Tick wired: heads={tickService.heads.Count}, tails={tickService.tails.Count}");
         }
         OnGraphRebuilt?.Invoke(graph);
+    }
+
+    void AutoWireEndpoints()
+    {
+        var inc = graph.incoming;
+        var outg = graph.outgoing;
+
+        while (tickService.heads.Count < graph.runs.Count) tickService.heads.Add(null);
+        while (tickService.tails.Count < graph.runs.Count) tickService.tails.Add(null);
+
+        for (int i = 0; i < inc.Count; i++)
+        {
+            if (inc[i].Count > 1)
+            {
+                if (!(tickService.heads[i] is MergerEndpoint)) tickService.heads[i] = new MergerEndpoint();
+            }
+            else
+            {
+                if (tickService.heads[i] == null) tickService.heads[i] = new HeadQueueEndpoint();
+            }
+        }
+
+        for (int i = 0; i < outg.Count; i++)
+        {
+            if (outg[i].Count > 1)
+            {
+                if (!(tickService.tails[i] is SplitterEndpoint)) tickService.tails[i] = new SplitterEndpoint();
+            }
+        }
+
+        // Automatically pair tunnels
+        var headTunnel = new Dictionary<int, int>();
+        var tailTunnel = new Dictionary<int, int>();
+        foreach (var kv in tileMap)
+        {
+            var tile = kv.Value;
+            if (tile.tunnelId <= 0) continue;
+            for (int i = 0; i < graph.headCells.Count; i++) if (graph.headCells[i] == tile.cell) headTunnel[tile.tunnelId] = i;
+            for (int i = 0; i < graph.tailCells.Count; i++) if (graph.tailCells[i] == tile.cell) tailTunnel[tile.tunnelId] = i;
+        }
+        foreach (var kv in headTunnel)
+        {
+            if (!tailTunnel.TryGetValue(kv.Key, out var tailIdx)) continue;
+            var headIdx = kv.Value;
+            var tailEp = tickService.tails[tailIdx] as TunnelEndpoint;
+            if (tailEp == null) { tailEp = new TunnelEndpoint(); tickService.tails[tailIdx] = tailEp; }
+            var headEp = tickService.heads[headIdx] as TunnelEndpoint;
+            if (headEp == null) { headEp = new TunnelEndpoint(); tickService.heads[headIdx] = headEp; }
+            tailEp.peer = headEp;
+        }
     }
 
     // External API: produce an item at the run whose head cell matches 'headCell'. Returns true if admitted or queued.
@@ -128,53 +203,23 @@ public class BeltGraphService : MonoBehaviour
         return false;
     }
 
-    object FindGridService(out MethodInfo worldToCell, out MethodInfo cellToWorld)
+    void TryFindGridService()
     {
-        worldToCell = null; cellToWorld = null;
-        var mbs = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-        foreach (var mb in mbs)
+        if (gridService != null) return;
+        if (gridServiceBehaviour != null)
         {
-            if (mb == null) continue;
-            var t = mb.GetType();
-            if (t.Name == "GridService")
-            {
-                worldToCell = t.GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
-                cellToWorld = t.GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
-                if (worldToCell == null) Debug.LogWarning("[BeltGraphService] GridService found but WorldToCell method missing.");
-                return mb;
-            }
+            gridService = gridServiceBehaviour as IGridService;
+            if (gridService != null) return;
         }
-        return null;
-    }
-
-    void BuildTilesFromSceneConveyors(object gridServiceInstance, MethodInfo worldToCell, List<BeltTile> outTiles)
-    {
         var mbs = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
         foreach (var mb in mbs)
         {
-            if (mb == null) continue;
-            var t = mb.GetType();
-            if (t.Name != "Conveyor") continue;
-
-            // cell via grid
-            var cellObj = worldToCell.Invoke(gridServiceInstance, new object[] { mb.transform.position });
-            var cell = cellObj is Vector2Int v2 ? v2 : Vector2Int.zero;
-
-            // get dir via Conveyor.DirVec()
-            var miDir = t.GetMethod("DirVec", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            Vector2Int dv = Vector2Int.right;
-            if (miDir != null)
+            if (mb is IGridService gs)
             {
-                var res = miDir.Invoke(mb, null);
-                if (res is Vector2Int vd) dv = vd;
+                gridService = gs;
+                gridServiceBehaviour = mb;
+                return;
             }
-
-            Direction2D dir = Direction2D.Right;
-            if (dv == Vector2Int.left) dir = Direction2D.Left;
-            else if (dv == Vector2Int.up) dir = Direction2D.Up;
-            else if (dv == Vector2Int.down) dir = Direction2D.Down;
-
-            outTiles.Add(new BeltTile { cell = cell, dir = dir });
         }
     }
 
@@ -186,16 +231,32 @@ public class BeltGraphService : MonoBehaviour
         var tail = g.tailCells[runIndex];
         cells.Add(head);
         var cur = head;
-        // step along tiles list using Dir2D from tiles map
-        var map = new Dictionary<Vector2Int, Direction2D>();
-        foreach (var t in tiles) map[t.cell] = t.dir;
+        // step along tiles list using current tileMap directions
         while (cur != tail)
         {
-            var dir = map[cur];
+            var dir = tileMap[cur].dir;
             var next = cur + Dir2D.ToVec(dir);
             cells.Add(next);
             cur = next;
         }
         return cells;
     }
+
+#if UNITY_EDITOR
+    void OnDrawGizmos()
+    {
+        if (graph == null) return;
+        Gizmos.color = Color.yellow;
+        foreach (var run in graph.runs)
+        {
+            for (int i = 0; i < run.points.Count - 1; i++)
+                Gizmos.DrawLine(run.points[i], run.points[i + 1]);
+            foreach (var item in run.items)
+            {
+                run.PositionAt(item.offset, out var p, out var _);
+                Gizmos.DrawSphere(p, 0.05f);
+            }
+        }
+    }
+#endif
 }

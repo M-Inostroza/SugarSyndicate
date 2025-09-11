@@ -10,6 +10,7 @@ public class BeltTickService : MonoBehaviour
 
     readonly List<BeltRun> runs = new List<BeltRun>(64);
     readonly List<List<BeltItem>> ejectedPerRun = new List<List<BeltItem>>(64);
+    readonly List<List<int>> outgoing = new List<List<int>>();
 
     // Optional endpoints per run end
     public readonly List<BeltEndpoint> heads = new List<BeltEndpoint>(); // feeders at head
@@ -26,7 +27,7 @@ public class BeltTickService : MonoBehaviour
         var oldRuns = new List<BeltRun>(runs);
         var oldHeads = new List<Vector2Int>(prevHeads);
 
-        runs.Clear(); heads.Clear(); tails.Clear(); ejectedPerRun.Clear();
+        runs.Clear(); heads.Clear(); tails.Clear(); ejectedPerRun.Clear(); outgoing.Clear();
         for (int i = 0; i < graph.runs.Count; i++)
         {
             var r = graph.runs[i];
@@ -36,6 +37,7 @@ public class BeltTickService : MonoBehaviour
             ejectedPerRun.Add(new List<BeltItem>(16));
             heads.Add(null);
             tails.Add(null);
+            outgoing.Add(new List<int>(graph.outgoing[i]));
         }
 
         if (preserveItems && oldRuns.Count > 0 && oldHeads.Count == oldRuns.Count)
@@ -45,7 +47,7 @@ public class BeltTickService : MonoBehaviour
             for (int i = 0; i < oldRuns.Count; i++)
             {
                 var copy = new List<BeltItem>(oldRuns[i].items.Count);
-                for (int k = 0; k < oldRuns[i].items.Count; k++) copy.Add(oldRuns[i].items[k]);
+                for (var node = oldRuns[i].items.First; node != null; node = node.Next) copy.Add(node.Value);
                 if (!map.ContainsKey(oldHeads[i])) map[oldHeads[i]] = copy;
             }
             // Remap into new runs by matching head cell
@@ -60,7 +62,7 @@ public class BeltTickService : MonoBehaviour
                     {
                         var it = list[k];
                         if (it.offset > r.totalLen) it.offset = r.totalLen; // clamp inside new length
-                        r.items.Add(it);
+                        r.items.AddLast(it);
                     }
                 }
             }
@@ -80,32 +82,70 @@ public class BeltTickService : MonoBehaviour
         // 1) advance all runs, collect ejected
         for (int i = 0; i < runs.Count; i++)
         {
-            // ensure spacing/speed reflect current inspector values at runtime
             runs[i].speed = fixedSpeed;
             runs[i].minSpacing = Mathf.Max(0f, itemSpacing);
-
             var ej = ejectedPerRun[i]; ej.Clear();
-            bool tailBlocked = tails[i] == null; // when no tail endpoint, jam at end
+            bool tailBlocked = outgoing[i].Count == 0 && tails[i] == null; // jam only if no connection
             runs[i].Advance(dt, tailBlocked, ej);
             if (debugLogs && (i == 0 || ej.Count > 0))
             {
                 Debug.Log($"[BeltTickService] Run {i} items={runs[i].items.Count} ejected={ej.Count} tailBlocked={tailBlocked}");
             }
         }
-        // 2) deliver ejected to tail endpoints (only when not blocked)
+        // 2) route ejected items
         for (int i = 0; i < runs.Count; i++)
         {
-            var ep = tails[i];
-            if (ep == null) continue;
             var ej = ejectedPerRun[i];
-            for (int k = 0; k < ej.Count; k++) ep.OnInputItem(ej[k].id);
+            if (ej.Count == 0) continue;
+            if (outgoing[i].Count == 0)
+            {
+                var ep = tails[i]; if (ep != null)
+                    for (int k = 0; k < ej.Count; k++) ep.OnInputItem(ej[k].id);
+                ej.Clear();
+            }
+            else if (outgoing[i].Count == 1)
+            {
+                int headIdx = outgoing[i][0];
+                var headEp = heads[headIdx];
+                var targetRun = runs[headIdx];
+                for (int k = 0; k < ej.Count; k++)
+                {
+                    var item = ej[k];
+                    if (headEp != null) headEp.OnInputItem(item.id);
+                    else if (!targetRun.TryEnqueue(item.id))
+                    {
+                        if (heads[headIdx] == null) heads[headIdx] = new MergerEndpoint();
+                        heads[headIdx].OnInputItem(item.id);
+                    }
+                }
+                ej.Clear();
+            }
+            else // splitter
+            {
+                var sp = tails[i] as SplitterEndpoint;
+                if (sp == null) { sp = new SplitterEndpoint(); tails[i] = sp; }
+                for (int k = 0; k < ej.Count; k++) sp.OnInputItem(ej[k].id);
+                ej.Clear();
+            }
         }
-        // 3) try admit from heads; keep pulling until blocked (so bursts are handled in one tick)
+        // 3) drive splitters
+        for (int i = 0; i < runs.Count; i++)
+        {
+            if (outgoing[i].Count > 1)
+            {
+                var sp = tails[i] as SplitterEndpoint; if (sp == null) continue;
+                var outsRuns = ListCache<BeltRun>.Get();
+                for (int k = 0; k < outgoing[i].Count; k++) outsRuns.Add(runs[outgoing[i][k]]);
+                while (sp.TrySplitTo(outsRuns)) { }
+                ListCache<BeltRun>.Release(outsRuns);
+            }
+        }
+        // 4) try admit from head endpoints
         for (int i = 0; i < runs.Count; i++)
         {
             var ep = heads[i]; if (ep == null) continue;
             int before = runs[i].items.Count;
-            int guard = 32; // avoid infinite loop in case of misbehaving endpoints
+            int guard = 32;
             while (guard-- > 0 && ep.TryOutputTo(runs[i])) { }
             int after = runs[i].items.Count;
             if (debugLogs && after > before)

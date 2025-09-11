@@ -7,11 +7,13 @@ public class BeltGraph
     public readonly List<BeltRun> runs = new List<BeltRun>(64);
     public readonly List<Vector2Int> headCells = new List<Vector2Int>(64);
     public readonly List<Vector2Int> tailCells = new List<Vector2Int>(64);
+    public readonly List<List<int>> incoming = new List<List<int>>(64);
+    public readonly List<List<int>> outgoing = new List<List<int>>(64);
 
     // Build from directional tiles; contiguous forward connectivity merges into a run
     public void BuildRuns(IReadOnlyList<BeltTile> tiles)
     {
-        runs.Clear(); headCells.Clear(); tailCells.Clear();
+        runs.Clear(); headCells.Clear(); tailCells.Clear(); incoming.Clear(); outgoing.Clear();
         // index tiles by cell
         var map = new Dictionary<Vector2Int, BeltTile>(tiles.Count);
         foreach (var t in tiles) map[t.cell] = t;
@@ -63,8 +65,25 @@ public class BeltGraph
                 runs.Add(run);
                 headCells.Add(path[0]);
                 tailCells.Add(path[path.Count - 1]);
+                incoming.Add(new List<int>(2));
+                outgoing.Add(new List<int>(2));
             }
             ListCache<Vector2Int>.Release(path);
+        }
+
+        // Build adjacency lists between runs (tail -> head)
+        var headLookup = new Dictionary<Vector2Int, int>(headCells.Count);
+        for (int i = 0; i < headCells.Count; i++) headLookup[headCells[i]] = i;
+        for (int i = 0; i < tailCells.Count; i++)
+        {
+            var tail = tailCells[i];
+            if (!map.TryGetValue(tail, out var tile)) continue;
+            var next = tail + Dir2D.ToVec(tile.dir);
+            if (headLookup.TryGetValue(next, out var headIdx))
+            {
+                outgoing[i].Add(headIdx);
+                incoming[headIdx].Add(i);
+            }
         }
     }
 }

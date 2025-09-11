@@ -10,8 +10,8 @@ public class BeltRun
     public readonly List<float> segLen = new List<float>(32);
     public float totalLen;
 
-    // Runtime items in ascending offset order (no boxing/alloc in hot path)
-    public readonly List<BeltItem> items = new List<BeltItem>(32);
+    // Runtime items stored as a linked list to allow fast head insertions
+    public readonly LinkedList<BeltItem> items = new LinkedList<BeltItem>();
 
     public float speed = 2f;      // units per second
     public float minSpacing = 0.6f; // minimal distance between item noses
@@ -67,9 +67,9 @@ public class BeltRun
     // Admission: try to add an item at head (offset=0). Respects spacing to first item.
     public bool TryEnqueue(int itemId)
     {
-        float headClear = items.Count == 0 ? float.MaxValue : items[0].offset;
+        float headClear = items.Count == 0 ? float.MaxValue : items.First.Value.offset;
         if (headClear < minSpacing) return false;
-        items.Insert(0, new BeltItem { id = itemId, offset = 0f });
+        items.AddFirst(new BeltItem { id = itemId, offset = 0f });
         return true;
     }
 
@@ -77,44 +77,41 @@ public class BeltRun
     public void Advance(float dt, bool tailBlocked, List<BeltItem> ejected)
     {
         if (items.Count == 0) return;
-        // forward pass: push by kinematics, backward pass: enforce spacing by clamping
+        // forward pass: push by kinematics
         float delta = speed * dt;
-        for (int i = 0; i < items.Count; i++)
+        for (var node = items.First; node != null; node = node.Next)
         {
-            var it = items[i];
+            var it = node.Value;
             it.offset += delta;
-            items[i] = it;
+            node.Value = it;
         }
         // If tail is blocked, clamp last item to totalLen (can't go past end)
-        if (tailBlocked)
+        if (tailBlocked && items.Last != null)
         {
-            int last = items.Count - 1;
-            var tail = items[last];
-            if (tail.offset > totalLen) { tail.offset = totalLen; items[last] = tail; }
+            var tail = items.Last.Value;
+            if (tail.offset > totalLen) { tail.offset = totalLen; items.Last.Value = tail; }
         }
         // enforce spacing from tail back to head: ensure next.offset - cur.offset >= minSpacing
-        for (int i = items.Count - 2; i >= 0; i--)
+        var cur = items.Last;
+        while (cur != null && cur.Previous != null)
         {
-            var a = items[i];
-            var b = items[i + 1];
+            var prev = cur.Previous;
+            var b = cur.Value; var a = prev.Value;
             float maxA = b.offset - minSpacing;
             if (a.offset > maxA)
             {
                 a.offset = maxA;
-                items[i] = a;
+                prev.Value = a;
             }
+            cur = prev;
         }
         // collect ejected from the end (only if not blocked)
         if (!tailBlocked)
         {
-            for (int i = items.Count - 1; i >= 0; i--)
+            while (items.Last != null && items.Last.Value.offset >= totalLen)
             {
-                if (items[i].offset >= totalLen)
-                {
-                    ejected.Add(items[i]);
-                    items.RemoveAt(i);
-                }
-                else break;
+                ejected.Add(items.Last.Value);
+                items.RemoveLast();
             }
         }
     }

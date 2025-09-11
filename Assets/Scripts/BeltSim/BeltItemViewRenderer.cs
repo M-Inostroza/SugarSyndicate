@@ -134,9 +134,9 @@ public class BeltItemViewRenderer : MonoBehaviour
             var run = runs[r];
             var items = run.items;
             totalItems += items.Count;
-            for (int i = 0; i < items.Count; i++)
+            for (var node = items.First; node != null; node = node.Next)
             {
-                var it = items[i];
+                var it = node.Value;
                 seen.Add(it.id);
                 if (!live.TryGetValue(it.id, out var view))
                 {
