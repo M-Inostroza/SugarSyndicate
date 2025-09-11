@@ -23,6 +23,8 @@ public struct BeltTile
 {
     public Vector2Int cell;
     public Direction2D dir;
+    // Optional identifier used to pair special endpoints such as tunnels
+    public int tunnelId;
 }
 
 // Lightweight runtime item representation (id/payload optional)
@@ -30,4 +32,19 @@ public struct BeltItem
 {
     public int id;
     public float offset; // along run; maintained by BeltRun
+}
+
+// Strongly typed service hooks so callers can avoid reflection when interacting
+// with the belt simulation. External grid and conveyor implementations can
+// simply implement these interfaces.
+public interface IGridService
+{
+    Vector2Int WorldToCell(Vector3 world);
+    Vector3 CellToWorld(Vector2Int cell, float height);
+}
+
+public interface IConveyor
+{
+    /// <summary>Unit vector describing the forward direction of the conveyor.</summary>
+    Vector2Int DirVec();
 }

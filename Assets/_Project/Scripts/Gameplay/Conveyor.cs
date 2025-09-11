@@ -3,7 +3,7 @@ using System.Reflection;
 using UnityEngine;
 
 [RequireComponent(typeof(Transform))]
-public class Conveyor : MonoBehaviour
+public class Conveyor : MonoBehaviour, IConveyor
 {
     public Direction direction = Direction.Right;
     [Min(1)] public int ticksPerCell = 4;
@@ -12,11 +12,12 @@ public class Conveyor : MonoBehaviour
 
     public Vector2Int DirVec() => DirectionUtil.DirVec(direction);
 
-    void Start()
+    void Awake()
     {
         RegisterWithGridService();
         lastCell = GetCellForPosition(transform.position);
-        NotifyGraphDirty();
+        // inform belt graph of our existence for incremental updates
+        BeltGraphService.Instance?.RegisterConveyor(this);
     }
 
     void Update()
@@ -31,14 +32,14 @@ public class Conveyor : MonoBehaviour
             SetConveyorAtCell(lastCell, null);
             TrySetConveyorSafe(currentCell, this);
             lastCell = currentCell;
-            NotifyGraphDirty();
+            BeltGraphService.Instance?.RegisterConveyor(this);
         }
     }
 
     void OnDestroy()
     {
         SetConveyorAtCell(lastCell, null);
-        NotifyGraphDirty();
+        BeltGraphService.Instance?.UnregisterConveyor(this);
     }
 
 #if UNITY_EDITOR
@@ -145,22 +146,6 @@ public class Conveyor : MonoBehaviour
         }
         
         return default;
-    }
-
-    void NotifyGraphDirty()
-    {
-        var svc = BeltGraphService.Instance;
-        if (svc == null)
-        {
-#if UNITY_2023_1_OR_NEWER
-            svc = UnityEngine.Object.FindFirstObjectByType<BeltGraphService>();
-#else
-#pragma warning disable 0618
-            svc = UnityEngine.Object.FindObjectOfType<BeltGraphService>();
-#pragma warning restore 0618
-#endif
-        }
-        if (svc != null) svc.MarkDirty();
     }
 
     static object FindGridServiceInstance()
