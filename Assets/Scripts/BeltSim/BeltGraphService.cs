@@ -250,7 +250,20 @@ public class BeltGraphService : MonoBehaviour
         var tail = g.tailCells[runIndex];
         cells.Add(head);
         var cur = head;
-        // step along tiles list using current tileMap directions
+        // If this run forms a closed loop (head == tail), walk until we return to head.
+        if (head == tail)
+        {
+            int guard = tileMap.Count + 1; // safety against malformed graphs
+            do
+            {
+                var dir = tileMap[cur].dir;
+                var next = cur + Dir2D.ToVec(dir);
+                cells.Add(next);
+                cur = next;
+            } while (cur != head && --guard > 0);
+            return cells;
+        }
+        // step along tiles list using current tileMap directions for open runs
         while (cur != tail)
         {
             var dir = tileMap[cur].dir;
