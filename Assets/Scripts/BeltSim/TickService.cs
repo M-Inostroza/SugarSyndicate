@@ -108,27 +108,47 @@ public class BeltTickService : MonoBehaviour
                 int headIdx = outgoing[i][0];
                 var headEp = heads[headIdx];
                 var targetRun = runs[headIdx];
-                for (int k = 0; k < ej.Count; k++)
+
+                if (headIdx == i)
                 {
-                    var item = ej[k];
-                    // If a merger is present, feed it with source info for round-robin fairness
-                    if (headEp is MergerEndpoint me)
+                    // self-loop: weave items back onto the run immediately when possible
+                    for (int k = 0; k < ej.Count; k++)
                     {
-                        me.OnInputItemFrom(i, item.id);
+                        var item = ej[k];
+                        if (!targetRun.TryEnqueue(item.id))
+                        {
+                            if (headEp is MergerEndpoint me)
+                                me.OnInputItemFrom(i, item.id);
+                            else if (headEp != null)
+                                headEp.OnInputItem(item.id);
+                        }
                     }
-                    else if (headEp != null)
-                    {
-                        headEp.OnInputItem(item.id);
-                    }
-                    else if (!targetRun.TryEnqueue(item.id))
-                    {
-                        // create a merger and enqueue into it for fairness
-                        var mep = new MergerEndpoint();
-                        heads[headIdx] = mep;
-                        mep.OnInputItemFrom(i, item.id);
-                    }
+                    ej.Clear();
                 }
-                ej.Clear();
+                else
+                {
+                    for (int k = 0; k < ej.Count; k++)
+                    {
+                        var item = ej[k];
+                        // If a merger is present, feed it with source info for round-robin fairness
+                        if (headEp is MergerEndpoint me)
+                        {
+                            me.OnInputItemFrom(i, item.id);
+                        }
+                        else if (headEp != null)
+                        {
+                            headEp.OnInputItem(item.id);
+                        }
+                        else if (!targetRun.TryEnqueue(item.id))
+                        {
+                            // create a merger and enqueue into it for fairness
+                            var mep = new MergerEndpoint();
+                            heads[headIdx] = mep;
+                            mep.OnInputItemFrom(i, item.id);
+                        }
+                    }
+                    ej.Clear();
+                }
             }
             else // splitter
             {
