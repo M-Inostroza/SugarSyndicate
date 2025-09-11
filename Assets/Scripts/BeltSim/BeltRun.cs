@@ -81,8 +81,9 @@ public class BeltRun
         return true;
     }
 
-    // Attempt to advance items by dt*speed while respecting spacing; returns ejected items at tail (offset>=totalLen)
-    public void Advance(float dt, bool tailBlocked, List<BeltItem> ejected)
+    // Attempt to advance items by dt*speed while respecting spacing.
+    // When selfLoop is true, items wrap around instead of being ejected.
+    public void Advance(float dt, bool tailBlocked, List<BeltItem> ejected, bool selfLoop = false)
     {
         if (items.Count == 0) return;
         // forward pass: push by kinematics
@@ -112,6 +113,22 @@ public class BeltRun
                 prev.Value = a;
             }
             cur = prev;
+        }
+        if (selfLoop)
+        {
+            // For loops, wrap items from tail to head when they pass the end
+            if (!tailBlocked)
+            {
+                while (items.Last != null && items.Last.Value.offset >= totalLen)
+                {
+                    var it = items.Last.Value;
+                    items.RemoveLast();
+                    it.offset -= totalLen;
+                    if (it.offset < 0f) it.offset = 0f;
+                    items.AddFirst(it);
+                }
+            }
+            return;
         }
         // collect ejected from the end (only if not blocked)
         if (!tailBlocked)

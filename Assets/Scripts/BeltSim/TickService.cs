@@ -11,6 +11,7 @@ public class BeltTickService : MonoBehaviour
     readonly List<BeltRun> runs = new List<BeltRun>(64);
     readonly List<List<BeltItem>> ejectedPerRun = new List<List<BeltItem>>(64);
     readonly List<List<int>> outgoing = new List<List<int>>();
+    readonly List<bool> selfLoop = new List<bool>();
 
     // Optional endpoints per run end
     public readonly List<BeltEndpoint> heads = new List<BeltEndpoint>(); // feeders at head
@@ -27,7 +28,7 @@ public class BeltTickService : MonoBehaviour
         var oldRuns = new List<BeltRun>(runs);
         var oldHeads = new List<Vector2Int>(prevHeads);
 
-        runs.Clear(); heads.Clear(); tails.Clear(); ejectedPerRun.Clear(); outgoing.Clear();
+        runs.Clear(); heads.Clear(); tails.Clear(); ejectedPerRun.Clear(); outgoing.Clear(); selfLoop.Clear();
         for (int i = 0; i < graph.runs.Count; i++)
         {
             var r = graph.runs[i];
@@ -38,6 +39,7 @@ public class BeltTickService : MonoBehaviour
             heads.Add(null);
             tails.Add(null);
             outgoing.Add(new List<int>(graph.outgoing[i]));
+            selfLoop.Add(graph.headCells[i] == graph.tailCells[i]);
         }
 
         if (preserveItems && oldRuns.Count > 0 && oldHeads.Count == oldRuns.Count)
@@ -87,19 +89,19 @@ public class BeltTickService : MonoBehaviour
             var ej = ejectedPerRun[i]; ej.Clear();
 
             bool tailBlocked = false;
-            if (outgoing[i].Count == 0 && tails[i] == null)
+            if (selfLoop[i])
             {
-                tailBlocked = true; // dead end
-            }
-            else if (outgoing[i].Count == 1 && outgoing[i][0] == i)
-            {
-                // self-loop: only allow tail to eject when head has spacing
+                // self-loop: only allow tail to wrap when head has spacing
                 var run = runs[i];
                 bool headHasSpace = run.items.Count == 0 || run.items.First.Value.offset >= run.minSpacing;
                 tailBlocked = !headHasSpace;
             }
+            else if (outgoing[i].Count == 0 && tails[i] == null)
+            {
+                tailBlocked = true; // dead end
+            }
 
-            runs[i].Advance(dt, tailBlocked, ej);
+            runs[i].Advance(dt, tailBlocked, ej, selfLoop[i]);
             if (debugLogs && (i == 0 || ej.Count > 0))
             {
                 Debug.Log($"[BeltTickService] Run {i} items={runs[i].items.Count} ejected={ej.Count} tailBlocked={tailBlocked}");
@@ -110,6 +112,7 @@ public class BeltTickService : MonoBehaviour
         {
             var ej = ejectedPerRun[i];
             if (ej.Count == 0) continue;
+            if (selfLoop[i]) { ej.Clear(); continue; }
             if (outgoing[i].Count == 0)
             {
                 var ep = tails[i]; if (ep != null)

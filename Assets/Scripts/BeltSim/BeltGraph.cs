@@ -53,7 +53,12 @@ public class BeltGraph
             {
                 var nextCell = cur.cell + Dir2D.ToVec(cur.dir);
                 if (!map.TryGetValue(nextCell, out var next)) break;
-                if (inPath.Contains(nextCell)) { break; } // cycle guard
+                if (inPath.Contains(nextCell))
+                {
+                    // If we loop back to the start cell, include it to close the run; otherwise stop.
+                    if (nextCell == path[0]) path.Add(nextCell);
+                    break;
+                }
                 // stop extending if next cell is a junction (indegree != 1)
                 int d = indeg.TryGetValue(nextCell, out var v) ? v : 0;
                 if (d != 1)
