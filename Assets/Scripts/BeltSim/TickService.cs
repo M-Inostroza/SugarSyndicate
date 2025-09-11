@@ -111,11 +111,21 @@ public class BeltTickService : MonoBehaviour
                 for (int k = 0; k < ej.Count; k++)
                 {
                     var item = ej[k];
-                    if (headEp != null) headEp.OnInputItem(item.id);
+                    // If a merger is present, feed it with source info for round-robin fairness
+                    if (headEp is MergerEndpoint me)
+                    {
+                        me.OnInputItemFrom(i, item.id);
+                    }
+                    else if (headEp != null)
+                    {
+                        headEp.OnInputItem(item.id);
+                    }
                     else if (!targetRun.TryEnqueue(item.id))
                     {
-                        if (heads[headIdx] == null) heads[headIdx] = new MergerEndpoint();
-                        heads[headIdx].OnInputItem(item.id);
+                        // create a merger and enqueue into it for fairness
+                        var mep = new MergerEndpoint();
+                        heads[headIdx] = mep;
+                        mep.OnInputItemFrom(i, item.id);
                     }
                 }
                 ej.Clear();
@@ -140,7 +150,7 @@ public class BeltTickService : MonoBehaviour
                 ListCache<BeltRun>.Release(outsRuns);
             }
         }
-        // 4) try admit from head endpoints
+        // 4) try admit from head endpoints (mergers)
         for (int i = 0; i < runs.Count; i++)
         {
             var ep = heads[i]; if (ep == null) continue;

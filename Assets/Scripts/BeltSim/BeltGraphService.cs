@@ -29,7 +29,6 @@ public class BeltGraphService : MonoBehaviour
 
     // Minimal endpoints used by default
     class HeadQueueEndpoint : BeltEndpoint { }
-    class TailSinkEndpoint : BeltEndpoint { public override void OnInputItem(int itemId) { /* no-op */ } }
 
     void Awake()
     {
@@ -59,6 +58,10 @@ public class BeltGraphService : MonoBehaviour
         }
         if (gridServiceBehaviour != null)
             gridService = gridServiceBehaviour as IGridService;
+
+        // discover any conveyors already present
+        ScanAndRegisterExistingConveyors();
+
         if (autoRebuildOnStart) RebuildGraph();
     }
 
@@ -114,7 +117,8 @@ public class BeltGraphService : MonoBehaviour
         tiles.Clear();
         foreach (var kv in tileMap) tiles.Add(kv.Value);
         graph.BuildRuns(tiles);
-        // Rebuild polyline positions using grid service if available
+
+        // rebuild run positions using grid service if available
         if (gridService != null)
         {
             for (int i = 0; i < graph.runs.Count; i++)
@@ -219,6 +223,20 @@ public class BeltGraphService : MonoBehaviour
                 gridService = gs;
                 gridServiceBehaviour = mb;
                 return;
+            }
+        }
+    }
+
+    // NEW: scan scene to pick up conveyors that may have awoken before this service
+    void ScanAndRegisterExistingConveyors()
+    {
+        TryFindGridService();
+        var mbs = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+        foreach (var mb in mbs)
+        {
+            if (mb is IConveyor conv)
+            {
+                RegisterConveyor(conv);
             }
         }
     }

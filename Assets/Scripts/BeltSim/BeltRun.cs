@@ -16,7 +16,7 @@ public class BeltRun
     public float speed = 2f;      // units per second
     public float minSpacing = 0.6f; // minimal distance between item noses
 
-    // Build polyline from grid cells with optional converter (recommended). points must contain at least two points.
+    // Build polyline from grid cells with optional converter (recommended). points must contain at least one point.
     public void BuildFromCells(IReadOnlyList<Vector2Int> cells, Func<Vector2Int, Vector3> cellToWorld)
     {
         points.Clear(); segLen.Clear(); items.Clear(); totalLen = 0f;
@@ -44,6 +44,14 @@ public class BeltRun
     // Get world position/forward at arc offset (clamped inside run)
     public void PositionAt(float offset, out Vector3 pos, out Vector3 fwd)
     {
+        if (points.Count == 0)
+        {
+            pos = Vector3.zero; fwd = Vector3.right; return;
+        }
+        if (points.Count == 1)
+        {
+            pos = points[0]; fwd = Vector3.right; return;
+        }
         offset = Mathf.Clamp(offset, 0, Mathf.Max(0.0001f, totalLen));
         float t = offset;
         for (int i = 0; i < segLen.Count; i++)

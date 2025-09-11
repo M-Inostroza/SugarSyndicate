@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using UnityEngine;
 
+[ExecuteAlways]
 [RequireComponent(typeof(Transform))]
 public class Conveyor : MonoBehaviour, IConveyor
 {
@@ -14,32 +15,73 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void Awake()
     {
-        RegisterWithGridService();
+        // Cache initial cell; avoid mutating runtime services while not playing
         lastCell = GetCellForPosition(transform.position);
-        // inform belt graph of our existence for incremental updates
-        BeltGraphService.Instance?.RegisterConveyor(this);
+        if (Application.isPlaying)
+        {
+            RegisterWithGridService();
+            // NOTE: registration with BeltGraphService moved to Start so BuildManager can set direction first
+        }
+    }
+
+    void Start()
+    {
+        if (Application.isPlaying)
+        {
+            // Register with correct direction after any external initialization (e.g., BuildManager) has set it
+            BeltGraphService.Instance?.RegisterConveyor(this);
+        }
     }
 
     void Update()
     {
-        var gs = FindGridServiceInstance();
-        if (gs == null) return;
-        
-        var currentCell = SafeInvokeWorldToCell(gs, transform.position);
-        
-        if (currentCell != lastCell)
+        if (!Application.isPlaying)
+        {
+            // Editor-time grid snapping while moving in Scene view
+            var gs = FindGridServiceInstance();
+            if (gs == null) return;
+
+            var currentCell = SafeInvokeWorldToCell(gs, transform.position);
+            if (currentCell == default) return;
+
+            var cellToWorld = gs.GetType().GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
+            if (cellToWorld == null) return;
+
+            float z = transform.position.z;
+            try
+            {
+                var worldObj = cellToWorld.Invoke(gs, new object[] { currentCell, z });
+                if (worldObj is Vector3 world)
+                {
+                    if ((world - transform.position).sqrMagnitude > 1e-6f)
+                        transform.position = world;
+                }
+            }
+            catch { /* ignore in edit mode */ }
+            return;
+        }
+
+        // Runtime: track cell changes and update grid + belt graph incrementally
+        var rgs = FindGridServiceInstance();
+        if (rgs == null) return;
+
+        var current = SafeInvokeWorldToCell(rgs, transform.position);
+        if (current != lastCell)
         {
             SetConveyorAtCell(lastCell, null);
-            TrySetConveyorSafe(currentCell, this);
-            lastCell = currentCell;
+            TrySetConveyorSafe(current, this);
+            lastCell = current;
             BeltGraphService.Instance?.RegisterConveyor(this);
         }
     }
 
     void OnDestroy()
     {
-        SetConveyorAtCell(lastCell, null);
-        BeltGraphService.Instance?.UnregisterConveyor(this);
+        if (Application.isPlaying)
+        {
+            SetConveyorAtCell(lastCell, null);
+            BeltGraphService.Instance?.UnregisterConveyor(this);
+        }
     }
 
 #if UNITY_EDITOR
@@ -72,9 +114,9 @@ public class Conveyor : MonoBehaviour, IConveyor
     {
         var gs = FindGridServiceInstance();
         if (gs == null) return;
-        
+
         var currentCell = SafeInvokeWorldToCell(gs, transform.position);
-        
+
         TrySetConveyorSafe(currentCell, this);
         lastCell = currentCell;
     }
@@ -127,24 +169,24 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (gs == null) return default;
         return SafeInvokeWorldToCell(gs, pos);
     }
-    
+
     Vector2Int SafeInvokeWorldToCell(object gridService, Vector3 position)
     {
         if (gridService == null) return default;
-        
+
         try
         {
             var worldToCell = gridService.GetType().GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
             if (worldToCell == null) return default;
             var cellObj = worldToCell.Invoke(gridService, new object[] { position });
-            if (cellObj is Vector2Int cell) 
+            if (cellObj is Vector2Int cell)
                 return cell;
         }
         catch (Exception ex)
         {
             Debug.LogWarning($"Failed to call WorldToCell: {ex.Message}");
         }
-        
+
         return default;
     }
 

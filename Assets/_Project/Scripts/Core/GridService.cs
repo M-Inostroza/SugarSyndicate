@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class GridService : MonoBehaviour
+public class GridService : MonoBehaviour, IGridService
 {
     public static GridService Instance { get; private set; }
 

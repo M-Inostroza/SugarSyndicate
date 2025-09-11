@@ -25,9 +25,54 @@ public abstract class BeltEndpoint
     public void Produce(int itemId) => queue.Enqueue(itemId);
 }
 
-// N->1 merger with round-robin fairness handled in TickService
+// N->1 merger with round-robin fairness handled internally
 public class MergerEndpoint : BeltEndpoint
 {
+    // per-source queues for fairness
+    readonly Dictionary<int, Queue<int>> sources = new Dictionary<int, Queue<int>>();
+    readonly List<int> round = new List<int>();
+    int turn;
+
+    // Optional: when caller doesn't provide a source, fallback to base behavior
+    public override void OnInputItem(int itemId)
+    {
+        base.OnInputItem(itemId);
+    }
+
+    // Source-aware admission used by TickService
+    public void OnInputItemFrom(int sourceRunIndex, int itemId)
+    {
+        if (!sources.TryGetValue(sourceRunIndex, out var q))
+        {
+            q = new Queue<int>(8);
+            sources[sourceRunIndex] = q;
+            round.Add(sourceRunIndex);
+        }
+        q.Enqueue(itemId);
+    }
+
+    public override bool TryOutputTo(BeltRun run)
+    {
+        // If we only have the base queue, use default behavior
+        if (sources.Count == 0)
+            return base.TryOutputTo(run);
+
+        if (round.Count == 0) return false;
+        int n = round.Count;
+        for (int k = 0; k < n; k++)
+        {
+            int idx = (turn + k) % n;
+            int s = round[idx];
+            if (!sources.TryGetValue(s, out var q) || q.Count == 0) continue;
+            if (run.TryEnqueue(q.Peek()))
+            {
+                q.Dequeue();
+                turn = (idx + 1) % n; // advance turn only on success
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 // 1->N splitter alternating outputs; if target blocked, falls back to others
