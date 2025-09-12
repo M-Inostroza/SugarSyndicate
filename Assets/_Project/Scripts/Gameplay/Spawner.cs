@@ -21,13 +21,17 @@ public class Spawner : MonoBehaviour
     void OnEnable()
     {
         running = autoStart;
-        GameTick.OnTick += OnTick;
+        // Use the start-of-tick phase so items are spawned before
+        // the belt simulation processes the frame. This mirrors the
+        // new belt system's expectation and replaces the old OnTick
+        // subscription which no longer fired in some setups.
+        GameTick.OnTickStart += OnTick;
         if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
     }
 
     void OnDisable()
     {
-        GameTick.OnTick -= OnTick;
+        GameTick.OnTickStart -= OnTick;
     }
 
     void OnTick()
@@ -54,15 +58,15 @@ public class Spawner : MonoBehaviour
         var headCell = baseCell + dir;
 
         var item = new Item { id = nextItemId };
-        Vector2Int spawnCell = headCell;
+        Vector2Int spawnCell = baseCell;
         if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
         {
-            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} blocked, trying base {baseCell}");
-            spawnCell = baseCell;
+            if (debugLogging) Debug.Log($"[Spawner] Base {baseCell} blocked, trying head {headCell}");
+            spawnCell = headCell;
             if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
             {
                 if (debugLogging)
-                    Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
+                    Debug.LogWarning($"[Spawner] Unable to spawn item at {baseCell} or {headCell}");
                 return;
             }
         }
