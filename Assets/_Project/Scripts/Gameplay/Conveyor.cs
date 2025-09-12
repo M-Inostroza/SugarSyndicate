@@ -17,18 +17,17 @@ public class Conveyor : MonoBehaviour, IConveyor
     {
         // Cache initial cell; avoid mutating runtime services while not playing
         lastCell = GetCellForPosition(transform.position);
-        if (Application.isPlaying)
-        {
-            RegisterWithGridService();
-            // registration with simulation service moved to Start so BuildManager can set direction first
-        }
+        // Do NOT touch GridService here; its Awake may not have warmed the grid yet when scene loads
+        // Registration is done in Start to avoid race with GridService.Awake
     }
 
     void Start()
     {
         if (Application.isPlaying)
         {
-            // Register with correct direction after any external initialization (e.g., BuildManager) has set it
+            // First, register with GridService now that all Awakes have run
+            RegisterWithGridService();
+            // Then register with the belt simulation so it can tick us
             BeltSimulationService.Instance?.RegisterConveyor(this);
         }
     }
@@ -192,6 +191,8 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     static object FindGridServiceInstance()
     {
+        // Prefer the authoritative singleton if available
+        if (GridService.Instance != null) return GridService.Instance;
         var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
         foreach (var mb in all)
         {
