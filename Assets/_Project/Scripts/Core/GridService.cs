@@ -17,6 +17,8 @@ public class GridService : MonoBehaviour, IGridService
         public bool hasConveyor;
         public bool hasMachine;
         public Conveyor conveyor;
+        public bool hasItem;
+        public Item item;
     }
 
     void Awake()
