@@ -40,20 +40,21 @@ public class Spawner : MonoBehaviour
 
     void Spawn()
     {
-        if (GridService.Instance == null || BeltGraphService.Instance == null)
+        if (GridService.Instance == null || BeltSimulationService.Instance == null)
         {
-            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltGraphService.");
+            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltSimulationService.");
             return;
         }
         var gs = GridService.Instance;
         var baseCell = gs.WorldToCell(transform.position);
         var dir = DirectionUtil.DirVec(outputDirection);
-        var headCell = baseCell + dir; // preferred
-        bool ok = BeltGraphService.Instance.TryProduceAtHead(headCell, nextItemId);
+        var headCell = baseCell + dir;
+        var item = new Item { id = nextItemId };
+        bool ok = BeltSimulationService.Instance.TrySpawnItem(headCell, item);
         if (!ok)
         {
-            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} failed, trying base {baseCell}");
-            ok = BeltGraphService.Instance.TryProduceAtHead(baseCell, nextItemId);
+            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} blocked, trying base {baseCell}");
+            ok = BeltSimulationService.Instance.TrySpawnItem(baseCell, item);
         }
         if (ok)
         {
@@ -62,7 +63,7 @@ public class Spawner : MonoBehaviour
         }
         else if (debugLogging)
         {
-            Debug.LogWarning($"[Spawner] No run head at {headCell} or {baseCell}, item skipped");
+            Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
         }
     }
 

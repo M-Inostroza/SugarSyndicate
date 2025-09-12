@@ -20,7 +20,7 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (Application.isPlaying)
         {
             RegisterWithGridService();
-            // NOTE: registration with BeltGraphService moved to Start so BuildManager can set direction first
+            // registration with simulation service moved to Start so BuildManager can set direction first
         }
     }
 
@@ -29,7 +29,7 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (Application.isPlaying)
         {
             // Register with correct direction after any external initialization (e.g., BuildManager) has set it
-            BeltGraphService.Instance?.RegisterConveyor(this);
+            BeltSimulationService.Instance?.RegisterConveyor(this);
         }
     }
 
@@ -71,7 +71,7 @@ public class Conveyor : MonoBehaviour, IConveyor
             SetConveyorAtCell(lastCell, null);
             TrySetConveyorSafe(current, this);
             lastCell = current;
-            BeltGraphService.Instance?.RegisterConveyor(this);
+            BeltSimulationService.Instance?.RegisterConveyor(this);
         }
     }
 
@@ -80,7 +80,7 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (Application.isPlaying)
         {
             SetConveyorAtCell(lastCell, null);
-            BeltGraphService.Instance?.UnregisterConveyor(this);
+            BeltSimulationService.Instance?.UnregisterConveyor(this);
         }
     }
 
