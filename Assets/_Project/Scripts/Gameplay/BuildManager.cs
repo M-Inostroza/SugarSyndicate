@@ -122,7 +122,7 @@ public class BuildManager : MonoBehaviour
                         // rotate visual to match
                         RotateTransformToDirection(lastPlacedConveyor.transform, dir);
                         // ensure belt graph sees the updated direction immediately
-                        BeltGraphService.Instance?.RegisterConveyor(lastPlacedConveyor);
+                        BeltSimulationService.Instance?.RegisterConveyor(lastPlacedConveyor);
                     }
 
                     // place conveyor at next cell and set its direction
@@ -205,7 +205,7 @@ public class BuildManager : MonoBehaviour
             lastPlacedConveyor = conv;
 
             // register immediately so graph updates this frame
-            BeltGraphService.Instance?.RegisterConveyor(conv);
+            BeltSimulationService.Instance?.RegisterConveyor(conv);
         }
     }
 
