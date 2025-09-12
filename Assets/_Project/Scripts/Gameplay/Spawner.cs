@@ -4,6 +4,9 @@ public class Spawner : MonoBehaviour
 {
     public Direction outputDirection = Direction.Right;
 
+    [Header("Prefabs")]
+    [SerializeField] GameObject itemPrefab;
+
     [Header("When")]
     [SerializeField, Min(1)] int intervalTicks = 10;
     [SerializeField] bool autoStart = true;
@@ -40,30 +43,40 @@ public class Spawner : MonoBehaviour
 
     void Spawn()
     {
-        if (GridService.Instance == null || BeltGraphService.Instance == null)
+        if (GridService.Instance == null || BeltSimulationService.Instance == null)
         {
-            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltGraphService.");
+            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltSimulationService.");
             return;
         }
         var gs = GridService.Instance;
         var baseCell = gs.WorldToCell(transform.position);
         var dir = DirectionUtil.DirVec(outputDirection);
-        var headCell = baseCell + dir; // preferred
-        bool ok = BeltGraphService.Instance.TryProduceAtHead(headCell, nextItemId);
-        if (!ok)
+        var headCell = baseCell + dir;
+
+        var item = new Item { id = nextItemId };
+        Vector2Int spawnCell = headCell;
+        if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
         {
-            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} failed, trying base {baseCell}");
-            ok = BeltGraphService.Instance.TryProduceAtHead(baseCell, nextItemId);
+            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} blocked, trying base {baseCell}");
+            spawnCell = baseCell;
+            if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
+            {
+                if (debugLogging)
+                    Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
+                return;
+            }
         }
-        if (ok)
-        {
-            if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {headCell} or {baseCell}");
-            nextItemId++;
-        }
-        else if (debugLogging)
-        {
-            Debug.LogWarning($"[Spawner] No run head at {headCell} or {baseCell}, item skipped");
-        }
+
+        float z = itemPrefab != null ? itemPrefab.transform.position.z : 0f;
+        var world = gs.CellToWorld(spawnCell, z);
+        if (itemPrefab != null)
+            item.view = Instantiate(itemPrefab, world, Quaternion.identity).transform;
+
+        if (item.view != null)
+            item.view.position = world;
+
+        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnCell}");
+        nextItemId++;
     }
 
 #if UNITY_EDITOR
