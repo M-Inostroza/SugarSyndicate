@@ -4,6 +4,9 @@ public class Spawner : MonoBehaviour
 {
     public Direction outputDirection = Direction.Right;
 
+    [Header("Prefabs")]
+    [SerializeField] GameObject itemPrefab;
+
     [Header("When")]
     [SerializeField, Min(1)] int intervalTicks = 10;
     [SerializeField] bool autoStart = true;
@@ -49,22 +52,31 @@ public class Spawner : MonoBehaviour
         var baseCell = gs.WorldToCell(transform.position);
         var dir = DirectionUtil.DirVec(outputDirection);
         var headCell = baseCell + dir;
+
         var item = new Item { id = nextItemId };
-        bool ok = BeltSimulationService.Instance.TrySpawnItem(headCell, item);
-        if (!ok)
+        Vector2Int spawnCell = headCell;
+        if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
         {
             if (debugLogging) Debug.Log($"[Spawner] Head {headCell} blocked, trying base {baseCell}");
-            ok = BeltSimulationService.Instance.TrySpawnItem(baseCell, item);
+            spawnCell = baseCell;
+            if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
+            {
+                if (debugLogging)
+                    Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
+                return;
+            }
         }
-        if (ok)
-        {
-            if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {headCell} or {baseCell}");
-            nextItemId++;
-        }
-        else if (debugLogging)
-        {
-            Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
-        }
+
+        float z = itemPrefab != null ? itemPrefab.transform.position.z : 0f;
+        var world = gs.CellToWorld(spawnCell, z);
+        if (itemPrefab != null)
+            item.view = Instantiate(itemPrefab, world, Quaternion.identity).transform;
+
+        if (item.view != null)
+            item.view.position = world;
+
+        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnCell}");
+        nextItemId++;
     }
 
 #if UNITY_EDITOR

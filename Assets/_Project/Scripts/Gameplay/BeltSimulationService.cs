@@ -46,7 +46,9 @@ public class BeltSimulationService : MonoBehaviour
 
         dest.item = cell.item;
         dest.hasItem = true;
+        cell.item = null;
         cell.hasItem = false;
+        MoveView(dest.item, destPos);
         active.Add(destPos);
     }
 
@@ -72,7 +74,9 @@ public class BeltSimulationService : MonoBehaviour
 
         dest.item = cell.item;
         dest.hasItem = true;
+        cell.item = null;
         cell.hasItem = false;
+        MoveView(dest.item, destPos);
         active.Add(destPos);
     }
 
@@ -84,14 +88,15 @@ public class BeltSimulationService : MonoBehaviour
         if (from == null || dest == null) return;
         if (!from.hasItem || from.conveyor == null)
             return;
-
         if (from.conveyor is IConveyor conv && conv.DirVec() != -DirectionUtil.DirVec(dir))
             return;
         if (dest.hasItem) return;
 
         dest.item = from.item;
         dest.hasItem = true;
+        from.item = null;
         from.hasItem = false;
+        MoveView(dest.item, target);
         active.Add(target);
     }
 
@@ -102,6 +107,7 @@ public class BeltSimulationService : MonoBehaviour
             return false;
         cell.item = item;
         cell.hasItem = true;
+        MoveView(item, cellPos);
         active.Add(cellPos);
         return true;
     }
@@ -120,5 +126,12 @@ public class BeltSimulationService : MonoBehaviour
         if (grid == null || c == null) return;
         var cellPos = grid.WorldToCell(c.transform.position);
         active.Remove(cellPos);
+    }
+
+    void MoveView(Item item, Vector2Int cellPos)
+    {
+        if (item?.view == null || grid == null) return;
+        var pos = grid.CellToWorld(cellPos, item.view.position.z);
+        item.view.position = pos;
     }
 }
