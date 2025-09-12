@@ -84,7 +84,8 @@ public class BeltSimulationService : MonoBehaviour
         if (from == null || dest == null) return;
         if (!from.hasItem || from.conveyor == null)
             return;
-        if (from.conveyor.DirVec() != -DirectionUtil.DirVec(dir))
+
+        if (from.conveyor is IConveyor conv && conv.DirVec() != -DirectionUtil.DirVec(dir))
             return;
         if (dest.hasItem) return;
 
