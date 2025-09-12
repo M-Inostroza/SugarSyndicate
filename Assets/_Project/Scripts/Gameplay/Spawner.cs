@@ -21,13 +21,17 @@ public class Spawner : MonoBehaviour
     void OnEnable()
     {
         running = autoStart;
-        GameTick.OnTick += OnTick;
+        // Use the start-of-tick phase so items are spawned before
+        // the belt simulation processes the frame. This mirrors the
+        // new belt system's expectation and replaces the old OnTick
+        // subscription which no longer fired in some setups.
+        GameTick.OnTickStart += OnTick;
         if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
     }
 
     void OnDisable()
     {
-        GameTick.OnTick -= OnTick;
+        GameTick.OnTickStart -= OnTick;
     }
 
     void OnTick()
