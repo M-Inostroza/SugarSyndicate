@@ -58,15 +58,15 @@ public class Spawner : MonoBehaviour
         var headCell = baseCell + dir;
 
         var item = new Item { id = nextItemId };
-        Vector2Int spawnCell = headCell;
+        Vector2Int spawnCell = baseCell;
         if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
         {
-            if (debugLogging) Debug.Log($"[Spawner] Head {headCell} blocked, trying base {baseCell}");
-            spawnCell = baseCell;
+            if (debugLogging) Debug.Log($"[Spawner] Base {baseCell} blocked, trying head {headCell}");
+            spawnCell = headCell;
             if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
             {
                 if (debugLogging)
-                    Debug.LogWarning($"[Spawner] Unable to spawn item at {headCell} or {baseCell}");
+                    Debug.LogWarning($"[Spawner] Unable to spawn item at {baseCell} or {headCell}");
                 return;
             }
         }
