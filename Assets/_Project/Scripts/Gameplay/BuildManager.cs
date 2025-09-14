@@ -191,7 +191,11 @@ public class BuildManager : MonoBehaviour
 
         float z = conveyorPrefab.transform.position.z;
         var spawnPos = gs.CellToWorld(cell, z);
-        var go = Instantiate(conveyorPrefab, spawnPos, Quaternion.identity, placeParent);
+
+        // choose parent: explicit placeParent if assigned, otherwise use the Belt Container found in scene
+        Transform parent = placeParent != null ? placeParent : ContainerLocator.GetBeltContainer();
+
+        var go = Instantiate(conveyorPrefab, spawnPos, Quaternion.identity, parent);
         var conv = go.GetComponent<Conveyor>();
         if (conv != null)
         {

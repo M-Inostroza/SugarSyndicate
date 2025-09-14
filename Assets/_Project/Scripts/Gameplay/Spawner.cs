@@ -21,10 +21,6 @@ public class Spawner : MonoBehaviour
     void OnEnable()
     {
         running = autoStart;
-        // Use the start-of-tick phase so items are spawned before
-        // the belt simulation processes the frame. This mirrors the
-        // new belt system's expectation and replaces the old OnTick
-        // subscription which no longer fired in some setups.
         GameTick.OnTickStart += OnTick;
         if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
     }
@@ -78,6 +74,11 @@ public class Spawner : MonoBehaviour
 
         if (item.view != null)
             item.view.position = world;
+
+        // Set the parent of the instantiated item view to the Item Container
+        var itemParent = ContainerLocator.GetItemContainer();
+        if (item.view != null && itemParent != null)
+            item.view.SetParent(itemParent, worldPositionStays: true);
 
         if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnCell}");
         nextItemId++;

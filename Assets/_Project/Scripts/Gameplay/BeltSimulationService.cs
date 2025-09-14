@@ -26,6 +26,10 @@ public class BeltSimulationService : MonoBehaviour
 
     // track pause transitions
     bool wasPaused;
+    // When true, skip processing one StepActive immediately after unpausing to avoid instant double-moves
+    bool skipNextStepAfterUnpause;
+    // When true, skip TryPullFrom operations for one step after unpausing to avoid front-of-chain jumps
+    bool suppressPullOnceAfterUnpause;
 
     void Awake()
     {
@@ -39,17 +43,42 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (useGameTick)
             GameTick.OnTickStart += OnTick;
+
+        // Subscribe to build mode exit so we can force resume if needed
+        var bmc = FindBestObjectOfType<BuildModeController>();
+        if (bmc != null)
+            bmc.onExitBuildMode += OnBuildModeExit;
     }
 
     void OnDisable()
     {
         if (useGameTick)
             GameTick.OnTickStart -= OnTick;
+
+        var bmc = FindBestObjectOfType<BuildModeController>();
+        if (bmc != null)
+            bmc.onExitBuildMode -= OnBuildModeExit;
+    }
+
+    void OnBuildModeExit()
+    {
+        // If we were paused due to build/dragging, ensure we run the resume transition immediately
+        if (wasPaused)
+        {
+            // Snap visuals to logical cell centers and clear any in-flight interpolation
+            SnapAllItemViewsToCells();
+            visuals.Clear();
+            ReseedActiveFromGrid();
+            wasPaused = false;
+            // prevent immediate processing on the same frame which causes visual jump
+            skipNextStepAfterUnpause = true;
+            suppressPullOnceAfterUnpause = true;
+        }
     }
 
     bool IsPaused()
     {
-        // Pause only while in Build AND actively dragging to place belts
+        // Pause only while in Build AND actively dragging to preserve normal build-mode behavior
         if (GameManager.Instance == null) return false;
         bool inBuild = GameManager.Instance.State == GameState.Build;
         bool dragging = BuildModeController.IsDragging;
@@ -61,14 +90,16 @@ public class BeltSimulationService : MonoBehaviour
         bool paused = IsPaused();
         if (paused && !wasPaused)
         {
-            // entering pause: snap all in-flight visuals to their destination cell centers
+            // entering pause: stop all in-flight visuals immediately (freeze at current position)
             if (visuals.Count > 0)
             {
                 foreach (var kv in new List<KeyValuePair<Item, VisualState>>(visuals))
                 {
                     var vs = kv.Value;
-                    if (vs?.view != null)
-                        vs.view.position = vs.end;
+                    if (vs?.view == null) continue;
+                    float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
+                    var current = Vector3.Lerp(vs.start, vs.end, t);
+                    vs.view.position = current;
                 }
                 visuals.Clear();
             }
@@ -76,10 +107,14 @@ public class BeltSimulationService : MonoBehaviour
         }
         else if (!paused && wasPaused)
         {
-            // exiting pause: snap all item views to their current cell centers & reseed active
+            // exiting pause: snap all item views to their current cell centers & reseed
             SnapAllItemViewsToCells();
+            visuals.Clear();
             ReseedActiveFromGrid();
             wasPaused = false;
+            // prevent immediate processing on the same frame which causes visual jump
+            skipNextStepAfterUnpause = true;
+            suppressPullOnceAfterUnpause = true;
         }
     }
 
@@ -88,6 +123,14 @@ public class BeltSimulationService : MonoBehaviour
         HandlePauseTransitions();
         // Do not accumulate ticks or step while paused
         if (IsPaused()) return;
+
+        if (skipNextStepAfterUnpause)
+        {
+            // consume one tick without stepping to avoid instant move after unpause
+            skipNextStepAfterUnpause = false;
+            tickAccumulator = 0;
+            return;
+        }
 
         tickAccumulator++;
         if (tickAccumulator < ticksPerStep) return;
@@ -101,6 +144,13 @@ public class BeltSimulationService : MonoBehaviour
         // Skip stepping and visual interpolation while paused
         if (IsPaused()) return;
 
+        if (skipNextStepAfterUnpause)
+        {
+            // consume one frame without stepping to avoid instant move after unpause
+            skipNextStepAfterUnpause = false;
+            return;
+        }
+
         if (!useGameTick)
             StepActive();
 
@@ -111,6 +161,12 @@ public class BeltSimulationService : MonoBehaviour
 
     void StepActive()
     {
+        // Extra guard: if we've been flagged to skip a single step after unpause, honor it here as well.
+        if (skipNextStepAfterUnpause)
+        {
+            skipNextStepAfterUnpause = false;
+            return;
+        }
         if (grid == null) return;
         // Merge any pending registrations so they are processed in this step, but avoid processing registrations that arrive while stepping
         if (pendingActive.Count > 0)
@@ -139,6 +195,10 @@ public class BeltSimulationService : MonoBehaviour
                 active.Add(dest.Value);
             }
         }
+
+        // Clear one-time suppression flags at the end of a logical step
+        if (suppressPullOnceAfterUnpause)
+            suppressPullOnceAfterUnpause = false;
     }
 
     bool IsBeltLike(GridService.Cell c)
@@ -169,6 +229,10 @@ public class BeltSimulationService : MonoBehaviour
         // Empty junction/belt tries to pull from inputs
         if (!cell.hasItem)
         {
+            // After unpausing, skip pulls for one logical step to avoid immediate chain advances
+            if (suppressPullOnceAfterUnpause)
+                return null;
+
             if (cell.type == GridService.CellType.Belt || cell.type == GridService.CellType.Junction)
             {
                 // TryPullFrom will move an item into 'cell' from a neighbor if possible and returns true if moved
@@ -245,6 +309,7 @@ public class BeltSimulationService : MonoBehaviour
     // Try to pull an item from neighbor into target cell. Returns true if a move occurred.
     bool TryPullFrom(Vector2Int target, Direction dir)
     {
+        if (suppressPullOnceAfterUnpause) return false;
         if (!DirectionUtil.IsCardinal(dir)) return false;
         var fromPos = target + DirectionUtil.DirVec(dir);
         var from = grid.GetCell(fromPos);
@@ -309,7 +374,7 @@ public class BeltSimulationService : MonoBehaviour
         {
             try
             {
-                var gt = UnityEngine.Object.FindObjectOfType<GameTick>();
+                var gt = FindBestObjectOfType<GameTick>();
                 if (gt != null)
                 {
                     var field = typeof(GameTick).GetField("ticksPerSecond", BindingFlags.Instance | BindingFlags.Public);
@@ -324,6 +389,9 @@ public class BeltSimulationService : MonoBehaviour
         }
 
         var duration = baseDuration * Mathf.Max(0.0001f, Vector3.Distance(startWorld, targetWorld));
+        // enforce a small minimum duration to avoid near-instant jumps on short distances
+        const float minVisualDuration = 0.05f; // seconds
+        if (duration < minVisualDuration) duration = minVisualDuration;
         var vs = new VisualState
         {
             view = item.view,
@@ -343,7 +411,6 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (grid == null)
         {
-            Debug.LogWarning($"[BeltSim] TrySpawnItem failed: GridService instance is null. Requested at {cellPos} with item {(item != null ? item.ToString() : "null")}.", this);
             return false;
         }
 
@@ -351,7 +418,6 @@ public class BeltSimulationService : MonoBehaviour
         if (cell == null)
         {
             bool inBounds = grid.InBounds(cellPos);
-            Debug.LogWarning($"[BeltSim] TrySpawnItem failed: Cell at {cellPos} is null. InBounds={inBounds}.", this);
             return false;
         }
         if (cell.hasItem)
@@ -383,7 +449,6 @@ public class BeltSimulationService : MonoBehaviour
         {
             pendingActive.Add(cellPos);
         }
-        Debug.Log($"[BeltSim] Spawned item at {cellPos}. PendingActiveCount={pendingActive.Count}.", this);
         return true;
     }
 
@@ -428,6 +493,7 @@ public class BeltSimulationService : MonoBehaviour
         if (item?.view == null || grid == null) return;
         var start = grid.CellToWorld(fromCell, item.view.position.z);
         var end = grid.CellToWorld(toCell, item.view.position.z);
+        // Use explicit start/end so visuals always animate from the source cell center to destination, avoiding inconsistencies.
         EnqueueVisualMove(item, start, end);
     }
 
@@ -487,5 +553,44 @@ public class BeltSimulationService : MonoBehaviour
             }
         }
         catch { }
+    }
+
+    // Helper: find an instance of T using the newest available Unity API, falling back via reflection.
+    static T FindBestObjectOfType<T>() where T : Object
+    {
+        var objType = typeof(Object);
+        // Prefer generic static APIs if present. Use explicit method selection to avoid AmbiguousMatchException.
+        string[] candidateNames = new[] { "FindAnyObjectByType", "FindFirstObjectByType", "FindObjectOfType" };
+        foreach (var name in candidateNames)
+        {
+            var methods = objType.GetMethods(BindingFlags.Static | BindingFlags.Public);
+            foreach (var method in methods)
+            {
+                if (method.Name != name) continue;
+                if (!method.IsGenericMethodDefinition) continue;
+                // we expect a single generic type parameter and no runtime parameters for the generic form
+                if (method.GetGenericArguments().Length != 1) continue;
+                if (method.GetParameters().Length != 0) continue;
+                try
+                {
+                    return (T)method.MakeGenericMethod(typeof(T)).Invoke(null, null);
+                }
+                catch { }
+            }
+        }
+
+        // Fallback: use non-generic FindObjectOfType(Type) if present
+        try
+        {
+            var fallback = objType.GetMethod("FindObjectOfType", BindingFlags.Static | BindingFlags.Public, null, new System.Type[] { typeof(System.Type) }, null);
+            if (fallback != null)
+            {
+                var res = fallback.Invoke(null, new object[] { typeof(T) });
+                return (T)res;
+            }
+        }
+        catch { }
+
+        return null;
     }
 }

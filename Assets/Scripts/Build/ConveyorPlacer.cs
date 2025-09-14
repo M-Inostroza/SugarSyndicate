@@ -17,8 +17,19 @@ public class ConveyorPlacer : MonoBehaviour
     [SerializeField] Color blockedColor = new Color(1f,0f,0f,0.5f);
     [Tooltip("Additional Z rotation to apply to the visual prefab so artwork aligns with logical direction.")]
     [SerializeField] float visualRotationOffset = 0f;
+    [Tooltip("Tint applied to conveyors placed while dragging (preview/ghost color).")]
+    [SerializeField] Color ghostTint = new Color(1f,1f,1f,0.6f);
 
     Quaternion rotation = Quaternion.identity;
+
+    // Track conveyors instantiated during dragging so we can restore their visuals on release
+    class GhostData
+    {
+        public Color[] spriteColors;
+        public RendererColor[] rendererColors;
+    }
+    class RendererColor { public Renderer renderer; public Color color; }
+    readonly Dictionary<Conveyor, GhostData> ghostOriginalColors = new Dictionary<Conveyor, GhostData>();
 
     // reflection cache for GridService methods
     object gridServiceInstance;
@@ -109,6 +120,9 @@ public class ConveyorPlacer : MonoBehaviour
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
         deferredRegistrations.Clear();
+        // Clear any leftover ghost visuals from previous sessions
+        RestoreGhostVisuals();
+        ghostOriginalColors.Clear();
     }
 
     // Called by BuildModeController when exiting build mode
@@ -119,6 +133,9 @@ public class ConveyorPlacer : MonoBehaviour
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
         deferredRegistrations.Clear();
+        // ensure any ghost visuals are cleared
+        RestoreGhostVisuals();
+        ghostOriginalColors.Clear();
     }
 
     public void RotatePreview()
@@ -166,6 +183,8 @@ public class ConveyorPlacer : MonoBehaviour
     {
         if (!isDragging) return false;
         isDragging = false;
+        // restore any ghost visuals back to true appearance
+        RestoreGhostVisuals();
         // if no movement occurred, place at the start cell
         if (lastDragCell.x == int.MinValue && dragStartCell.x != int.MinValue)
         {
@@ -242,6 +261,8 @@ public class ConveyorPlacer : MonoBehaviour
                 if (placed) MarkGraphDirtyIfPresent();
             }
             isDragging = false;
+            // restore ghost preview visuals back to normal on pointer release
+            RestoreGhostVisuals();
             dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
             lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
             dragStartWorld = Vector3.zero;
@@ -354,6 +375,38 @@ public class ConveyorPlacer : MonoBehaviour
             return false;
         }
 
+        // If a belt/conveyor already exists on this cell, remove it so the new one replaces it
+        try
+        {
+            // Try GridService.GetConveyor to obtain any existing Conveyor component
+            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+            if (getConv != null)
+            {
+                var existing = getConv.Invoke(gridServiceInstance, new object[] { cell2 }) as Conveyor;
+                if (existing != null)
+                {
+                    // Destroy the existing conveyor GameObject
+                    try { Destroy(existing.gameObject); } catch { }
+                    // Inform GridService to clear conveyor reference
+                    try
+                    {
+                        var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) });
+                        if (setConv != null)
+                            setConv.Invoke(gridServiceInstance, new object[] { cell2, null });
+                    }
+                    catch { }
+                    // Also clear the logical cell to avoid stacking or stale fields
+                    try
+                    {
+                        var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+                        if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell2 });
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+
         // instantiate visual if provided
         if (conveyorPrefab != null)
         {
@@ -407,6 +460,9 @@ public class ConveyorPlacer : MonoBehaviour
 
                     // defer belt sim registration when dragging
                     RegisterOrDefer(cell2);
+                    // apply ghost tint when dragging
+                    if (isDragging)
+                        ApplyGhostToConveyor(conv);
                     return true;
                 }
             }
@@ -865,4 +921,125 @@ public class ConveyorPlacer : MonoBehaviour
             _ => 4,
         };
     }
+
+    void ApplyGhostToConveyor(Conveyor conv)
+    {
+        if (conv == null) return;
+        try
+        {
+            var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
+            if (srs != null && srs.Length > 0)
+            {
+                var orig = new Color[srs.Length];
+                for (int i = 0; i < srs.Length; i++)
+                {
+                    orig[i] = srs[i].color;
+                    var c = ghostTint;
+                    // preserve original alpha if Ghost alpha is transparent by design
+                    c.a = orig[i].a;
+                    srs[i].color = c;
+                }
+                ghostOriginalColors[conv] = new GhostData { spriteColors = orig };
+                 return;
+            }
+
+            // fallback: try MeshRenderer/Renderer and tint material color (instantiate materials)
+            var rends = conv.GetComponentsInChildren<Renderer>(true);
+            if (rends != null && rends.Length > 0)
+            {
+                var rendList = new List<RendererColor>();
+                for (int i = 0; i < rends.Length; i++)
+                {
+                    var r = rends[i];
+                    try { r.material = new Material(r.material); } catch { }
+                    var col = Color.white;
+                    if (r.material != null && r.material.HasProperty("_Color")) col = r.material.color;
+                    var c = ghostTint; c.a = col.a;
+                    if (r.material != null && r.material.HasProperty("_Color")) r.material.color = c;
+                    rendList.Add(new RendererColor { renderer = r, color = col });
+                }
+                ghostOriginalColors[conv] = new GhostData { rendererColors = rendList.ToArray() };
+             }
+         }
+         catch { }
+     }
+
+     void RestoreGhostVisuals()
+     {
+         try
+         {
+            foreach (var kv in new List<KeyValuePair<Conveyor, GhostData>>(ghostOriginalColors))
+            {
+                var conv = kv.Key;
+                var data = kv.Value;
+                if (conv == null || data == null) continue;
+
+                // If we have a conveyorPrefab available, replace the ghost instance with a fresh prefab instance
+                if (conveyorPrefab != null)
+                {
+                    try
+                    {
+                        var pos = conv.transform.position;
+                        var rot = conv.transform.rotation;
+                        var go = Instantiate(conveyorPrefab, pos, rot);
+                        var newConv = go.GetComponent<Conveyor>();
+                        if (newConv != null)
+                        {
+                            // copy direction if available
+                            try { newConv.direction = conv.direction; } catch { }
+
+                            // update GridService registration to point to the new Conveyor
+                            try
+                            {
+                                if (EnsureGridServiceCached() && gridServiceInstance != null)
+                                {
+                                    var cellObj = miWorldToCell?.Invoke(gridServiceInstance, new object[] { pos });
+                                    Vector2Int cell = cellObj is Vector2Int v ? v : default;
+                                    var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) });
+                                    if (setConv != null)
+                                        setConv.Invoke(gridServiceInstance, new object[] { cell, newConv });
+                                    // notify belt sim
+                                    TryRegisterCellInBeltSim(cell);
+                                }
+                            }
+                            catch { }
+                        }
+                        // destroy the ghost object
+                        try { Destroy(conv.gameObject); } catch { }
+                        // continue to next
+                        continue;
+                    }
+                    catch { /* fallback to color restore below if replacement fails */ }
+                }
+
+                if (data.spriteColors != null)
+                {
+                    var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
+                    if (srs != null && srs.Length == data.spriteColors.Length)
+                    {
+                        for (int i = 0; i < srs.Length; i++) if (srs[i] != null) srs[i].color = data.spriteColors[i];
+                    }
+                    else if (srs != null && srs.Length > 0)
+                    {
+                        for (int i = 0; i < srs.Length && i < data.spriteColors.Length; i++) if (srs[i] != null) srs[i].color = data.spriteColors[Math.Min(i, data.spriteColors.Length-1)];
+                    }
+                }
+                if (data.rendererColors != null)
+                {
+                    foreach (var rc in data.rendererColors)
+                    {
+                        if (rc?.renderer == null) continue;
+                        try
+                        {
+                            if (rc.renderer.material != null && rc.renderer.material.HasProperty("_Color"))
+                                rc.renderer.material.color = rc.color;
+                        }
+                        catch { }
+                    }
+                }
+            }
+         }
+         catch { }
+        ghostOriginalColors.Clear();
+     }
 }
