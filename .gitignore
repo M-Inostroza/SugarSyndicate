@@ -29,10 +29,6 @@ Thumbs.db
 .idea/
 *.sln.iml
 
-# Archivos de configuración de MonoDevelop
-*.pidb
-*.userprefs
-
 # Archivos de configuración de VS Code
 .vscode/
 
