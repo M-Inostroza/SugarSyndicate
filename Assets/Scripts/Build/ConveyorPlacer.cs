@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using System.Collections.Generic;
 
 public class ConveyorPlacer : MonoBehaviour
 {
@@ -33,6 +34,9 @@ public class ConveyorPlacer : MonoBehaviour
     Vector2Int dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
     Vector3 dragStartWorld = Vector3.zero; // store world position where pointer down began
     bool isDragging = false;
+
+    // Defer belt-sim registrations while dragging to avoid disturbing running items mid-step
+    HashSet<Vector2Int> deferredRegistrations = new HashSet<Vector2Int>();
 
     void Reset()
     {
@@ -104,6 +108,7 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
+        deferredRegistrations.Clear();
     }
 
     // Called by BuildModeController when exiting build mode
@@ -113,6 +118,7 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
+        deferredRegistrations.Clear();
     }
 
     public void RotatePreview()
@@ -134,6 +140,9 @@ public class ConveyorPlacer : MonoBehaviour
         return placed;
     }
 
+    // Called when the user presses pointer down to start placing/dragging belts.
+    // This immediately places the first belt at the pointer-down cell so there is
+    // something to reorient when the drag moves.
     public bool OnPointerDown()
     {
         if (!EnsureGridServiceCached() || miWorldToCell == null) return false;
@@ -151,6 +160,8 @@ public class ConveyorPlacer : MonoBehaviour
         return true;
     }
 
+    // Called when the user releases the pointer. If no dragging movement occurred
+    // then place a single belt at the initial cell (already handled here).
     public bool OnPointerUp()
     {
         if (!isDragging) return false;
@@ -162,13 +173,36 @@ public class ConveyorPlacer : MonoBehaviour
             if (placed) MarkGraphDirtyIfPresent();
             dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
             lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
+
+            // flush deferred registrations now that drag finished
+            FlushDeferredRegistrations();
             return placed;
         }
+
+        // flush deferred registrations now that drag finished
+        FlushDeferredRegistrations();
+
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         return false;
     }
 
+    void FlushDeferredRegistrations()
+    {
+        if (deferredRegistrations.Count == 0) return;
+        foreach (var c in deferredRegistrations)
+        {
+            TryRegisterCellInBeltSim(c);
+        }
+        deferredRegistrations.Clear();
+        MarkGraphDirtyIfPresent();
+    }
+
+    // This method should be called every frame while in build mode to update the
+    // preview and handle drag placement. It contains the core drag logic:
+    // - Do not change a placed belt's direction while pointer remains inside that belt's cell.
+    // - When pointer moves out of a cell into the next cell, update the previous cell's
+    //   direction to point toward the next cell and then place the next cell.
     public void UpdatePreviewPosition()
     {
         if (!EnsureGridServiceCached()) return;
@@ -190,64 +224,12 @@ public class ConveyorPlacer : MonoBehaviour
 
         if (Input.GetMouseButton(0) && isDragging)
         {
-            if (cell == lastDragCell && lastDragCell.x != int.MinValue)
-            {
-                // Still in same last-placed cell; we may still want to update its direction based on mouse movement
-                // Compute world delta relative to that cell center
-                try
-                {
-                    var centerObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { lastDragCell, 0f });
-                    var center = centerObj is Vector3 cc ? cc : Vector3.zero;
-                    var worldDelta = world - center;
-                    if (worldDelta.sqrMagnitude > 0.001f)
-                    {
-                        var dirName = Math.Abs(worldDelta.x) >= Math.Abs(worldDelta.y) ? (worldDelta.x > 0 ? "Right" : "Left") : (worldDelta.y > 0 ? "Up" : "Down");
-                        UpdateBeltDirectionAtCell(lastDragCell, dirName);
-                        MarkGraphDirtyIfPresent();
-                    }
-                }
-                catch { }
-                return;
-            }
-
-            // If we haven't placed any cell yet (only the initial placed on pointer down), update its direction based on world delta from drag start
-            if (lastDragCell.x == int.MinValue && dragStartCell.x != int.MinValue)
-            {
-                var worldDelta = world - dragStartWorld;
-                if (worldDelta.sqrMagnitude > 0.001f)
-                {
-                    var dirName = Math.Abs(worldDelta.x) >= Math.Abs(worldDelta.y) ? (worldDelta.x > 0 ? "Right" : "Left") : (worldDelta.y > 0 ? "Up" : "Down");
-                    var updated = UpdateBeltDirectionAtCell(dragStartCell, dirName);
-                    if (updated) lastDragCell = dragStartCell;
-                    MarkGraphDirtyIfPresent();
-                }
-
-                // Also attempt to place the next cell if mouse moved into another cell
-                TryPlaceCellFromDrag(cell);
-                if (lastDragCell.x != int.MinValue) MarkGraphDirtyIfPresent();
-                return;
-            }
-
-            // Otherwise, place the next cell stepping from the last placed cell toward the current cell
+            // Only attempt to place/update when the pointer has moved into a new cell
+            // TryPlaceCellFromDrag will handle updating the previous cell direction and placing the next cell
             TryPlaceCellFromDrag(cell);
-            if (lastDragCell.x != int.MinValue)
-            {
-                // Also update the direction of the (new) last placed cell to point toward the current mouse position
-                try
-                {
-                    var centerObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { lastDragCell, 0f });
-                    var center = centerObj is Vector3 cc ? cc : Vector3.zero;
-                    var worldDelta = world - center;
-                    if (worldDelta.sqrMagnitude > 0.001f)
-                    {
-                        var dirName = Math.Abs(worldDelta.x) >= Math.Abs(worldDelta.y) ? (worldDelta.x > 0 ? "Right" : "Left") : (worldDelta.y > 0 ? "Up" : "Down");
-                        UpdateBeltDirectionAtCell(lastDragCell, dirName);
-                    }
-                }
-                catch { }
 
-                MarkGraphDirtyIfPresent();
-            }
+            // If something changed (lastDragCell set), mark graph dirty
+            if (lastDragCell.x != int.MinValue) MarkGraphDirtyIfPresent();
             return;
         }
 
@@ -263,6 +245,9 @@ public class ConveyorPlacer : MonoBehaviour
             dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
             lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
             dragStartWorld = Vector3.zero;
+
+            // flush deferred registrations after drag
+            FlushDeferredRegistrations();
             return;
         }
     }
@@ -295,19 +280,40 @@ public class ConveyorPlacer : MonoBehaviour
 
     void TryPlaceCellFromDrag(Vector2Int cell)
     {
+        // If we haven't placed any cell yet (only the initial placed on pointer down)
+        // then when the pointer moves into a different cell we should:
+        // 1) update the start cell's direction to point toward the next cell
+        // 2) place the next cell and set lastDragCell to that newly placed cell
         if (lastDragCell.x == int.MinValue)
         {
-            // no previous cell placed; we already placed a belt at dragStartCell on pointer down.
-            // Instead of placing again, update that belt's direction to point toward the current cell
-            var dirNameStart = DirectionNameFromDelta(cell - dragStartCell);
-            if (dirNameStart == null) return;
-            var updated = UpdateBeltDirectionAtCell(dragStartCell, dirNameStart);
-            if (updated) lastDragCell = dragStartCell;
+            // If pointer still inside the start cell, do nothing
+            if (cell == dragStartCell) return;
+
+            // pointer left the start cell - compute step toward current cell
+            var deltaStart = cell - dragStartCell;
+            Vector2Int stepStart;
+            if (Math.Abs(deltaStart.x) >= Math.Abs(deltaStart.y))
+                stepStart = new Vector2Int(Math.Sign(deltaStart.x), 0);
+            else
+                stepStart = new Vector2Int(0, Math.Sign(deltaStart.y));
+
+            var next = dragStartCell + stepStart;
+            var dirName = DirectionNameFromDelta(stepStart);
+            if (dirName == null) return;
+
+            // update the start cell to point to 'next'
+            UpdateBeltDirectionAtCell(dragStartCell, dirName);
+
+            // attempt to place the next cell and mark it as last placed if successful
+            var placedNext = PlaceBeltAtCell(next, dirName);
+            if (placedNext) lastDragCell = next;
             return;
         }
 
+        // If pointer hasn't moved past the last placed cell, do nothing (we don't update direction while inside cell)
         if (cell == lastDragCell) return;
 
+        // pointer moved beyond last placed cell - step one cell toward the current pointer cell
         var delta = cell - lastDragCell;
         Vector2Int step = Vector2Int.zero;
         if (Mathf.Abs(delta.x) >= Mathf.Abs(delta.y))
@@ -315,14 +321,20 @@ public class ConveyorPlacer : MonoBehaviour
         else
             step = new Vector2Int(0, Math.Sign(delta.y));
 
-        var next = lastDragCell + step;
+        var nextCell = lastDragCell + step;
         var dirNameNext = DirectionNameFromDelta(step);
         if (dirNameNext == null) return;
-        var placedNext = PlaceBeltAtCell(next, dirNameNext);
-        if (placedNext) lastDragCell = next;
+
+        // Before placing the next cell, update the previous (lastDragCell) to point toward it
+        UpdateBeltDirectionAtCell(lastDragCell, dirNameNext);
+
+        var placed = PlaceBeltAtCell(nextCell, dirNameNext);
+        if (placed) lastDragCell = nextCell;
     }
 
     // Place a belt at a specific cell with an output direction name ("Right","Left","Up","Down")
+    // This handles collision checks, instantiates visuals, hooks the Conveyor prefab into GridService
+    // and finally calls GridService.SetBeltCell via reflection to set the logical in/out directions.
     bool PlaceBeltAtCell(Vector2Int cell2, string outDirName)
     {
         if (miCellToWorld == null) { Debug.LogWarning("[Placer] GridService.CellToWorld not found"); return false; }
@@ -392,6 +404,9 @@ public class ConveyorPlacer : MonoBehaviour
                     catch { }
 
                     // we're done: visual and grid are in sync
+
+                    // defer belt sim registration when dragging
+                    RegisterOrDefer(cell2);
                     return true;
                 }
             }
@@ -429,7 +444,8 @@ public class ConveyorPlacer : MonoBehaviour
         try
         {
             miSetBeltCell.Invoke(gridServiceInstance, new object[] { cell2, inObj, outObj });
-            TryRegisterCellInBeltSim(cell2);
+            // register with belt sim (deferred while dragging)
+            RegisterOrDefer(cell2);
             // If we instantiated a visual with a Conveyor component, ensure GridService knows about it immediately
             if (conveyorPrefab != null)
             {
@@ -474,6 +490,14 @@ public class ConveyorPlacer : MonoBehaviour
         }
     }
 
+    void RegisterOrDefer(Vector2Int cell)
+    {
+        if (isDragging)
+            deferredRegistrations.Add(cell);
+        else
+            TryRegisterCellInBeltSim(cell);
+    }
+
     string DirectionNameFromDelta(Vector2Int delta)
     {
         if (delta.x > 0) return "Right";
@@ -484,6 +508,8 @@ public class ConveyorPlacer : MonoBehaviour
     }
 
     // Update an existing belt cell's output direction and visual Conveyor (if present)
+    // This will try to find a Conveyor GameObject at the cell, update its "direction" field and rotation,
+    // notify GridService.SetConveyor and GridService.SetBeltCell (via reflection) so the grid data matches the visual.
     bool UpdateBeltDirectionAtCell(Vector2Int cell2, string outDirName)
     {
         if (miCellToWorld == null) { Debug.LogWarning("[Placer] GridService.CellToWorld not found"); return false; }
@@ -611,7 +637,8 @@ public class ConveyorPlacer : MonoBehaviour
                     }
 
                     miSetBeltCell?.Invoke(gridServiceInstance, new object[] { cell2, inObjLocal, outObjLocal });
-                    TryRegisterCellInBeltSim(cell2);
+                    // defer belt sim registration while dragging
+                    RegisterOrDefer(cell2);
                 }
                 catch { }
 
@@ -628,6 +655,9 @@ public class ConveyorPlacer : MonoBehaviour
                         break;
                     }
                 }
+
+                // also defer TryRegisterCellInBeltSim call
+                RegisterOrDefer(cell2);
 
                 TryRegisterCellInBeltSim(cell2);
                 MarkGraphDirtyIfPresent();
@@ -659,7 +689,8 @@ public class ConveyorPlacer : MonoBehaviour
             }
 
             miSetBeltCell.Invoke(gridServiceInstance, new object[] { cell2, inObj, outObj });
-            TryRegisterCellInBeltSim(cell2);
+            // defer registration while dragging
+            RegisterOrDefer(cell2);
 
             // Debug readback
             try

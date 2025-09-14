@@ -41,7 +41,6 @@ public class GameTick : MonoBehaviour
             if (debugTimer >= 1f)
             {
                 debugTimer = 0f;
-                Debug.Log($"[GameTick] tps={ticksPerSecond} tick={TickIndex}");
             }
         }
     }

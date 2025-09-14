@@ -8,9 +8,20 @@ public class GameManager : MonoBehaviour
 
     public GameState State { get; private set; } = GameState.Play;
 
+    // Ensure a GameManager exists for any scene (before first scene loads)
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    static void EnsureExists()
+    {
+        if (Instance == null)
+        {
+            var go = new GameObject("GameManager");
+            go.AddComponent<GameManager>();
+        }
+    }
+
     void Awake()
     {
-        if (Instance != null) { Destroy(gameObject); return; }
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
     }
