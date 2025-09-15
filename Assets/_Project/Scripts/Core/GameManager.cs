@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public enum GameState { Play, Build }
+public enum GameState { Play, Build, Delete }
 
 public class GameManager : MonoBehaviour
 {

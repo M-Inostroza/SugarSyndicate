@@ -118,4 +118,13 @@ public class BuildModeController : MonoBehaviour
         var exitState = GameManager.Instance != null ? GameManager.Instance.State.ToString() : "<no GameManager>";
         Debug.Log($"[BuildModeController] Exited Build mode. GameState={exitState}");
     }
+
+    // UI helper to start conveyor build mode and immediately enable delete mode
+    public void StartDeleteConveyorMode()
+    {
+        StartBuildMode(BuildableType.Conveyor);
+        // Enter global Delete state so systems can pause appropriately
+        if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Delete);
+        conveyorPlacer?.StartDeleteMode();
+    }
 }
