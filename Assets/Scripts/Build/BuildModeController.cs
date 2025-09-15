@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public enum BuildableType { None, Conveyor }
 
@@ -17,6 +18,8 @@ public class BuildModeController : MonoBehaviour
     void Update()
     {
         if (current == BuildableType.None) return;
+
+        bool pointerOverUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
 
         // cancel build with Esc or right mouse
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
@@ -47,20 +50,27 @@ public class BuildModeController : MonoBehaviour
         // Handle pointer down/up for drag-aware placement
         if (Input.GetMouseButtonDown(0))
         {
-            IsDragging = true; // announce drag start
-            // start potential drag - placer will record start cell
-            conveyorPlacer?.OnPointerDown();
+            if (!pointerOverUI)
+            {
+                IsDragging = true; // announce drag start
+                // start potential drag - placer will record start cell
+                conveyorPlacer?.OnPointerDown();
+            }
         }
 
         if (Input.GetMouseButtonUp(0))
         {
             bool keepPlacing = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             bool placed = false;
-            switch (current)
+
+            if (IsDragging)
             {
-                case BuildableType.Conveyor:
-                    placed = conveyorPlacer != null && conveyorPlacer.OnPointerUp();
-                    break;
+                switch (current)
+                {
+                    case BuildableType.Conveyor:
+                        placed = conveyorPlacer != null && conveyorPlacer.OnPointerUp();
+                        break;
+                }
             }
 
             IsDragging = false; // announce drag end
@@ -116,7 +126,6 @@ public class BuildModeController : MonoBehaviour
         // Return to Play state when leaving build mode
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Play);
         var exitState = GameManager.Instance != null ? GameManager.Instance.State.ToString() : "<no GameManager>";
-        Debug.Log($"[BuildModeController] Exited Build mode. GameState={exitState}");
     }
 
     // UI helper to start conveyor build mode and immediately enable delete mode

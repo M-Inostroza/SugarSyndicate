@@ -235,18 +235,52 @@ public class BeltSimulationService : MonoBehaviour
 
             if (cell.type == GridService.CellType.Belt || cell.type == GridService.CellType.Junction)
             {
-                // TryPullFrom will move an item into 'cell' from a neighbor if possible and returns true if moved
-                if (TryPullFrom(cellPos, cell.inA))
+                // Modified: for junctions, detect whether inputs actually have items ready to push into this cell.
+                if (cell.type == GridService.CellType.Junction && cell.inA != Direction.None && cell.inB != Direction.None)
                 {
-                    // schedule this cell for processing next step
-                    return cellPos;
-                }
+                    // Determine readiness of each input (neighbor has item and outputs toward this cell)
+                    var neighborA = grid.GetCell(cellPos + DirectionUtil.DirVec(cell.inA));
+                    var neighborB = grid.GetCell(cellPos + DirectionUtil.DirVec(cell.inB));
+                    bool aReady = neighborA != null && neighborA.hasItem && HasOutputTowards(neighborA, DirectionUtil.Opposite(cell.inA));
+                    bool bReady = neighborB != null && neighborB.hasItem && HasOutputTowards(neighborB, DirectionUtil.Opposite(cell.inB));
 
-                if (!grid.GetCell(cellPos).hasItem && cell.type == GridService.CellType.Junction)
-                {
-                    if (TryPullFrom(cellPos, cell.inB))
+                    if (aReady && bReady)
                     {
+                        // Both sides have items waiting: enforce round-robin one-by-one behavior
+                        var tryDir = (cell.junctionToggle & 1) == 0 ? cell.inA : cell.inB;
+                        if (TryPullFrom(cellPos, tryDir))
+                        {
+                            // successful pull, flip toggle so next time the other side gets priority
+                            cell.junctionToggle ^= 1;
+                            return cellPos;
+                        }
+                        // If chosen side wasn't able to pull (race/edge case), do not attempt the other side this step
+                        return null;
+                    }
+                    else
+                    {
+                        // Only one (or none) side is ready: fall back to opportunistic behavior
+                        if (aReady && TryPullFrom(cellPos, cell.inA))
+                            return cellPos;
+                        if (bReady && TryPullFrom(cellPos, cell.inB))
+                            return cellPos;
+                    }
+                }
+                else
+                {
+                    // non-junction or single-input junction: retain previous behavior
+                    if (TryPullFrom(cellPos, cell.inA))
+                    {
+                        // schedule this cell for processing next step
                         return cellPos;
+                    }
+
+                    if (!grid.GetCell(cellPos).hasItem && cell.type == GridService.CellType.Junction)
+                    {
+                        if (TryPullFrom(cellPos, cell.inB))
+                        {
+                            return cellPos;
+                        }
                     }
                 }
 
@@ -422,17 +456,11 @@ public class BeltSimulationService : MonoBehaviour
         }
         if (cell.hasItem)
         {
-            Debug.LogWarning($"[BeltSim] TrySpawnItem failed: Cell {cellPos} already has an item.", this);
             return false;
         }
         if (!IsBeltLike(cell))
         {
-            Debug.LogWarning($"[BeltSim] TrySpawnItem failed: No belt/junction at {cellPos}.", this);
             return false;
-        }
-        if (item == null)
-        {
-            Debug.LogWarning($"[BeltSim] TrySpawnItem: Provided item is null for {cellPos}. Proceeding will set hasItem=true with null item.", this);
         }
 
         cell.item = item;
