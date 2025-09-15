@@ -11,6 +11,14 @@ public class Spawner : MonoBehaviour
     [SerializeField, Min(1)] int intervalTicks = 10;
     [SerializeField] bool autoStart = true;
 
+    [Header("Pooling")] 
+    [Tooltip("Prewarm pool size (only first spawner with prefab matters)." )]
+    [SerializeField, Min(0)] int poolPrewarm = 32;
+
+    [Header("Behavior")]
+    [Tooltip("If true, spawns prefer the head cell (in front of the spawner). If false, try base cell first then head as fallback.")]
+    [SerializeField] bool preferHeadCell = true;
+
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
@@ -22,6 +30,10 @@ public class Spawner : MonoBehaviour
     {
         running = autoStart;
         GameTick.OnTickStart += OnTick;
+        if (itemPrefab != null)
+        {
+            ItemViewPool.Ensure(itemPrefab, poolPrewarm);
+        }
         if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
     }
 
@@ -54,33 +66,57 @@ public class Spawner : MonoBehaviour
         var headCell = baseCell + dir;
 
         var item = new Item { id = nextItemId };
-        Vector2Int spawnCell = baseCell;
-        if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
+
+        bool spawned = false;
+        Vector2Int spawnedCell = baseCell; // track where we actually placed the item
+        if (preferHeadCell)
         {
-            if (debugLogging) Debug.Log($"[Spawner] Base {baseCell} blocked, trying head {headCell}");
-            spawnCell = headCell;
-            if (!BeltSimulationService.Instance.TrySpawnItem(spawnCell, item))
+            if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
             {
-                if (debugLogging)
-                    Debug.LogWarning($"[Spawner] Unable to spawn item at {baseCell} or {headCell}");
-                return;
+                spawned = true;
+                spawnedCell = headCell;
+            }
+            else if (BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
+            {
+                spawned = true;
+                spawnedCell = baseCell;
+            }
+        }
+        else
+        {
+            if (BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
+            {
+                spawned = true;
+                spawnedCell = baseCell;
+            }
+            else if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
+            {
+                spawned = true;
+                spawnedCell = headCell;
             }
         }
 
+        if (!spawned)
+        {
+            if (debugLogging)
+                Debug.LogWarning($"[Spawner] Unable to spawn item at {baseCell} or {headCell}");
+            return;
+        }
+
         float z = itemPrefab != null ? itemPrefab.transform.position.z : 0f;
-        var world = gs.CellToWorld(spawnCell, z);
+        var world = gs.CellToWorld(spawnedCell, z);
         if (itemPrefab != null)
-            item.view = Instantiate(itemPrefab, world, Quaternion.identity).transform;
+        {
+            // pooled acquire
+            var parent = ContainerLocator.GetItemContainer();
+            var t = ItemViewPool.Get(world, Quaternion.identity, parent);
+            item.view = t;
+        }
 
         if (item.view != null)
             item.view.position = world;
 
-        // Set the parent of the instantiated item view to the Item Container
-        var itemParent = ContainerLocator.GetItemContainer();
-        if (item.view != null && itemParent != null)
-            item.view.SetParent(itemParent, worldPositionStays: true);
-
-        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnCell}");
+        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnedCell}");
         nextItemId++;
     }
 

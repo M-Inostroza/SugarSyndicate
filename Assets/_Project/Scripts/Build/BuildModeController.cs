@@ -136,4 +136,14 @@ public class BuildModeController : MonoBehaviour
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Delete);
         conveyorPlacer?.StartDeleteMode();
     }
+
+    // NEW: Stop delete mode explicitly (UI button). Returns to Play state.
+    public void StopDeleteMode()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.State == GameState.Delete)
+        {
+            // Reuse existing cancel logic to clean up previews etc.
+            CancelBuildMode();
+        }
+    }
 }

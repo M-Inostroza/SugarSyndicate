@@ -11,6 +11,11 @@ public class BeltSimulationService : MonoBehaviour
     readonly HashSet<Vector2Int> pendingActive = new HashSet<Vector2Int>();
     GridService grid;
 
+    // Reusable buffers to minimize GC allocations per step/frame
+    readonly List<Vector2Int> stepBuffer = new List<Vector2Int>(256);
+    readonly HashSet<Vector2Int> movedBuffer = new HashSet<Vector2Int>();
+    readonly List<Item> visualsRemoveBuffer = new List<Item>(64);
+
     [Header("Speed")]
     [Tooltip("If true, the belt sim runs on GameTick; otherwise it steps every frame.")]
     [SerializeField] bool useGameTick = true;
@@ -23,6 +28,10 @@ public class BeltSimulationService : MonoBehaviour
     [SerializeField] bool smoothMovement = true;
     [Tooltip("Fallback movement duration (seconds) when not using GameTick-driven timing.")]
     [SerializeField, Min(0f)] float moveDurationSeconds = 0.2f;
+
+    [Header("Build Pause")]
+    [Tooltip("If true, pauses the belt simulation while dragging in Build mode. Turn off to keep items moving while placing belts.")]
+    [SerializeField] bool pauseWhileDragging = false;
 
     // track pause transitions
     bool wasPaused;
@@ -78,6 +87,7 @@ public class BeltSimulationService : MonoBehaviour
 
     bool IsPaused()
     {
+        if (!pauseWhileDragging) return false;
         // Pause only while in Build AND actively dragging to preserve normal build-mode behavior
         if (GameManager.Instance == null) return false;
         bool inBuild = GameManager.Instance.State == GameState.Build;
@@ -93,7 +103,7 @@ public class BeltSimulationService : MonoBehaviour
             // entering pause: stop all in-flight visuals immediately (freeze at current position)
             if (visuals.Count > 0)
             {
-                foreach (var kv in new List<KeyValuePair<Item, VisualState>>(visuals))
+                foreach (var kv in visuals)
                 {
                     var vs = kv.Value;
                     if (vs?.view == null) continue;
@@ -175,23 +185,26 @@ public class BeltSimulationService : MonoBehaviour
             pendingActive.Clear();
         }
 
-        var step = new List<Vector2Int>(active);
+        // Copy to reusable buffer and clear active for next accumulation
+        stepBuffer.Clear();
+        foreach (var c in active) stepBuffer.Add(c);
         active.Clear();
 
-        // movedThisStep prevents chained moves where an item would be moved multiple cells in one StepActive
-        var movedThisStep = new HashSet<Vector2Int>();
+        // movedBuffer prevents chained moves where an item would be moved multiple cells in one StepActive
+        movedBuffer.Clear();
 
-        foreach (var cell in step)
+        for (int i = 0; i < stepBuffer.Count; i++)
         {
+            var cell = stepBuffer[i];
             // If this cell was the destination of a previous move this step, skip it to avoid double-moving
-            if (movedThisStep.Contains(cell)) continue;
+            if (movedBuffer.Contains(cell)) continue;
 
             var dest = StepCell(cell);
 
             if (dest.HasValue)
             {
                 // mark destination as moved this step and schedule it for processing on the next StepActive
-                movedThisStep.Add(dest.Value);
+                movedBuffer.Add(dest.Value);
                 active.Add(dest.Value);
             }
         }
@@ -377,19 +390,19 @@ public class BeltSimulationService : MonoBehaviour
     void UpdateVisuals(float dt)
     {
         if (visuals.Count == 0) return;
-        var remove = new List<Item>();
+        visualsRemoveBuffer.Clear();
         foreach (var kv in visuals)
         {
             var item = kv.Key;
             var vs = kv.Value;
-            if (vs.view == null) { remove.Add(item); continue; }
+            if (vs.view == null) { visualsRemoveBuffer.Add(item); continue; }
             vs.elapsed += dt;
             float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
             vs.view.position = Vector3.Lerp(vs.start, vs.end, t);
-            if (t >= 1f) remove.Add(item);
+            if (t >= 1f) visualsRemoveBuffer.Add(item);
         }
-        foreach (var it in remove)
-            visuals.Remove(it);
+        for (int i = 0; i < visualsRemoveBuffer.Count; i++)
+            visuals.Remove(visualsRemoveBuffer[i]);
     }
 
     // strict start-end move
