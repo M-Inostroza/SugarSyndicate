@@ -10,11 +10,18 @@ public class Conveyor : MonoBehaviour, IConveyor
     [Min(1)] public int ticksPerCell = 4;
 
     Vector2Int lastCell;
+    
+    // Flag to mark this conveyor as a ghost (visual only, should not be registered)
+    [System.NonSerialized]
+    public bool isGhost = false;
 
     public Vector2Int DirVec() => DirectionUtil.DirVec(direction);
 
     void Awake()
     {
+        // Don't do any registration work if this is a ghost conveyor
+        if (isGhost) return;
+        
         // Cache initial cell; avoid mutating runtime services while not playing
         lastCell = GetCellForPosition(transform.position);
         // Do NOT touch GridService here; its Awake may not have warmed the grid yet when scene loads
@@ -25,6 +32,35 @@ public class Conveyor : MonoBehaviour, IConveyor
     {
         if (Application.isPlaying)
         {
+            // Don't register ghost conveyors with GridService or simulation
+            if (isGhost)
+            {
+                return;
+            }
+            
+            // Check if there's already a conveyor at this position
+            var gs = FindGridServiceInstance();
+            if (gs != null)
+            {
+                var currentCell = SafeInvokeWorldToCell(gs, transform.position);
+                var getConv = gs.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+                if (getConv != null)
+                {
+                    try
+                    {
+                        var existing = getConv.Invoke(gs, new object[] { currentCell }) as Conveyor;
+                        if (existing != null && existing != this && !existing.isGhost)
+                        {
+                            // There's already a real conveyor here, destroy this one
+                            Debug.Log($"[Conveyor] Duplicate conveyor detected at {currentCell}, destroying duplicate.");
+                            Destroy(gameObject);
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            
             // First, register with GridService now that all Awakes have run
             RegisterWithGridService();
             // Then register with the belt simulation so it can tick us
@@ -34,6 +70,9 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void Update()
     {
+        // Don't update grid registration for ghost conveyors
+        if (isGhost) return;
+        
         if (!Application.isPlaying)
         {
             // Editor-time grid snapping while moving in Scene view
@@ -76,7 +115,7 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void OnDestroy()
     {
-        if (Application.isPlaying)
+        if (Application.isPlaying && !isGhost)
         {
             SetConveyorAtCell(lastCell, null);
             BeltSimulationService.Instance?.UnregisterConveyor(this);
@@ -116,8 +155,12 @@ public class Conveyor : MonoBehaviour, IConveyor
 
         var currentCell = SafeInvokeWorldToCell(gs, transform.position);
 
-        TrySetConveyorSafe(currentCell, this);
-        lastCell = currentCell;
+        // Only register if not a ghost
+        if (!isGhost)
+        {
+            TrySetConveyorSafe(currentCell, this);
+            lastCell = currentCell;
+        }
     }
 
     void TrySetConveyorSafe(Vector2Int cell, Conveyor conveyor)
@@ -133,6 +176,24 @@ public class Conveyor : MonoBehaviour, IConveyor
         var existing = existingObj as Conveyor;
         if (existing != null && existing != this)
         {
+            // Check if existing is a ghost and this is not
+            if (existing.isGhost && !this.isGhost)
+            {
+                // Replace ghost with real conveyor
+                try { Destroy(existing.gameObject); } catch { }
+                setConv.Invoke(gs, new object[] { cell, conveyor });
+                return;
+            }
+            
+            // Check if this is a ghost and existing is real
+            if (this.isGhost && !existing.isGhost)
+            {
+                // Don't replace real conveyor with ghost, destroy this ghost instead
+                Debug.Log($"Ghost conveyor trying to replace real conveyor at {cell}, destroying ghost.");
+                Destroy(gameObject);
+                return;
+            }
+            
             // if placing opposite direction (head-on), keep the earlier one and destroy the new one to avoid a crashy cycle
             var dvExisting = existing.DirVec();
             var dvNew = this.DirVec();

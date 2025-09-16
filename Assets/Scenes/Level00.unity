@@ -492,7 +492,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0.5}
   m_AnchorMax: {x: 0, y: 0.5}
   m_AnchoredPosition: {x: 100, y: 0}
-  m_SizeDelta: {x: 80, y: 80}
+  m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &239643830
 MonoBehaviour:
@@ -570,7 +570,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -4422711690462160421, guid: 51f14059cf730be48a337e0841b130a8, type: 3}
+  m_Sprite: {fileID: 4290308353415105066, guid: 778078ab9fc0e0441a7eb13f710f108b, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -2055,6 +2055,7 @@ MonoBehaviour:
   blockedColor: {r: 1, g: 0, b: 0, a: 0.5}
   visualRotationOffset: 0
   ghostTint: {r: 0.5735065, g: 0.94792503, b: 0.97735846, a: 0.26666668}
+  ghostSortingOrderOffset: 1
 --- !u!4 &958606651
 Transform:
   m_ObjectHideFlags: 0
@@ -3707,6 +3708,7 @@ MonoBehaviour:
   smoothMovement: 1
   moveDurationSeconds: 0.2
   pauseWhileDragging: 0
+  preventGhostMovement: 1
 --- !u!4 &1678141470
 Transform:
   m_ObjectHideFlags: 0
@@ -4297,7 +4299,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -198938125430884413, guid: 392940ea57796e948be189833ce8196c, type: 3}
+  m_Sprite: {fileID: -2136733623990294904, guid: 4bea8617dd7f6db4c9bda2b32ffd0dc0, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1

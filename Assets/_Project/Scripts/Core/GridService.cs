@@ -12,6 +12,8 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField, Min(0.01f)] float cellSize = 1f;
     [SerializeField] Vector2Int gridSize = new Vector2Int(20, 12);
 
+    public float CellSize => cellSize;
+
     readonly Dictionary<Vector2Int, Cell> cells = new();
 
     public enum CellType : byte { Empty = 0, Belt = 1, Junction = 2, Machine = 3 }

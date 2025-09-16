@@ -30,15 +30,35 @@ public class BeltSimulationService : MonoBehaviour
     [SerializeField, Min(0f)] float moveDurationSeconds = 0.2f;
 
     [Header("Build Pause")]
-    [Tooltip("If true, pauses the belt simulation while dragging in Build mode. Turn off to keep items moving while placing belts.")]
-    [SerializeField] bool pauseWhileDragging = false;
+    [Tooltip("If true, pauses the belt simulation during build operations.")]
+    [SerializeField] bool pauseWhileDragging = true;
+    
+    [Tooltip("If true, prevents items from moving on ghost/temporary belts during drag operations but allows movement after committing.")]
+    [SerializeField] bool preventGhostMovement = true;
 
     // track pause transitions
     bool wasPaused;
     // When true, skip processing one StepActive immediately after unpausing to avoid instant double-moves
     bool skipNextStepAfterUnpause;
     // When true, skip TryPullFrom operations for one step after unpausing to avoid front-of-chain jumps
-    bool suppressPullOnceAfterUnpause;
+    bool suppressPullOnceAfterUnpausing;
+
+    // Track tick timing to sync visual durations with logic
+    float lastTickTime;
+    float lastTickDurationSec;
+    bool tickTimeInitialized;
+
+    // Public helper so build/placement code can request a one-step suppression of pulls
+    public void SuppressNextStepPulls(bool alsoSkipOneStep = true)
+    {
+        suppressPullOnceAfterUnpausing = true;
+        if (alsoSkipOneStep) skipNextStepAfterUnpause = true;
+        // Reset tick accumulator so we don't immediately step after suppression request
+        tickAccumulator = 0;
+        // Also reset the wasPaused flag to ensure the pause transition logic
+        // correctly re-evaluates the state on the next frame.
+        wasPaused = false;
+    }
 
     void Awake()
     {
@@ -57,6 +77,11 @@ public class BeltSimulationService : MonoBehaviour
         var bmc = FindBestObjectOfType<BuildModeController>();
         if (bmc != null)
             bmc.onExitBuildMode += OnBuildModeExit;
+
+        // Initialize tick timing reference
+        lastTickTime = Time.time;
+        lastTickDurationSec = 0f;
+        tickTimeInitialized = false;
     }
 
     void OnDisable()
@@ -81,18 +106,30 @@ public class BeltSimulationService : MonoBehaviour
             wasPaused = false;
             // prevent immediate processing on the same frame which causes visual jump
             skipNextStepAfterUnpause = true;
-            suppressPullOnceAfterUnpause = true;
+            suppressPullOnceAfterUnpausing = true;
         }
     }
 
     bool IsPaused()
     {
         if (!pauseWhileDragging) return false;
-        // Pause only while in Build AND actively dragging to preserve normal build-mode behavior
+        
         if (GameManager.Instance == null) return false;
         bool inBuild = GameManager.Instance.State == GameState.Build;
         bool dragging = BuildModeController.IsDragging;
-        return inBuild && dragging;
+        
+        if (preventGhostMovement)
+        {
+            // When preventing ghost movement: pause only while actively dragging
+            // This allows items to move normally in build mode when not dragging,
+            // but stops them from moving on ghost belts while dragging
+            return inBuild && dragging;
+        }
+        else
+        {
+            // Original behavior: pause entire build mode
+            return inBuild;
+        }
     }
 
     void HandlePauseTransitions()
@@ -124,12 +161,26 @@ public class BeltSimulationService : MonoBehaviour
             wasPaused = false;
             // prevent immediate processing on the same frame which causes visual jump
             skipNextStepAfterUnpause = true;
-            suppressPullOnceAfterUnpause = true;
+            suppressPullOnceAfterUnpausing = true;
         }
     }
 
     void OnTick()
     {
+        // Update tick duration to sync visuals
+        if (!tickTimeInitialized)
+        {
+            tickTimeInitialized = true;
+            lastTickTime = Time.time;
+            lastTickDurationSec = 0f;
+        }
+        else
+        {
+            var now = Time.time;
+            lastTickDurationSec = Mathf.Max(0f, now - lastTickTime);
+            lastTickTime = now;
+        }
+
         HandlePauseTransitions();
         // Do not accumulate ticks or step while paused
         if (IsPaused()) return;
@@ -210,8 +261,8 @@ public class BeltSimulationService : MonoBehaviour
         }
 
         // Clear one-time suppression flags at the end of a logical step
-        if (suppressPullOnceAfterUnpause)
-            suppressPullOnceAfterUnpause = false;
+        if (suppressPullOnceAfterUnpausing)
+            suppressPullOnceAfterUnpausing = false;
     }
 
     bool IsBeltLike(GridService.Cell c)
@@ -243,7 +294,7 @@ public class BeltSimulationService : MonoBehaviour
         if (!cell.hasItem)
         {
             // After unpausing, skip pulls for one logical step to avoid immediate chain advances
-            if (suppressPullOnceAfterUnpause)
+            if (suppressPullOnceAfterUnpausing)
                 return null;
 
             if (cell.type == GridService.CellType.Belt || cell.type == GridService.CellType.Junction)
@@ -356,7 +407,7 @@ public class BeltSimulationService : MonoBehaviour
     // Try to pull an item from neighbor into target cell. Returns true if a move occurred.
     bool TryPullFrom(Vector2Int target, Direction dir)
     {
-        if (suppressPullOnceAfterUnpause) return false;
+        if (suppressPullOnceAfterUnpausing) return false;
         if (!DirectionUtil.IsCardinal(dir)) return false;
         var fromPos = target + DirectionUtil.DirVec(dir);
         var from = grid.GetCell(fromPos);
@@ -405,7 +456,7 @@ public class BeltSimulationService : MonoBehaviour
             visuals.Remove(visualsRemoveBuffer[i]);
     }
 
-    // strict start-end move
+    // strict start-end move, but chain from current interpolated position if already moving
     void EnqueueVisualMove(Item item, Vector3 startWorld, Vector3 targetWorld)
     {
         if (item?.view == null || !smoothMovement)
@@ -416,29 +467,44 @@ public class BeltSimulationService : MonoBehaviour
             return;
         }
 
-        float baseDuration = moveDurationSeconds;
-        if (useGameTick)
+        // If we already have a visual move in progress for this item, start the next move from the current interpolated position
+        if (visuals.TryGetValue(item, out var existing) && existing != null && existing.view != null)
         {
-            try
-            {
-                var gt = FindBestObjectOfType<GameTick>();
-                if (gt != null)
-                {
-                    var field = typeof(GameTick).GetField("ticksPerSecond", BindingFlags.Instance | BindingFlags.Public);
-                    if (field != null)
-                    {
-                        var tps = (int)field.GetValue(gt);
-                        baseDuration = (1f / Mathf.Max(1, tps)) * Mathf.Max(1, ticksPerStep);
-                    }
-                }
-            }
-            catch { }
+            float tPrev = existing.duration <= 0f ? 1f : Mathf.Clamp01(existing.elapsed / existing.duration);
+            var current = Vector3.Lerp(existing.start, existing.end, tPrev);
+            startWorld = current;
+        }
+        else
+        {
+            // Otherwise, ensure start aligns with the current view position to avoid pops
+            if (item.view != null) startWorld = item.view.position;
         }
 
-        var duration = baseDuration * Mathf.Max(0.0001f, Vector3.Distance(startWorld, targetWorld));
-        // enforce a small minimum duration to avoid near-instant jumps on short distances
-        const float minVisualDuration = 0.05f; // seconds
+        // Determine duration
+        float duration;
+        if (useGameTick && tickTimeInitialized && lastTickDurationSec > 0f)
+        {
+            // Match visual movement to the logical step cadence
+            duration = Mathf.Max(0.01f, lastTickDurationSec * ticksPerStep);
+        }
+        else
+        {
+            duration = moveDurationSeconds;
+        }
+
+        // Keep perceived velocity roughly constant across distances
+        float distance = Vector3.Distance(startWorld, targetWorld);
+        if (grid != null && grid.CellSize > 0.0001f)
+        {
+            float baseDuration = duration; // duration for one cell
+            // scale linearly with distance so speed stays consistent
+            duration = baseDuration * (distance / grid.CellSize);
+        }
+
+        // Minimum duration to avoid instant jumps
+        const float minVisualDuration = 0.03f; // slightly lower to feel snappier but still smooth
         if (duration < minVisualDuration) duration = minVisualDuration;
+        
         var vs = new VisualState
         {
             view = item.view,
@@ -497,6 +563,10 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (grid == null) grid = GridService.Instance;
         if (grid == null || c == null) return;
+        
+        // Don't register ghost conveyors with the belt simulation
+        if (c.isGhost) return;
+        
         var cellPos = grid.WorldToCell(c.transform.position);
         lock (pendingActive)
         {
@@ -523,6 +593,13 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (grid == null) grid = GridService.Instance;
         if (grid == null) return;
+        
+        // Don't register cells during dragging to prevent ghost belt processing
+        if (GameManager.Instance != null && GameManager.Instance.State == GameState.Build && BuildModeController.IsDragging)
+        {
+            return;
+        }
+        
         lock (pendingActive)
         {
             pendingActive.Add(cellPos);
@@ -534,7 +611,7 @@ public class BeltSimulationService : MonoBehaviour
         if (item?.view == null || grid == null) return;
         var start = grid.CellToWorld(fromCell, item.view.position.z);
         var end = grid.CellToWorld(toCell, item.view.position.z);
-        // Use explicit start/end so visuals always animate from the source cell center to destination, avoiding inconsistencies.
+        // Use explicit start/end, but EnqueueVisualMove will chain from current interpolated position if needed
         EnqueueVisualMove(item, start, end);
     }
 
