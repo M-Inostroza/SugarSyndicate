@@ -10,9 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 2379343749919079794}
   - component: {fileID: 4201051881256447682}
-  - component: {fileID: 94467850820874292}
   m_Layer: 0
-  m_Name: Conveyor
+  m_Name: Splitter
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -77,7 +76,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 4
-  m_Sprite: {fileID: 8820978091977198850, guid: 956b8b3deffe51e49b5d1e360134a289, type: 3}
+  m_Sprite: {fileID: -1095093601407789611, guid: ae19b56453a7b164ea04dee803bbd595, type: 3}
   m_Color: {r: 0.5943396, g: 0.5943396, b: 0.5943396, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -88,17 +87,3 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
---- !u!114 &94467850820874292
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2678353271812311813}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f04786476a3de874980498a27dbe3e60, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  direction: 1
-  ticksPerCell: 10
