@@ -23,10 +23,18 @@ public class BeltSimulationService : MonoBehaviour
     [SerializeField, Min(1)] int ticksPerStep = 1;
     int tickAccumulator;
 
+    public enum VisualTimingMode { TickSynced, ConstantSpeed }
+
     [Header("Visuals")]
     [Tooltip("Enable smooth interpolation of item views between cells.")]
     [SerializeField] bool smoothMovement = true;
-    [Tooltip("Fallback movement duration (seconds) when not using GameTick-driven timing.")]
+    [Tooltip("When VisualTimingMode = TickSynced, each 1-cell move lasts exactly ticksPerStep / GameTick.ticksPerSecond seconds.")]
+    [SerializeField] VisualTimingMode visualTiming = VisualTimingMode.ConstantSpeed;
+    [Tooltip("When ConstantSpeed is active and matchTickRate = true, speed is auto set to ticksPerSecond/ticksPerStep cells/sec. Otherwise this manual value is used.")]
+    [SerializeField] bool matchTickRate = true;
+    [Tooltip("Manual visual speed in cells per second when ConstantSpeed and matchTickRate=false.")]
+    [SerializeField, Min(0.01f)] float visualCellsPerSecond = 6f;
+    [Tooltip("Fallback movement duration (seconds) when neither GameTick nor Grid are available.")]
     [SerializeField, Min(0f)] float moveDurationSeconds = 0.2f;
 
     [Header("Build Pause")]
@@ -43,7 +51,7 @@ public class BeltSimulationService : MonoBehaviour
     // When true, skip TryPullFrom operations for one step after unpausing to avoid front-of-chain jumps
     bool suppressPullOnceAfterUnpausing;
 
-    // Track tick timing to sync visual durations with logic
+    // Track tick timing to sync visual durations with logic (legacy jitter-prone approach kept for fallback only)
     float lastTickTime;
     float lastTickDurationSec;
     bool tickTimeInitialized;
@@ -78,7 +86,7 @@ public class BeltSimulationService : MonoBehaviour
         if (bmc != null)
             bmc.onExitBuildMode += OnBuildModeExit;
 
-        // Initialize tick timing reference
+        // Initialize tick timing reference (used only as a fallback)
         lastTickTime = Time.time;
         lastTickDurationSec = 0f;
         tickTimeInitialized = false;
@@ -112,24 +120,10 @@ public class BeltSimulationService : MonoBehaviour
 
     bool IsPaused()
     {
-        if (!pauseWhileDragging) return false;
-        
         if (GameManager.Instance == null) return false;
-        bool inBuild = GameManager.Instance.State == GameState.Build;
-        bool dragging = BuildModeController.IsDragging;
-        
-        if (preventGhostMovement)
-        {
-            // When preventing ghost movement: pause only while actively dragging
-            // This allows items to move normally in build mode when not dragging,
-            // but stops them from moving on ghost belts while dragging
-            return inBuild && dragging;
-        }
-        else
-        {
-            // Original behavior: pause entire build mode
-            return inBuild;
-        }
+        var s = GameManager.Instance.State;
+        // Pause item flow during Build and Delete modes
+        return s == GameState.Build || s == GameState.Delete;
     }
 
     void HandlePauseTransitions()
@@ -147,6 +141,7 @@ public class BeltSimulationService : MonoBehaviour
                     float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
                     var current = Vector3.Lerp(vs.start, vs.end, t);
                     vs.view.position = current;
+                    vs.queue.Clear();
                 }
                 visuals.Clear();
             }
@@ -167,7 +162,7 @@ public class BeltSimulationService : MonoBehaviour
 
     void OnTick()
     {
-        // Update tick duration to sync visuals
+        // Update tick duration timestamp (fallback only)
         if (!tickTimeInitialized)
         {
             tickTimeInitialized = true;
@@ -385,14 +380,42 @@ public class BeltSimulationService : MonoBehaviour
 
         var destPos = cellPos + DirectionUtil.DirVec(outDir);
         var dest = grid.GetCell(destPos);
-        if (dest == null || dest.hasItem || !IsBeltLike(dest))
+        if (dest == null)
+        {
+            return cellPos; // out of bounds; retry later
+        }
+        
+        // Special: machine intake happens before entering the cell
+        if (dest.type == GridService.CellType.Machine)
+        {
+            // Respect machine orientation: only accept if approaching from its input side
+            var approachFromVec = -DirectionUtil.DirVec(outDir); // vector pointing from machine toward current cell
+            PressMachine press;
+            if (PressMachine.TryGetAt(destPos, out press) && press != null)
+            {
+                if (press.AcceptsFromVec(approachFromVec))
+                {
+                    // Notify the machine and consume item without occupying the machine cell
+                    var theItem = cell.item;
+                    TryNotifyMachineAt(destPos, theItem);
+                    ConsumeItemAt(cellPos, theItem);
+                }
+                // Whether accepted or not, we do not move into the machine cell this step
+                return cellPos;
+            }
+            // No registered press found: treat as blocked
+            return cellPos;
+        }
+
+        if (dest.hasItem || !IsBeltLike(dest))
         {
             // can't move this step, keep active to retry later
             return cellPos;
         }
 
         // move logical item one cell
-        dest.item = cell.item;
+        var movedItem = cell.item;
+        dest.item = movedItem;
         dest.hasItem = true;
         cell.item = null;
         cell.hasItem = false;
@@ -434,9 +457,60 @@ public class BeltSimulationService : MonoBehaviour
         public Vector3 end;
         public float elapsed;
         public float duration;
+        public readonly Queue<Vector3> queue = new Queue<Vector3>();
     }
 
     readonly Dictionary<Item, VisualState> visuals = new Dictionary<Item, VisualState>();
+
+    float ComputeSegmentDuration(Vector3 a, Vector3 b)
+    {
+        // Deterministic visual timing
+        float distance = Vector3.Distance(a, b);
+        if (grid != null && grid.CellSize > 0.0001f)
+        {
+            if (visualTiming == VisualTimingMode.TickSynced)
+            {
+                int tps = GetGameTickRateOrDefault(15);
+                float perCell = ticksPerStep > 0 && tps > 0 ? (float)ticksPerStep / tps : moveDurationSeconds;
+                // scale linearly with distance for partial segments (should still be ~1 cell)
+                return Mathf.Max(1f / 120f, perCell * (distance / grid.CellSize));
+            }
+            else // ConstantSpeed
+            {
+                float cellsPerSec = visualCellsPerSecond;
+                if (matchTickRate)
+                {
+                    int tps = GetGameTickRateOrDefault(15);
+                    if (ticksPerStep > 0) cellsPerSec = (float)tps / ticksPerStep;
+                }
+                float sec = Mathf.Approximately(cellsPerSec, 0f) ? moveDurationSeconds : (distance / grid.CellSize) / Mathf.Max(0.01f, cellsPerSec);
+                return Mathf.Max(1f / 120f, sec);
+            }
+        }
+        // Fallback
+        return Mathf.Max(1f / 120f, moveDurationSeconds);
+    }
+
+    int GetGameTickRateOrDefault(int fallback)
+    {
+        try
+        {
+            // Try modern API first
+            var arr = UnityEngine.Object.FindObjectsByType<GameTick>(FindObjectsSortMode.None);
+            if (arr != null && arr.Length > 0 && arr[0] != null)
+            {
+                return Mathf.Clamp(arr[0].ticksPerSecond, 1, 1000);
+            }
+        }
+        catch { }
+        try
+        {
+            var gt = UnityEngine.Object.FindObjectOfType<GameTick>();
+            if (gt != null) return Mathf.Clamp(gt.ticksPerSecond, 1, 1000);
+        }
+        catch { }
+        return fallback;
+    }
 
     void UpdateVisuals(float dt)
     {
@@ -450,13 +524,28 @@ public class BeltSimulationService : MonoBehaviour
             vs.elapsed += dt;
             float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
             vs.view.position = Vector3.Lerp(vs.start, vs.end, t);
-            if (t >= 1f) visualsRemoveBuffer.Add(item);
+            if (t >= 1f)
+            {
+                if (vs.queue.Count > 0)
+                {
+                    // Start next queued segment from the current end point
+                    vs.start = vs.end;
+                    vs.end = vs.queue.Dequeue();
+                    vs.elapsed = 0f;
+                    vs.duration = ComputeSegmentDuration(vs.start, vs.end);
+                }
+                else
+                {
+                    visualsRemoveBuffer.Add(item);
+                }
+            }
         }
         for (int i = 0; i < visualsRemoveBuffer.Count; i++)
             visuals.Remove(visualsRemoveBuffer[i]);
     }
 
-    // strict start-end move, but chain from current interpolated position if already moving
+    // Enqueue a visual segment. If a segment is already in progress for this item, queue the next target
+    // so the item finishes to the current cell center and then turns, avoiding diagonal cuts at corners.
     void EnqueueVisualMove(Item item, Vector3 startWorld, Vector3 targetWorld)
     {
         if (item?.view == null || !smoothMovement)
@@ -467,51 +556,22 @@ public class BeltSimulationService : MonoBehaviour
             return;
         }
 
-        // If we already have a visual move in progress for this item, start the next move from the current interpolated position
         if (visuals.TryGetValue(item, out var existing) && existing != null && existing.view != null)
         {
-            float tPrev = existing.duration <= 0f ? 1f : Mathf.Clamp01(existing.elapsed / existing.duration);
-            var current = Vector3.Lerp(existing.start, existing.end, tPrev);
-            startWorld = current;
-        }
-        else
-        {
-            // Otherwise, ensure start aligns with the current view position to avoid pops
-            if (item.view != null) startWorld = item.view.position;
+            // Just queue the next target; keep current segment intact
+            existing.queue.Enqueue(targetWorld);
+            return;
         }
 
-        // Determine duration
-        float duration;
-        if (useGameTick && tickTimeInitialized && lastTickDurationSec > 0f)
-        {
-            // Match visual movement to the logical step cadence
-            duration = Mathf.Max(0.01f, lastTickDurationSec * ticksPerStep);
-        }
-        else
-        {
-            duration = moveDurationSeconds;
-        }
-
-        // Keep perceived velocity roughly constant across distances
-        float distance = Vector3.Distance(startWorld, targetWorld);
-        if (grid != null && grid.CellSize > 0.0001f)
-        {
-            float baseDuration = duration; // duration for one cell
-            // scale linearly with distance so speed stays consistent
-            duration = baseDuration * (distance / grid.CellSize);
-        }
-
-        // Minimum duration to avoid instant jumps
-        const float minVisualDuration = 0.03f; // slightly lower to feel snappier but still smooth
-        if (duration < minVisualDuration) duration = minVisualDuration;
-        
+        // Start a new segment from the current view position towards the target
+        var start = item.view != null ? item.view.position : startWorld;
         var vs = new VisualState
         {
             view = item.view,
-            start = startWorld,
+            start = start,
             end = targetWorld,
             elapsed = 0f,
-            duration = duration
+            duration = ComputeSegmentDuration(start, targetWorld)
         };
         visuals[item] = vs;
     }
@@ -611,8 +671,71 @@ public class BeltSimulationService : MonoBehaviour
         if (item?.view == null || grid == null) return;
         var start = grid.CellToWorld(fromCell, item.view.position.z);
         var end = grid.CellToWorld(toCell, item.view.position.z);
-        // Use explicit start/end, but EnqueueVisualMove will chain from current interpolated position if needed
+        // Enqueue one segment per logical step. Any subsequent step while still moving will be queued and started after this reaches its end.
         EnqueueVisualMove(item, start, end);
+    }
+
+    void TryNotifyMachineAt(Vector2Int cellPos, Item item)
+    {
+        if (grid == null) return;
+        var cell = grid.GetCell(cellPos);
+        if (cell == null || cell.type != GridService.CellType.Machine) return;
+        try
+        {
+            // Preferred: direct lookup
+            PressMachine press;
+            if (PressMachine.TryGetAt(cellPos, out press) && press != null)
+            {
+                press.OnItemArrived();
+                return;
+            }
+        }
+        catch { }
+        // Fallback: Physics2D lookup by point
+        try
+        {
+            var world = grid.CellToWorld(cellPos, 0f);
+            var cols = Physics2D.OverlapPointAll(world);
+            foreach (var col in cols)
+            {
+                var comp = col.GetComponentInParent<Component>();
+                if (comp == null) continue;
+                var maybePress = comp.GetComponent("PressMachine");
+                if (maybePress != null)
+                {
+                    try { maybePress.SendMessage("OnItemArrived", SendMessageOptions.DontRequireReceiver); } catch { }
+                    break;
+                }
+            }
+        }
+        catch { }
+    }
+
+    void ConsumeItemAt(Vector2Int cellPos, Item item)
+    {
+        try
+        {
+            // Log as requested
+            Debug.Log($"[Press] item entered press from {cellPos}");
+
+            // Remove visual with a short feedback tween end position matching current position (no move)
+            if (item?.view != null)
+            {
+                try { Destroy(item.view.gameObject); } catch { }
+            }
+            if (item != null)
+            {
+                visuals.Remove(item);
+            }
+            // Clear logical cell where the item was before the press
+            var c = grid?.GetCell(cellPos);
+            if (c != null)
+            {
+                c.item = null;
+                c.hasItem = false;
+            }
+        }
+        catch { }
     }
 
     void ReseedActiveFromGrid()

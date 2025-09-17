@@ -83,9 +83,7 @@ public class GridService : MonoBehaviour, IGridService
     // New API for the cell-based system
     public void SetBeltCell(Vector2Int c, Direction inA, Direction outA)
     {
-        if (!InBounds(c)) { Debug.LogWarning($"[Grid] SetBeltCell ignored: {c} out of bounds"); return; }
         var cell = GetCell(c);
-        if (cell == null) { Debug.LogWarning($"[Grid] SetBeltCell ignored: cell {c} is null"); return; }
         cell.type = CellType.Belt;
         cell.inA = inA; cell.outA = outA; cell.inB = Direction.None; cell.outB = Direction.None;
         // legacy bridge
@@ -94,19 +92,26 @@ public class GridService : MonoBehaviour, IGridService
         {
             // nothing to attach here; Conveyor placer will handle Unity component
         }
-        Debug.Log($"[Grid] SetBeltCell {c}: inA={inA} outA={outA}");
     }
 
     public void SetJunctionCell(Vector2Int c, Direction inA, Direction inB, Direction outA, Direction outB)
     {
-        if (!InBounds(c)) { Debug.LogWarning($"[Grid] SetJunctionCell ignored: {c} out of bounds"); return; }
         var cell = GetCell(c);
-        if (cell == null) { Debug.LogWarning($"[Grid] SetJunctionCell ignored: cell {c} is null"); return; }
         cell.type = CellType.Junction;
         cell.inA = inA; cell.inB = inB; cell.outA = outA; cell.outB = outB; cell.junctionToggle = 0;
         // legacy bridge
         cell.hasConveyor = true;
-        Debug.Log($"[Grid] SetJunctionCell {c}: inA={inA} inB={inB} outA={outA} outB={outB}");
+    }
+
+    public void SetMachineCell(Vector2Int c)
+    {
+        var cell = GetCell(c);
+        cell.type = CellType.Machine;
+        cell.inA = cell.inB = cell.outA = cell.outB = Direction.None;
+        cell.junctionToggle = 0;
+        cell.hasConveyor = false;
+        cell.conveyor = null;
+        cell.hasMachine = true;
     }
 
     public void ClearCell(Vector2Int c)
@@ -119,15 +124,12 @@ public class GridService : MonoBehaviour, IGridService
         cell.junctionToggle = 0;
         cell.hasConveyor = false;
         cell.conveyor = null;
-        Debug.Log($"[Grid] Cleared {c}");
     }
 
     // Legacy API used by Conveyor
     public void SetConveyor(Vector2Int c, Conveyor conveyor)
     {
-        if (!InBounds(c)) { Debug.LogWarning($"[Grid] SetConveyor ignored: {c} out of bounds"); return; }
         var cell = GetCell(c);
-        if (cell == null) { Debug.LogWarning($"[Grid] SetConveyor ignored: cell {c} is null"); return; }
         cell.conveyor = conveyor;
         cell.hasConveyor = conveyor != null;
         if (conveyor != null)
@@ -137,7 +139,6 @@ public class GridService : MonoBehaviour, IGridService
             cell.inA = DirectionUtil.Opposite(conveyor.direction);
             cell.outA = conveyor.direction;
         }
-        Debug.Log($"[Grid] SetConveyor {c} => {(conveyor != null ? "SET" : "CLEARED")} {(conveyor != null ? "dir=" + conveyor.direction.ToString() : string.Empty)}");
     }
 
     public Conveyor GetConveyor(Vector2Int c)

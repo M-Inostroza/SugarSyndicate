@@ -107,9 +107,9 @@ public class Spawner : MonoBehaviour
         var world = gs.CellToWorld(spawnedCell, z);
         if (itemPrefab != null)
         {
-            // pooled acquire
+            // pooled acquire for this specific prefab
             var parent = ContainerLocator.GetItemContainer();
-            var t = ItemViewPool.Get(world, Quaternion.identity, parent);
+            var t = ItemViewPool.Get(itemPrefab, world, Quaternion.identity, parent);
             item.view = t;
         }
 

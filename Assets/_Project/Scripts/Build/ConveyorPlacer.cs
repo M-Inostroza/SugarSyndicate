@@ -316,6 +316,8 @@ public class ConveyorPlacer : MonoBehaviour
             
             // Now, place the second belt to start the chain
             var nextCell = dragStartCell + step;
+            // Ensure no duplicate ghost at next cell
+            RemoveGhostAtCell(nextCell);
             if (PlaceBeltAtCell(nextCell, dirName))
             {
                 dragPath.Add(nextCell);
@@ -334,8 +336,43 @@ public class ConveyorPlacer : MonoBehaviour
         var dirNameNext = DirectionNameFromDelta(stepMove);
         if (dirNameNext == null) return;
 
+        // Handle backtracking: if moving into the previous cell in the path, pop the tail ghost instead of placing a new one
+        if (dragPath.Count >= 2)
+        {
+            var prevCell = dragPath[dragPath.Count - 2];
+            if (nextCellMove == prevCell)
+            {
+                // Remove current tail ghost
+                var tail = dragPath[dragPath.Count - 1];
+                RemoveGhostAtCell(tail);
+                dragPath.RemoveAt(dragPath.Count - 1);
+                // Orient the new tail toward the direction we're moving (optional for visual feedback)
+                UpdateBeltDirectionFast(prevCell, dirNameNext);
+                lastDragCell = prevCell;
+                return;
+            }
+        }
+
+        // If we moved back multiple cells at once (fast mouse), remove all tail cells until the new cell is the last
+        int idx = dragPath.IndexOf(nextCellMove);
+        if (idx != -1 && idx < dragPath.Count - 1)
+        {
+            for (int i = dragPath.Count - 1; i > idx; i--)
+            {
+                RemoveGhostAtCell(dragPath[i]);
+                dragPath.RemoveAt(i);
+            }
+            // Re-orient last to face toward next direction
+            UpdateBeltDirectionFast(dragPath[dragPath.Count - 1], dirNameNext);
+            lastDragCell = dragPath[dragPath.Count - 1];
+            return;
+        }
+
         // Ensure the previous belt now points toward this next step (rotate second-to-last)
         UpdateBeltDirectionFast(lastDragCell, dirNameNext);
+
+        // Avoid duplicating ghosts in the next cell
+        RemoveGhostAtCell(nextCellMove);
 
         // Place the next belt in the direction of movement
         if (PlaceBeltAtCell(nextCellMove, dirNameNext))
@@ -347,6 +384,37 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = nextCellMove;
     }
 
+    void RemoveGhostAtCell(Vector2Int cell)
+    {
+        try
+        {
+            if (ghostByCell.TryGetValue(cell, out var existing) && existing != null)
+            {
+                try { ghostOriginalColors.Remove(existing); } catch { }
+                try { Destroy(existing.gameObject); } catch { }
+                try { ghostByCell.Remove(cell); } catch { }
+            }
+            else if (miCellToWorld != null)
+            {
+                // Fallback: search colliders for any ghost conveyor at this cell
+                var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+                var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                foreach (var col in cols)
+                {
+                    var c = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
+                    if (c != null && c.isGhost)
+                    {
+                        try { ghostOriginalColors.Remove(c); } catch { }
+                        try { Destroy(c.gameObject); } catch { }
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    // Restore: delete-mode drag helper to mark cells along drag path
     void TryMarkCellFromDrag(Vector2Int cell)
     {
         if (lastDragCell.x == int.MinValue)
@@ -354,11 +422,18 @@ public class ConveyorPlacer : MonoBehaviour
             if (cell == dragStartCell) return;
             var deltaStart = cell - dragStartCell;
             Vector2Int stepStart = Mathf.Abs(deltaStart.x) >= Mathf.Abs(deltaStart.y) ? new Vector2Int(Math.Sign(deltaStart.x), 0) : new Vector2Int(0, Math.Sign(deltaStart.y));
-            var next = dragStartCell + stepStart; MarkCellForDeletion(dragStartCell); MarkCellForDeletion(next); lastDragCell = next; return;
+            var next = dragStartCell + stepStart;
+            MarkCellForDeletion(dragStartCell);
+            MarkCellForDeletion(next);
+            lastDragCell = next;
+            return;
         }
         if (cell == lastDragCell) return;
-        var delta = cell - lastDragCell; Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
-        var nextCell = lastDragCell + step; MarkCellForDeletion(nextCell); lastDragCell = nextCell;
+        var delta = cell - lastDragCell;
+        Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
+        var nextCell = lastDragCell + step;
+        MarkCellForDeletion(nextCell);
+        lastDragCell = nextCell;
     }
 
     void MarkCellForDeletion(Vector2Int cell)
