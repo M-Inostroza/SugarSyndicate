@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using System.Reflection;
 
 public enum BuildableType { None, Conveyor }
 
@@ -83,14 +84,28 @@ public class BuildModeController : MonoBehaviour
         }
     }
 
+    // End only the current preview without touching the global GameManager state
+    void EndCurrentPreview()
+    {
+        switch (current)
+        {
+            case BuildableType.Conveyor:
+                conveyorPlacer?.EndPreview();
+                break;
+        }
+        current = BuildableType.None;
+    }
+
     public void StartBuildMode(BuildableType type)
     {
-        if (current != BuildableType.None) CancelBuildMode();
-        current = type;
+        // Ensure only one building tool is active at a time by stopping other builders
+        TryStopMachineBuilder();
+        TryStopJunctionBuilder();
 
-        // Enter global Build state so systems can pause (e.g., belt sim)
-        if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Build);
-        var enterState = GameManager.Instance != null ? GameManager.Instance.State.ToString() : "<no GameManager>";
+        // If a preview is already active, just end that preview and start the new one
+        // without changing GameManager state. Global state is controlled elsewhere.
+        if (current != BuildableType.None) EndCurrentPreview();
+        current = type;
 
         switch (current)
         {
@@ -126,6 +141,31 @@ public class BuildModeController : MonoBehaviour
         // Return to Play state when leaving build mode
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Play);
         var exitState = GameManager.Instance != null ? GameManager.Instance.State.ToString() : "<no GameManager>";
+    }
+
+    // When switching to belt building, stop any active MachineBuilder session
+    void TryStopMachineBuilder()
+    {
+        try
+        {
+            var mb = FindAnyObjectByType<MachineBuilder>();
+            if (mb != null) mb.StopBuilding();
+        }
+        catch { }
+    }
+
+    void TryStopJunctionBuilder()
+    {
+        try
+        {
+            var jb = FindAnyObjectByType<JunctionBuilder>();
+            if (jb != null)
+            {
+                var mi = typeof(JunctionBuilder).GetMethod("StopBuilding", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (mi != null) mi.Invoke(jb, null);
+            }
+        }
+        catch { }
     }
 
     // UI helper to start conveyor build mode and immediately enable delete mode

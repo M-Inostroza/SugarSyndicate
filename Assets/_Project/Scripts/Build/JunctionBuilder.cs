@@ -86,11 +86,16 @@ public class JunctionBuilder : MonoBehaviour
 
     void StartBuild(Mode m)
     {
-        // Stop any active conveyor building to avoid overlap with drag handlers
-        TryCancelConveyorBuildMode();
+        // Only arm placement in Build mode
+        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Build)
+            return;
+
+        // Stop any active conveyor building to avoid overlap with drag handlers, without changing global state
+        TryEndConveyorPreviewWithoutState();
+        // Also stop any active press placement to ensure single-tool behavior
+        TryStopPressBuilder();
 
         mode = m;
-        TrySetGameState("Build");
         awaitingWorldClick = true;
         waitRelease = true;
         activationFrame = Time.frameCount;
@@ -99,6 +104,19 @@ public class JunctionBuilder : MonoBehaviour
 
     void Update()
     {
+        // Enforce global Build mode
+        if (GameManager.Instance == null || GameManager.Instance.State != GameState.Build)
+        {
+            if (awaitingWorldClick || placing)
+            {
+                CancelPreview();
+                awaitingWorldClick = false;
+                placing = false;
+                mode = Mode.None;
+            }
+            return;
+        }
+
         if (!awaitingWorldClick) return;
 
         // Ensure we don't accept the same click that triggered the button: wait for release and a new frame
@@ -110,12 +128,12 @@ public class JunctionBuilder : MonoBehaviour
             return;
         }
 
-        // Cancel flow
+        // Cancel flow: only end local preview; do not touch global state
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
         {
             CancelPreview();
             awaitingWorldClick = false;
-            TrySetGameState("Play");
+            mode = Mode.None;
             return;
         }
 
@@ -151,9 +169,17 @@ public class JunctionBuilder : MonoBehaviour
                 Commit(baseCell, dir);
                 placing = false;
                 awaitingWorldClick = false;
-                TrySetGameState("Play");
+                mode = Mode.None;
             }
         }
+    }
+
+    // Public API: stop any active junction placement session (called when switching tools)
+    public void StopBuilding()
+    {
+        awaitingWorldClick = false;
+        CancelPreview();
+        mode = Mode.None;
     }
 
     bool TryCellFromWorld(Vector3 world, out Vector2Int cell)
@@ -313,7 +339,8 @@ public class JunctionBuilder : MonoBehaviour
         facingVec = new Vector2Int(1, 0);
     }
 
-    void TryCancelConveyorBuildMode()
+    // End conveyor tool without altering global state (replaces old TryCancelConveyorBuildMode)
+    void TryEndConveyorPreviewWithoutState()
     {
         try
         {
@@ -324,10 +351,45 @@ public class JunctionBuilder : MonoBehaviour
                 var t = mb.GetType();
                 if (t.Name == "BuildModeController")
                 {
-                    var mi = t.GetMethod("CancelBuildMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (mi != null) mi.Invoke(mb, null);
+                    // Prefer the private EndCurrentPreview helper
+                    var miEnd = t.GetMethod("EndCurrentPreview", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (miEnd != null)
+                    {
+                        miEnd.Invoke(mb, null);
+                        break;
+                    }
+                    // Fallback: end placer preview and clear current
+                    var fiPlacer = t.GetField("conveyorPlacer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var placer = fiPlacer != null ? fiPlacer.GetValue(mb) : null;
+                    if (placer != null)
+                    {
+                        var mi = placer.GetType().GetMethod("EndPreview", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (mi != null) mi.Invoke(placer, null);
+                    }
+                    var fiCurrent = t.GetField("current", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (fiCurrent != null)
+                    {
+                        var enumType = fiCurrent.FieldType; // BuildableType
+                        object noneVal = null;
+                        try { noneVal = Enum.Parse(enumType, "None"); } catch { }
+                        if (noneVal != null) fiCurrent.SetValue(mb, noneVal);
+                    }
                     break;
                 }
+            }
+        }
+        catch { }
+    }
+
+    void TryStopPressBuilder()
+    {
+        try
+        {
+            var pressBuilder = FindAnyObjectByType<MachineBuilder>();
+            if (pressBuilder != null)
+            {
+                var mi = typeof(MachineBuilder).GetMethod("StopBuilding", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (mi != null) mi.Invoke(pressBuilder, null);
             }
         }
         catch { }
@@ -445,30 +507,6 @@ public class JunctionBuilder : MonoBehaviour
         if (d == new Vector2Int(-1, 0)) return 180f;
         if (d == new Vector2Int(0, -1)) return 270f;
         return 0f;
-    }
-
-    static void TrySetGameState(string name)
-    {
-        try
-        {
-            var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-            foreach (var mb in all)
-            {
-                if (mb != null && mb.GetType().Name == "GameManager")
-                {
-                    var t = mb.GetType();
-                    var mi = t.GetMethod("SetState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (mi != null)
-                    {
-                        var gsType = t.Assembly.GetType("GameState");
-                        object value = gsType != null ? Enum.Parse(gsType, name) : null;
-                        mi.Invoke(mb, new object[] { value });
-                    }
-                    break;
-                }
-            }
-        }
-        catch { }
     }
 
     static object TryCallStatic(string typeName, string methodName, object[] args)

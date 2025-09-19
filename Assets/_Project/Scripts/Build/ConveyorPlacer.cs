@@ -48,7 +48,6 @@ public class ConveyorPlacer : MonoBehaviour
     Vector2Int dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
     Vector3 dragStartWorld = Vector3.zero;
     bool isDragging = false;
-    bool onPointerDownCalled = false; // Track if OnPointerDown was called to prevent duplicate placement
     bool dragHasMoved = false; // Track if the mouse has moved to a new cell after starting a drag
 
     // Track the current dragged path to avoid overlapping and to support backtracking
@@ -104,7 +103,6 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
-        onPointerDownCalled = false; // Reset the flag
         deferredRegistrations.Clear();
         // Clear any leftover ghost visuals from previous sessions
         RestoreGhostVisuals();
@@ -121,7 +119,6 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
-        onPointerDownCalled = false; // Reset the flag
         deferredRegistrations.Clear();
         // ensure any ghost visuals are cleared
         RestoreGhostVisuals();
@@ -178,7 +175,6 @@ public class ConveyorPlacer : MonoBehaviour
         var res = miWorldToCell.Invoke(gridServiceInstance, new object[] { world });
         var cell = res is Vector2Int v ? v : new Vector2Int(0,0);
 
-        onPointerDownCalled = true; // Mark that OnPointerDown was called
         dragHasMoved = false; // Reset drag movement flag
 
         if (isDeleting)
@@ -205,7 +201,6 @@ public class ConveyorPlacer : MonoBehaviour
     {
         if (!isDragging) return false; 
         isDragging = false;
-        onPointerDownCalled = false; // Reset the flag
         
         if (isDeleting)
         {
@@ -279,7 +274,6 @@ public class ConveyorPlacer : MonoBehaviour
         }
         if (Input.GetMouseButtonUp(0) && isDragging)
         {
-            onPointerDownCalled = false; // Reset the flag on mouse up
             
             if (isDeleting)
             {
@@ -452,6 +446,7 @@ public class ConveyorPlacer : MonoBehaviour
             catch { }
 
             bool isLogicalBelt = false;
+            bool isMachine = false;
             try
             {
                 var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
@@ -462,46 +457,51 @@ public class ConveyorPlacer : MonoBehaviour
                     {
                         var t = cellObj.GetType();
                         var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                         if (fiHasConv != null)
                         {
                             try { isLogicalBelt = (bool)fiHasConv.GetValue(cellObj); } catch { isLogicalBelt = false; }
                         }
-                        if (!isLogicalBelt)
+                        if (!isLogicalBelt && fiType != null)
                         {
-                            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (fiType != null)
+                            try
                             {
-                                try
+                                var typeVal = fiType.GetValue(cellObj);
+                                if (typeVal != null)
                                 {
-                                    var typeVal = fiType.GetValue(cellObj);
-                                    if (typeVal != null)
-                                    {
-                                        var name = typeVal.ToString();
-                                        if (name == "Belt" || name == "Junction") isLogicalBelt = true;
-                                    }
+                                    var name = typeVal.ToString();
+                                    if (name == "Belt" || name == "Junction") isLogicalBelt = true;
+                                    if (name == "Machine") isMachine = true;
                                 }
-                                catch { }
                             }
+                            catch { }
                         }
                     }
                 }
             }
             catch { }
 
-            // If there is no conveyor (belt) visual/object and no logical belt, do not mark this cell for deletion.
-            if (conv == null && !isLogicalBelt)
+            // If there is no conveyor (belt) and no logical belt and no machine, do not mark this cell for deletion.
+            if (conv == null && !isLogicalBelt && !isMachine)
             {
-                // No belt to delete; silently ignore.
-                return;
+                // Check for a machine visual anyway as a fallback via physics
+                var mg = FindMachineAtCell(cell);
+                if (mg == null) return;
+                isMachine = true;
             }
 
             // mark for deletion
             deleteMarkedCells.Add(cell);
 
-            if (conv != null) { ApplyDeleteGhostToConveyor(conv); try { ghostByCell[cell] = conv; } catch { } }
+            if (conv != null)
+            {
+                ApplyDeleteGhostToConveyor(conv);
+                try { ghostByCell[cell] = conv; } catch { }
+            }
             else
             {
-                var go = FindBeltVisualAtCell(cell);
+                // Belt visual or machine visual
+                var go = isLogicalBelt ? FindBeltVisualAtCell(cell) : FindMachineAtCell(cell);
                 if (go != null) ApplyDeleteGhostToGameObject(go);
             }
         }
@@ -515,7 +515,7 @@ public class ConveyorPlacer : MonoBehaviour
         {
             try
             {
-                bool removedBelt = false;
+                bool removedSomething = false;
                 Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
                 if (conv == null)
                 {
@@ -540,39 +540,59 @@ public class ConveyorPlacer : MonoBehaviour
                     try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
                     try { Destroy(conv.gameObject); } catch { }
                     try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
-                    removedBelt = true;
+                    removedSomething = true;
                 }
                 else
                 {
-                    var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedBelt = true; }
+                    // Try machine visual first
+                    var mg = FindMachineAtCell(cell);
+                    if (mg != null)
+                    {
+                        try { Destroy(mg); } catch { }
+                        removedSomething = true;
+                        // Clear machine flag in grid
+                        try
+                        {
+                            var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+                            if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        // Try belt visual next
+                        var go = FindBeltVisualAtCell(cell);
+                        if (go != null)
+                        {
+                            try { genericGhostOriginalColors.Remove(go); } catch { }
+                            try { Destroy(go); } catch { }
+                            removedSomething = true;
+                        }
+                    }
                 }
 
-                // If we didn't find a visual conveyor, check for logical belt cells and clear them
-                if (!removedBelt)
+                // If we didn't find any visual, check logical grid for belt/junction/machine and clear them
+                if (!removedSomething)
                 {
                     try
                     {
                         var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
+                        var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
                         if (getCell != null)
                         {
                             var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
                             if (cellObj != null)
                             {
                                 var t = cellObj.GetType();
-                                var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                bool isLogicalBelt = false;
-                                if (fiHasConv != null) { try { isLogicalBelt = (bool)fiHasConv.GetValue(cellObj); } catch { isLogicalBelt = false; } }
-                                if (!isLogicalBelt)
+                                var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                if (fiType != null)
                                 {
-                                    var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (fiType != null)
+                                    var name = fiType.GetValue(cellObj)?.ToString();
+                                    if (name == "Belt" || name == "Junction" || name == "Machine")
                                     {
-                                        try { var typeVal = fiType.GetValue(cellObj); if (typeVal != null) { var name = typeVal.ToString(); if (name == "Belt" || name == "Junction") isLogicalBelt = true; } } catch { }
+                                        if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
+                                        removedSomething = true;
                                     }
-                                }
-                                if (isLogicalBelt)
-                                {
-                                    removedBelt = true;
                                 }
                             }
                         }
@@ -580,13 +600,11 @@ public class ConveyorPlacer : MonoBehaviour
                     catch { }
                 }
 
-                // Only clear items if we actually removed a belt at this cell (visual or logical)
-                if (removedBelt)
+                if (removedSomething)
                 {
                     TryClearItemAtCell(cell);
                 }
 
-                try { var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) }); if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell }); } catch { }
                 TryRegisterCellInBeltSim(cell);
                 deleteMarkedCells.Remove(cell);
             }
@@ -600,11 +618,11 @@ public class ConveyorPlacer : MonoBehaviour
     {
         try
         {
-            bool removedBelt = false;
+            bool removedSomething = false;
             Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
             if (conv == null)
             {
-                var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) }); 
+                var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
                 if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
             }
             if (conv == null)
@@ -618,53 +636,56 @@ public class ConveyorPlacer : MonoBehaviour
                 try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
                 try { Destroy(conv.gameObject); } catch { }
                 try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
-                removedBelt = true;
+                removedSomething = true;
             }
             else
             {
-                var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedBelt = true; }
+                // Machine visual first
+                var mg = FindMachineAtCell(cell);
+                if (mg != null) { try { Destroy(mg); } catch { } removedSomething = true; }
+                if (!removedSomething)
+                {
+                    // Belt visual
+                    var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedSomething = true; }
+                }
             }
 
-            // If no visual conveyor found, check logical grid for belt cell and treat as removed if present
-            if (!removedBelt)
+            if (!removedSomething)
             {
                 try
                 {
                     var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
+                    var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
                     if (getCell != null)
                     {
                         var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
                         if (cellObj != null)
                         {
                             var t = cellObj.GetType();
-                            var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            bool isLogicalBelt = false;
-                            if (fiHasConv != null) { try { isLogicalBelt = (bool)fiHasConv.GetValue(cellObj); } catch { isLogicalBelt = false; } }
-                            if (!isLogicalBelt)
+                            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            if (fiType != null)
                             {
-                                var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (fiType != null)
+                                var name = fiType.GetValue(cellObj)?.ToString();
+                                if (name == "Belt" || name == "Junction" || name == "Machine")
                                 {
-                                    try { var typeVal = fiType.GetValue(cellObj); if (typeVal != null) { var name = typeVal.ToString(); if (name == "Belt" || name == "Junction") isLogicalBelt = true; } } catch { }
+                                    if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
+                                    removedSomething = true;
                                 }
                             }
-                            if (isLogicalBelt) removedBelt = true;
                         }
                     }
                 }
                 catch { }
             }
 
-            // Only clear item if we've actually removed a belt here
-            if (removedBelt)
+            if (removedSomething)
             {
                 TryClearItemAtCell(cell);
             }
 
-            try { var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) }); if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell }); } catch { }
             TryRegisterCellInBeltSim(cell);
             MarkGraphDirtyIfPresent();
-            return true;
+            return removedSomething;
         }
         catch { return false; }
     }
@@ -706,6 +727,9 @@ public class ConveyorPlacer : MonoBehaviour
 
                     // Make preview ignore SpriteMasks so it remains visible while dragging
                     srs[i].maskInteraction = SpriteMaskInteraction.None;
+
+                    // Nudge ghosts above by a small sorting order offset
+                    srs[i].sortingOrder = orders[i] + ghostSortingOrderOffset;
                 }
                 ghostOriginalColors[conv] = new GhostData { spriteColors = orig, spriteOrders = orders, spriteMaskInteractions = masks, spawnedByPlacer = true, sortingGroupOrder = origOrder, sortingGroupLayerId = origLayerId }; return;
             }
@@ -1259,6 +1283,27 @@ public class ConveyorPlacer : MonoBehaviour
                     var conv = tr.GetComponent<Conveyor>() ?? tr.GetComponentInChildren<Conveyor>(true);
                     if (conv != null) return tr.gameObject;
                 }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    // Helper: find a machine GameObject (e.g., PressMachine) at a cell center
+    GameObject FindMachineAtCell(Vector2Int cell)
+    {
+        try
+        {
+            if (miCellToWorld == null || gridServiceInstance == null) return null;
+            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+            foreach (var col in cols)
+            {
+                if (col == null) continue;
+                var press = col.GetComponentInParent<PressMachine>();
+                if (press != null && !press.isGhost)
+                    return press.gameObject;
             }
         }
         catch { }

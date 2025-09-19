@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -122,6 +123,8 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (GameManager.Instance == null) return false;
         var s = GameManager.Instance.State;
+        // Respect the pauseWhileDragging toggle
+        if (!pauseWhileDragging) return false;
         // Pause item flow during Build and Delete modes
         return s == GameState.Build || s == GameState.Delete;
     }
@@ -349,8 +352,10 @@ public class BeltSimulationService : MonoBehaviour
             return null;
         }
 
-        // Determine output direction
+        // Determine output direction (with splitter improvements)
         Direction outDir = Direction.None;
+        Direction altOutDir = Direction.None; // Used only for splitter fallback if primary blocked
+        bool twoOutputs = false;
         if (cell.type == GridService.CellType.Belt)
         {
             outDir = cell.outA;
@@ -359,7 +364,10 @@ public class BeltSimulationService : MonoBehaviour
         {
             if (cell.outA != Direction.None && cell.outB != Direction.None)
             {
+                twoOutputs = true;
+                // primary based on toggle
                 outDir = (cell.junctionToggle & 1) == 0 ? cell.outA : cell.outB;
+                altOutDir = outDir == cell.outA ? cell.outB : cell.outA;
             }
             else
             {
@@ -380,6 +388,7 @@ public class BeltSimulationService : MonoBehaviour
 
         var destPos = cellPos + DirectionUtil.DirVec(outDir);
         var dest = grid.GetCell(destPos);
+
         if (dest == null)
         {
             return cellPos; // out of bounds; retry later
@@ -388,23 +397,72 @@ public class BeltSimulationService : MonoBehaviour
         // Special: machine intake happens before entering the cell
         if (dest.type == GridService.CellType.Machine)
         {
+            Debug.Log($"[BeltSimulationService] Item at {cellPos} trying to move to machine at {destPos}");
+            
             // Respect machine orientation: only accept if approaching from its input side
             var approachFromVec = -DirectionUtil.DirVec(outDir); // vector pointing from machine toward current cell
+            Debug.Log($"[BeltSimulationService] Approach vector: {approachFromVec}");
+            
             PressMachine press;
             if (PressMachine.TryGetAt(destPos, out press) && press != null)
             {
+                Debug.Log($"[BeltSimulationService] Found PressMachine at {destPos}. Checking if it accepts from {approachFromVec}");
+                
                 if (press.AcceptsFromVec(approachFromVec))
                 {
-                    // Notify the machine and consume item without occupying the machine cell
+                    // Double-check acceptance at notify time to avoid consuming while busy
                     var theItem = cell.item;
-                    TryNotifyMachineAt(destPos, theItem);
-                    ConsumeItemAt(cellPos, theItem);
+                    bool started = false;
+                    try { started = press.OnItemArrived(); } catch { started = false; }
+                    if (started)
+                    {
+                        Debug.Log($"[BeltSimulationService] PressMachine started processing. Consuming item at {cellPos}.");
+                        ConsumeItemAt(cellPos, theItem);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[BeltSimulationService] PressMachine reported busy at notify; keeping item at {cellPos}.");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"[BeltSimulationService] PressMachine rejected item from approach vector {approachFromVec}");
                 }
                 // Whether accepted or not, we do not move into the machine cell this step
                 return cellPos;
             }
+            else
+            {
+                Debug.LogWarning($"[BeltSimulationService] No PressMachine found at {destPos}");
+            }
             // No registered press found: treat as blocked
             return cellPos;
+        }
+
+        // Fallback: if the grid cell isn't marked as Machine but we do have a registered press there,
+        // treat it like a machine intake. This guards against rare registration ordering issues.
+        {
+            PressMachine press;
+            if (PressMachine.TryGetAt(destPos, out press) && press != null)
+            {
+                var approachFromVec = -DirectionUtil.DirVec(outDir);
+                Debug.Log($"[BeltSimulationService] Fallback intake: cell {destPos} not typed as Machine but press is registered. Approach {approachFromVec}");
+                if (press.AcceptsFromVec(approachFromVec))
+                {
+                    var theItem = cell.item;
+                    bool started = false;
+                    try { started = press.OnItemArrived(); } catch { started = false; }
+                    if (started)
+                    {
+                        ConsumeItemAt(cellPos, theItem);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[BeltSimulationService] PressMachine reported busy at notify; keeping item at {cellPos}.");
+                    }
+                }
+                return cellPos;
+            }
         }
 
         if (dest.hasItem || !IsBeltLike(dest))
@@ -422,6 +480,16 @@ public class BeltSimulationService : MonoBehaviour
 
         // schedule visual movement (visual system is separate)
         MoveView(dest.item, cellPos, destPos);
+
+        // Splitter alternation: if junction has exactly one input and two outputs, flip toggle after successful dispatch
+        if (cell.type == GridService.CellType.Junction && twoOutputs)
+        {
+            bool singleInput = (cell.inA == Direction.None) ^ (cell.inB == Direction.None); // XOR: true if exactly one input defined
+            if (singleInput)
+            {
+                cell.junctionToggle ^= 1; // alternate next output
+            }
+        }
 
         // Return destination so caller schedules it for next step
         return destPos;
@@ -505,7 +573,7 @@ public class BeltSimulationService : MonoBehaviour
         catch { }
         try
         {
-            var gt = UnityEngine.Object.FindObjectOfType<GameTick>();
+            var gt = UnityEngine.Object.FindFirstObjectByType<GameTick>();
             if (gt != null) return Mathf.Clamp(gt.ticksPerSecond, 1, 1000);
         }
         catch { }
@@ -655,7 +723,7 @@ public class BeltSimulationService : MonoBehaviour
         if (grid == null) return;
         
         // Don't register cells during dragging to prevent ghost belt processing
-        if (GameManager.Instance != null && GameManager.Instance.State == GameState.Build && BuildModeController.IsDragging)
+        if (preventGhostMovement && GameManager.Instance != null && GameManager.Instance.State == GameState.Build && BuildModeController.IsDragging)
         {
             return;
         }
@@ -677,38 +745,27 @@ public class BeltSimulationService : MonoBehaviour
 
     void TryNotifyMachineAt(Vector2Int cellPos, Item item)
     {
-        if (grid == null) return;
-        var cell = grid.GetCell(cellPos);
-        if (cell == null || cell.type != GridService.CellType.Machine) return;
+        Debug.Log($"[BeltSimulationService] Trying to notify machine at {cellPos} with item {item}");
+
         try
         {
-            // Preferred: direct lookup
             PressMachine press;
             if (PressMachine.TryGetAt(cellPos, out press) && press != null)
             {
+                Debug.Log($"[BeltSimulationService] Found PressMachine at {cellPos}. Calling OnItemArrived.");
                 press.OnItemArrived();
+                Debug.Log($"[BeltSimulationService] Successfully notified PressMachine at {cellPos}.");
                 return;
             }
-        }
-        catch { }
-        // Fallback: Physics2D lookup by point
-        try
-        {
-            var world = grid.CellToWorld(cellPos, 0f);
-            var cols = Physics2D.OverlapPointAll(world);
-            foreach (var col in cols)
+            else
             {
-                var comp = col.GetComponentInParent<Component>();
-                if (comp == null) continue;
-                var maybePress = comp.GetComponent("PressMachine");
-                if (maybePress != null)
-                {
-                    try { maybePress.SendMessage("OnItemArrived", SendMessageOptions.DontRequireReceiver); } catch { }
-                    break;
-                }
+                Debug.LogWarning($"[BeltSimulationService] PressMachine not found at {cellPos}.");
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[BeltSimulationService] Exception while notifying machine at {cellPos}: {ex.Message}");
+        }
     }
 
     void ConsumeItemAt(Vector2Int cellPos, Item item)
@@ -797,9 +854,9 @@ public class BeltSimulationService : MonoBehaviour
     }
 
     // Helper: find an instance of T using the newest available Unity API, falling back via reflection.
-    static T FindBestObjectOfType<T>() where T : Object
+    static T FindBestObjectOfType<T>() where T : UnityEngine.Object
     {
-        var objType = typeof(Object);
+        var objType = typeof(UnityEngine.Object);
         // Prefer generic static APIs if present. Use explicit method selection to avoid AmbiguousMatchException.
         string[] candidateNames = new[] { "FindAnyObjectByType", "FindFirstObjectByType", "FindObjectOfType" };
         foreach (var name in candidateNames)
@@ -832,6 +889,6 @@ public class BeltSimulationService : MonoBehaviour
         }
         catch { }
 
-        return null;
+        return default(T);
     }
 }

@@ -20,6 +20,8 @@ public class PressMachine : MonoBehaviour
     [Header("Processing")]
     [Tooltip("How many seconds are required to process one input into an output.")]
     [SerializeField, Min(0f)] float processingSeconds = 1.0f;
+    [Tooltip("If true, the press advances processing on GameTick; otherwise it uses frame time (Update).")]
+    [SerializeField] bool useGameTickForProcessing = true;
 
     [NonSerialized] public bool isGhost = false; // builder sets this before enabling
 
@@ -30,26 +32,78 @@ public class PressMachine : MonoBehaviour
 
     // State
     bool busy;               // true after accepting an input until output successfully spawns
-    float remainingTime;     // countdown while processing
+    float remainingTime;     // countdown while processing (seconds)
     bool waitingToOutput;    // processing done; waiting for free output cell to spawn
+
+    // NEW: track if an input was actually accepted for this cycle
+    bool hasInputThisCycle;
 
     void Awake()
     {
+        Debug.Log($"[PressMachine] Awake called for {gameObject.name} at position {transform.position}");
+
         if (!isGhost && itemPrefab != null)
         {
-            // Try to prewarm pool if present (reflection)
             TryCallStatic("ItemViewPool", "Ensure", new object[] { itemPrefab, poolPrewarm });
         }
 
-        if (isGhost) return; // skip grid registration for ghost previews
+        if (isGhost) return;
+
         TryRegisterAsMachineAndSnap();
+
+        // Fix: Prevent double registration by checking if already registered
+        if (s_byCell.ContainsKey(cell))
+        {
+            Debug.LogWarning($"[PressMachine] Cell {cell} already registered. Removing old registration and registering this one.");
+            s_byCell.Remove(cell);
+        }
+
         s_byCell[cell] = this;
         Debug.Log($"[PressMachine] Registered at cell {cell} facing {OutputVec}");
+    }
+
+    void OnEnable()
+    {
+        // Optionally drive processing with GameTick so it lines up with belt steps
+        if (useGameTickForProcessing)
+        {
+            try { GameTick.OnTickStart += OnTick; } catch { }
+        }
+    }
+
+    void OnDisable()
+    {
+        if (useGameTickForProcessing)
+        {
+            try { GameTick.OnTickStart -= OnTick; } catch { }
+        }
     }
 
     void OnDestroy()
     {
         try { if (s_byCell.ContainsKey(cell) && s_byCell[cell] == this) s_byCell.Remove(cell); } catch { }
+        // Clear grid logical cell if this press is being deleted
+        try
+        {
+            var grid = FindGridService();
+            if (grid != null)
+            {
+                var t = grid.GetType();
+                var miClear = t.GetMethod("ClearCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
+                if (miClear != null) miClear.Invoke(grid, new object[] { cell });
+                var miGetCell = t.GetMethod("GetCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
+                if (miGetCell != null)
+                {
+                    var cellObj = miGetCell.Invoke(grid, new object[] { cell });
+                    if (cellObj != null)
+                    {
+                        var fiHasMachine = cellObj.GetType().GetField("hasMachine", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (fiHasMachine != null) fiHasMachine.SetValue(cellObj, false);
+                    }
+                }
+            }
+        }
+        catch { }
     }
 
     public static bool TryGetAt(Vector2Int c, out PressMachine press)
@@ -57,56 +111,21 @@ public class PressMachine : MonoBehaviour
 
     public bool AcceptsFromVec(Vector2Int approachFromVec)
     {
-        if (approachFromVec != InputVec) return false;
-        if (busy) return false; // do not accept new input while working or waiting to output
+        Debug.Log($"[PressMachine] AcceptsFromVec called for approach vector {approachFromVec} at cell {cell}");
 
-        // Optional: only accept if output cell currently looks free and usable
-        var grid = FindGridService();
-        if (grid == null) return true; // be permissive if grid not found
-        var outCellPos = cell + OutputVec;
-
-        try
+        // Must approach from the input side
+        if (approachFromVec != InputVec)
         {
-            var t = grid.GetType();
-            var miInBounds = t.GetMethod("InBounds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
-            var miGetCell = t.GetMethod("GetCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
-            if (miInBounds != null && miGetCell != null)
-            {
-                bool inBounds = (bool)miInBounds.Invoke(grid, new object[] { outCellPos });
-                if (!inBounds) return false;
-                var cellObj = miGetCell.Invoke(grid, new object[] { outCellPos });
-                if (cellObj == null) return false;
-                // reflect fields: hasItem, type, hasConveyor, conveyor
-                var typeField = cellObj.GetType().GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                var hasItemField = cellObj.GetType().GetField("hasItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                var hasConveyorField = cellObj.GetType().GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                var conveyorField = cellObj.GetType().GetField("conveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-                bool hasItem = hasItemField != null && (bool)hasItemField.GetValue(cellObj);
-                if (hasItem) return false; // must be empty now
-
-                // Belt-like check to ensure it's an output-capable cell
-                bool beltLike = false;
-                if (typeField != null)
-                {
-                    var typeVal = typeField.GetValue(cellObj);
-                    var enumType = typeVal.GetType();
-                    string name = Enum.GetName(enumType, typeVal);
-                    // enum names: Empty, Belt, Junction, Machine
-                    beltLike = name == "Belt" || name == "Junction";
-                }
-                if (!beltLike && hasConveyorField != null)
-                {
-                    beltLike = (bool)hasConveyorField.GetValue(cellObj);
-                }
-                if (!beltLike && conveyorField != null)
-                {
-                    beltLike = conveyorField.GetValue(cellObj) != null;
-                }
-                return beltLike;
-            }
+            Debug.LogWarning($"[PressMachine] Rejecting input: approach vector {approachFromVec} does not match InputVec {InputVec}");
+            return false;
         }
-        catch { }
+
+        // Do not accept if already processing or waiting to output
+        if (busy)
+        {
+            Debug.LogWarning($"[PressMachine] Rejecting input: machine is busy");
+            return false;
+        }
         return true;
     }
 
@@ -135,6 +154,23 @@ public class PressMachine : MonoBehaviour
 
     object FindGridService()
     {
+        // 1) Prefer GridService.Instance to match BeltSimulationService
+        try
+        {
+            var type = FindTypeByName("GridService");
+            if (type != null)
+            {
+                var prop = type.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (prop != null)
+                {
+                    var inst = prop.GetValue(null, null) as MonoBehaviour;
+                    if (inst != null) return inst;
+                }
+            }
+        }
+        catch { }
+
+        // 2) Fallback: search scene objects
         try
         {
             var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
@@ -144,70 +180,172 @@ public class PressMachine : MonoBehaviour
         return null;
     }
 
-    // Called by the belt sim when an item finishes moving toward this machine from its input side
-    public void OnItemArrived()
+    // Return true if the item was accepted and processing started
+    public bool OnItemArrived()
     {
+        Debug.Log($"[PressMachine] OnItemArrived called for cell {cell}");
+
         if (busy)
         {
-            // Shouldn't happen as AcceptsFromVec prevents it, but guard anyway
-            return;
+            Debug.LogWarning($"[PressMachine] OnItemArrived ignored because machine is busy.");
+            return false;
         }
-        // Start processing
+
         busy = true;
+        hasInputThisCycle = true;
         waitingToOutput = false;
         remainingTime = Mathf.Max(0f, processingSeconds);
-        Debug.Log($"[PressMachine] Input accepted at {cell}. Processing for {remainingTime:0.###} sec...");
+        Debug.Log($"[PressMachine] Input accepted at {cell}. Processing for {remainingTime:0.###} sec... busy={busy}, hasInputThisCycle={hasInputThisCycle}");
+        return true;
+    }
+
+    void OnTick()
+    {
+        if (!useGameTickForProcessing) return;
+        if (!busy) return;
+        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        StepProcessing(GetTickDeltaSeconds());
     }
 
     void Update()
     {
+        // If we drive processing from GameTick, only try to spawn when waiting to output
+        if (useGameTickForProcessing)
+        {
+            if (!busy) return;
+            if (GameManager.Instance == null || GameManager.Instance.State != GameState.Play) return;
+            if (waitingToOutput)
+            {
+                // Only produce output if we actually accepted an input this cycle
+                if (hasInputThisCycle && TryProduceOutputNow())
+                {
+                    busy = false;
+                    waitingToOutput = false;
+                    remainingTime = 0f;
+                    hasInputThisCycle = false;
+                    Debug.Log($"[PressMachine] Cycle complete at {cell}");
+                }
+            }
+            return;
+        }
+
+        // Frame-time processing path
+        if (GameManager.Instance == null || GameManager.Instance.State != GameState.Play)
+        {
+            if (busy) Debug.Log($"[PressMachine] Skipping update - not in Play mode. Current state: {GameManager.Instance?.State}");
+            return;
+        }
+
         if (!busy) return;
+
+        StepProcessing(Time.deltaTime);
+    }
+
+    void StepProcessing(float dt)
+    {
+        Debug.Log($"[PressMachine] StepProcessing dt={dt:0.###} - busy={busy}, waitingToOutput={waitingToOutput}, remainingTime={remainingTime:0.###}, hasInputThisCycle={hasInputThisCycle}");
 
         if (!waitingToOutput)
         {
-            remainingTime -= Time.deltaTime;
+            remainingTime -= Mathf.Max(0f, dt);
             if (remainingTime <= 0f)
             {
                 waitingToOutput = true; // finished working time; now try to spawn
+                Debug.Log($"[PressMachine] Processing complete, now waiting to output at cell {cell}");
             }
         }
 
         if (waitingToOutput)
         {
-            // Try to produce the output now; if it fails (blocked), keep trying each frame
-            if (TryProduceOutputNow())
+            // Only produce output if we actually accepted an input this cycle
+            if (hasInputThisCycle && TryProduceOutputNow())
             {
                 busy = false;
                 waitingToOutput = false;
                 remainingTime = 0f;
+                hasInputThisCycle = false;
                 Debug.Log($"[PressMachine] Cycle complete at {cell}");
             }
         }
     }
 
+    float GetTickDeltaSeconds()
+    {
+        // Compute 1 / ticksPerSecond (fallback to 1/15)
+        int tps = 15;
+        try
+        {
+            var gt = FindFirstObjectByType<GameTick>();
+            if (gt != null) tps = Mathf.Clamp(gt.ticksPerSecond, 1, 1000);
+        }
+        catch { }
+        return 1f / Mathf.Max(1, tps);
+    }
+
     bool TryProduceOutputNow()
     {
-        if (itemPrefab == null) { Debug.LogWarning("[PressMachine] No itemPrefab set; cannot produce."); return false; }
+        if (itemPrefab == null) 
+        { 
+            Debug.LogWarning("[PressMachine] No itemPrefab set; cannot produce."); 
+            return false; 
+        }
+
         // Resolve GridService and BeltSimulationService via reflection
-        var grid = FindGridService(); if (grid == null) { Debug.LogWarning("[PressMachine] GridService not found for output."); return false; }
-        var belt = FindSingletonByTypeName("BeltSimulationService"); if (belt == null) { Debug.LogWarning("[PressMachine] BeltSimulationService not found."); return false; }
+        var grid = FindGridService(); 
+        if (grid == null) 
+        { 
+            Debug.LogWarning("[PressMachine] GridService not found for output."); 
+            return false; 
+        }
+
+        var belt = FindSingletonByTypeName("BeltSimulationService"); 
+        if (belt == null) 
+        { 
+            Debug.LogWarning("[PressMachine] BeltSimulationService not found."); 
+            return false; 
+        }
 
         var beltType = belt.GetType();
         var trySpawn = beltType.GetMethod("TrySpawnItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (trySpawn == null) { Debug.LogWarning("[PressMachine] TrySpawnItem not found on BeltSimulationService."); return false; }
+        if (trySpawn == null) 
+        { 
+            Debug.LogWarning("[PressMachine] TrySpawnItem not found on BeltSimulationService."); 
+            return false; 
+        }
 
         // Create Item instance via reflection
-        var itemType = FindTypeByName("Item");
-        if (itemType == null) { Debug.LogWarning("[PressMachine] Item type not found."); return false; }
+        var itemType = FindTypeByName("BeltSimulationService+Item") ?? FindTypeByName("GridService+Item") ?? FindTypeByName("Item");
+        if (itemType == null) 
+        { 
+            Debug.LogWarning("[PressMachine] Item type not found."); 
+            return false; 
+        }
+
         var itemObj = Activator.CreateInstance(itemType);
+        Debug.Log($"[PressMachine] Created item of type {itemType.Name}.");
 
         // Compute out cell
         var outCell = cell + OutputVec;
+        Debug.Log($"[PressMachine] Output cell calculated as {outCell}.");
 
         // Call TrySpawnItem(outCell, item)
         bool spawned = false;
-        try { spawned = (bool)trySpawn.Invoke(belt, new object[] { outCell, itemObj }); } catch (Exception ex) { Debug.LogWarning($"[PressMachine] TrySpawnItem threw: {ex.Message}"); spawned = false; }
-        if (!spawned) { return false; }
+        try 
+        { 
+            spawned = (bool)trySpawn.Invoke(belt, new object[] { outCell, itemObj }); 
+            Debug.Log($"[PressMachine] TrySpawnItem result: {spawned} for cell {outCell}."); 
+        } 
+        catch (Exception ex) 
+        { 
+            Debug.LogWarning($"[PressMachine] TrySpawnItem threw: {ex.Message}"); 
+            spawned = false; 
+        }
+
+        if (!spawned) 
+        { 
+            Debug.LogWarning($"[PressMachine] Failed to spawn item at {outCell}."); 
+            return false; 
+        }
 
         // Attach view to item using pool if available
         Transform view = null;
@@ -215,6 +353,8 @@ public class PressMachine : MonoBehaviour
         var gridType = grid.GetType();
         var miCellToWorld = gridType.GetMethod("CellToWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(float) }, null);
         var world = miCellToWorld != null ? (Vector3)miCellToWorld.Invoke(grid, new object[] { outCell, itemPrefab.transform.position.z }) : transform.position;
+
+        Debug.Log($"[PressMachine] World position for output cell: {world}.");
 
         // Prefer new overload ItemViewPool.Get(GameObject, Vector3, Quaternion, Transform)
         Transform TryGetFromPoolWithPrefab()
@@ -242,7 +382,14 @@ public class PressMachine : MonoBehaviour
             var poolGetLegacy = FindStaticMethod("ItemViewPool", "Get", new Type[] { typeof(Vector3), typeof(Quaternion), typeof(Transform) });
             if (poolGetLegacy != null)
             {
-                try { view = poolGetLegacy.Invoke(null, new object[] { world, Quaternion.identity, parent }) as Transform; } catch { view = null; }
+                try 
+                { 
+                    view = poolGetLegacy.Invoke(null, new object[] { world, Quaternion.identity, parent }) as Transform; 
+                } 
+                catch 
+                { 
+                    view = null; 
+                }
             }
         }
         if (view == null)
@@ -251,11 +398,21 @@ public class PressMachine : MonoBehaviour
             view = go.transform;
         }
 
+        Debug.Log($"[PressMachine] View attached to item at position {view?.position}.");
+
         // Assign item.view
         var fiView = itemType.GetField("view", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         if (fiView != null)
         {
-            try { fiView.SetValue(itemObj, view); } catch { }
+            try 
+            { 
+                fiView.SetValue(itemObj, view); 
+                Debug.Log($"[PressMachine] View assigned to item."); 
+            } 
+            catch 
+            { 
+                Debug.LogWarning($"[PressMachine] Failed to assign view to item."); 
+            }
         }
         if (view != null) view.position = world;
         return true;

@@ -26,8 +26,18 @@ public class CameraDragPan : MonoBehaviour
     [Tooltip("Multiplier for drag amount. 1 means exact 1:1 world drag distance.")]
     [SerializeField, Min(0.01f)] float dragSensitivity = 1f;
 
-    Vector3 lastMouseWorld;
+    [Header("Smoothing")]
+    [Tooltip("Smooth camera towards drag target to avoid jitter.")]
+    [SerializeField] bool smooth = true;
+    [SerializeField, Range(0.01f, 0.3f)] float smoothTime = 0.08f;
+
+    // Drag anchors
+    Vector3 dragOriginWorld;  // world position under cursor when drag started (on z=0 plane)
+    Vector3 camOriginPos;     // camera position when drag started
+
+    // State
     bool dragging;
+    Vector3 smoothVelocity;   // for SmoothDamp
 
     void Awake()
     {
@@ -57,19 +67,26 @@ public class CameraDragPan : MonoBehaviour
         if (Input.GetMouseButtonDown(btn))
         {
             dragging = true;
-            lastMouseWorld = GetMouseWorldOnPlane(targetCamera);
+            dragOriginWorld = GetMouseWorldOnPlane(targetCamera);
+            camOriginPos = targetCamera.transform.position;
+            smoothVelocity = Vector3.zero; // reset smoothing for a crisp start
         }
         else if (dragging && Input.GetMouseButton(btn))
         {
-            var cur = GetMouseWorldOnPlane(targetCamera);
-            var delta = cur - lastMouseWorld; // how much the world moved under the cursor
-            if (delta.sqrMagnitude > 0f)
+            var curWorld = GetMouseWorldOnPlane(targetCamera);
+            var delta = curWorld - dragOriginWorld; // anchored world delta since drag start
+            var desired = new Vector3(
+                camOriginPos.x - delta.x * dragSensitivity,
+                camOriginPos.y - delta.y * dragSensitivity,
+                camOriginPos.z);
+
+            if (smooth)
             {
-                // move camera opposite to mouse delta
-                var pos = targetCamera.transform.position;
-                pos -= delta * dragSensitivity;
-                targetCamera.transform.position = pos;
-                lastMouseWorld = cur;
+                targetCamera.transform.position = Vector3.SmoothDamp(targetCamera.transform.position, desired, ref smoothVelocity, smoothTime);
+            }
+            else
+            {
+                targetCamera.transform.position = desired;
             }
         }
         else if (Input.GetMouseButtonUp(btn))
@@ -87,7 +104,7 @@ public class CameraDragPan : MonoBehaviour
         float camZ = cam.transform.position.z;
         mp.z = planeZ - camZ; // distance along camera forward to hit z=0 plane
         var world = cam.ScreenToWorldPoint(mp);
-        world.z = cam.transform.position.z; // keep camera's z for relative deltas
+        world.z = 0f; // return a point on the plane
         return world;
     }
 

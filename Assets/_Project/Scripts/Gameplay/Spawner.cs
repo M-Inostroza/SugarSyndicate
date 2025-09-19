@@ -45,6 +45,8 @@ public class Spawner : MonoBehaviour
     void OnTick()
     {
         if (!running) return;
+        // Pause spawning while not in Play (e.g. Build/Delete modes)
+        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
         tickCounter++;
         if (tickCounter >= intervalTicks)
         {

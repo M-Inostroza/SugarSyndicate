@@ -29,6 +29,18 @@ public class MachineBuilder : MonoBehaviour
 
     void Update()
     {
+        // Enforce global Build state: if not in Build, cancel any pending placement and ignore input
+        if (GameManager.Instance == null || GameManager.Instance.State != GameState.Build)
+        {
+            if (awaitingWorldClick || placing)
+            {
+                CancelPreview();
+                awaitingWorldClick = false;
+                placing = false;
+            }
+            return;
+        }
+
         if (!awaitingWorldClick) return;
 
         // Ensure we don't accept the same click that triggered the button: wait for release and a new frame
@@ -40,12 +52,11 @@ public class MachineBuilder : MonoBehaviour
             return;
         }
 
-        // Cancel flow
+        // Cancel flow -> end only local preview; DO NOT change GameManager state
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
         {
             CancelPreview();
             awaitingWorldClick = false;
-            TrySetGameState("Play");
             return;
         }
 
@@ -76,12 +87,24 @@ public class MachineBuilder : MonoBehaviour
 
             if (Input.GetMouseButtonUp(0))
             {
+                // Commit the press but STAY in Build mode so user can place another
                 Commit(baseCell, dir);
-                placing = false;
-                awaitingWorldClick = false;
-                TrySetGameState("Play");
+                placing = false; // Clear for next placement
+                // Prepare for next placement: require mouse release + new click
+                waitRelease = true;
+                activationFrame = Time.frameCount;
+                awaitingWorldClick = true; // remain in build loop
             }
         }
+    }
+
+    // Public API: stop any active press placement session (called when switching tools)
+    public void StopBuilding()
+    {
+        awaitingWorldClick = false;
+        placing = false;
+        // Clear any ghost preview safely
+        CancelPreview();
     }
 
     void CacheGrid()
@@ -108,11 +131,14 @@ public class MachineBuilder : MonoBehaviour
     // UI Button-friendly helper: drag this component into a Button.onClick and pick BuildPress
     public void BuildPress()
     {
-        // Stop any active conveyor building to avoid overlap
-        TryCancelConveyorBuildMode();
+        // End any active conveyor preview WITHOUT changing global state
+        TryEndConveyorPreviewWithoutState();
 
-        // Enter build mode and wait for the next world click to place
-        TrySetGameState("Build");
+        // Only arm placement if currently in Build mode
+        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Build)
+            return;
+
+        // Wait for the next world click to place
         awaitingWorldClick = true;
         waitRelease = true;
         activationFrame = Time.frameCount;
@@ -121,7 +147,7 @@ public class MachineBuilder : MonoBehaviour
     // Back-compatible alias
     public void BuildPressAtMouse() => BuildPress();
 
-    void TryCancelConveyorBuildMode()
+    void TryEndConveyorPreviewWithoutState()
     {
         try
         {
@@ -132,8 +158,31 @@ public class MachineBuilder : MonoBehaviour
                 var t = mb.GetType();
                 if (t.Name == "BuildModeController")
                 {
-                    var mi = t.GetMethod("CancelBuildMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (mi != null) mi.Invoke(mb, null);
+                    // Prefer calling the private EndCurrentPreview() helper we added earlier
+                    var miEnd = t.GetMethod("EndCurrentPreview", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (miEnd != null)
+                    {
+                        miEnd.Invoke(mb, null);
+                        break;
+                    }
+
+                    // Fallback: try to grab conveyorPlacer field and call EndPreview directly
+                    var fiPlacer = t.GetField("conveyorPlacer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var placer = fiPlacer != null ? fiPlacer.GetValue(mb) : null;
+                    if (placer != null)
+                    {
+                        var mi = placer.GetType().GetMethod("EndPreview", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (mi != null) mi.Invoke(placer, null);
+                    }
+                    // Also attempt to set current = BuildableType.None so Update() doesn't keep driving the placer
+                    var fiCurrent = t.GetField("current", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (fiCurrent != null)
+                    {
+                        var enumType = fiCurrent.FieldType; // BuildableType
+                        object noneVal = null;
+                        try { noneVal = System.Enum.Parse(enumType, "None"); } catch { }
+                        if (noneVal != null) fiCurrent.SetValue(mb, noneVal);
+                    }
                     break;
                 }
             }
@@ -198,13 +247,57 @@ public class MachineBuilder : MonoBehaviour
 
     void Commit(Vector2Int cell, Vector2Int outputDir)
     {
+        Debug.Log($"[MachineBuilder] Committing PressMachine at cell {cell} facing {outputDir}");
+
         // Destroy ghost and place real prefab with same orientation
         Vector3 pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
         if (ghostGO != null) Destroy(ghostGO);
+
+        // Ensure the target cell is not a belt anymore (remove any conveyor and clear logical belt)
+        TryRemoveBeltAtCell(cell);
+
         var go = Instantiate(pressMachinePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
+        Debug.Log($"[MachineBuilder] Instantiated PressMachine at position {pos}");
+
         var press = go.GetComponent<PressMachine>();
-        if (press != null) press.facingVec = outputDir; // Awake will register
+        if (press != null)
+        {
+            press.facingVec = outputDir; // Awake will register
+            Debug.Log($"[MachineBuilder] PressMachine facing set to {outputDir}");
+        }
+
         ClearPreviewState();
+    }
+
+    void TryRemoveBeltAtCell(Vector2Int cell)
+    {
+        if (grid == null) { CacheGrid(); if (grid == null) return; }
+        try
+        {
+            var t = grid.GetType();
+            var miGetConv = t.GetMethod("GetConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
+            var miSetConv = t.GetMethod("SetConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(Conveyor) }, null);
+            var miClearCell = t.GetMethod("ClearCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
+
+            Conveyor existing = null;
+            if (miGetConv != null)
+            {
+                try { existing = miGetConv.Invoke(grid, new object[] { cell }) as Conveyor; } catch { existing = null; }
+            }
+            if (existing != null)
+            {
+                try { Destroy(existing.gameObject); } catch { }
+            }
+            if (miSetConv != null)
+            {
+                try { miSetConv.Invoke(grid, new object[] { cell, null }); } catch { }
+            }
+            if (miClearCell != null)
+            {
+                try { miClearCell.Invoke(grid, new object[] { cell }); } catch { }
+            }
+        }
+        catch { }
     }
 
     void CancelPreview()
@@ -232,26 +325,7 @@ public class MachineBuilder : MonoBehaviour
 
     static void TrySetGameState(string name)
     {
-        try
-        {
-            var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-            foreach (var mb in all)
-            {
-                if (mb != null && mb.GetType().Name == "GameManager")
-                {
-                    var t = mb.GetType();
-                    var mi = t.GetMethod("SetState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (mi != null)
-                    {
-                        var gsType = t.Assembly.GetType("GameState");
-                        object value = gsType != null ? System.Enum.Parse(gsType, name) : null;
-                        mi.Invoke(mb, new object[] { value });
-                    }
-                    break;
-                }
-            }
-        }
-        catch { }
+        // Deprecated: no-op (kept for binary compatibility if referenced elsewhere)
     }
 
     static Vector3 GetMouseWorldOnPlane(Camera cam)
