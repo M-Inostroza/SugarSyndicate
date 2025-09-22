@@ -45,6 +45,16 @@ public class BeltSimulationService : MonoBehaviour
     [Tooltip("If true, prevents items from moving on ghost/temporary belts during drag operations but allows movement after committing.")]
     [SerializeField] bool preventGhostMovement = true;
 
+    [Header("Performance")]
+    [Tooltip("Enable verbose logs for this service.")]
+    [SerializeField] bool enableDebugLogs = false;
+    [Tooltip("Update visuals in N buckets (round-robin) to reduce per-frame Transform work.")]
+    [SerializeField, Range(1, 8)] int visualUpdateBuckets = 1;
+
+    // bucket state
+    int currentVisualBucket;
+    int nextVisualBucketAssignment;
+
     // track pause transitions
     bool wasPaused;
     // When true, skip processing one StepActive immediately after unpausing to avoid instant double-moves
@@ -56,6 +66,10 @@ public class BeltSimulationService : MonoBehaviour
     float lastTickTime;
     float lastTickDurationSec;
     bool tickTimeInitialized;
+
+    // lightweight logging
+    void DLog(string msg) { if (enableDebugLogs) Debug.Log(msg); }
+    void DWarn(string msg) { if (enableDebugLogs) Debug.LogWarning(msg); }
 
     // Public helper so build/placement code can request a one-step suppression of pulls
     public void SuppressNextStepPulls(bool alsoSkipOneStep = true)
@@ -215,7 +229,12 @@ public class BeltSimulationService : MonoBehaviour
 
         // Advance visuals every frame for smooth movement regardless of tick mode
         if (smoothMovement)
-            UpdateVisuals(Time.deltaTime);
+        {
+            int buckets = Mathf.Max(1, visualUpdateBuckets);
+            currentVisualBucket = (currentVisualBucket + 1) % buckets;
+            float dtScaled = Time.deltaTime * buckets;
+            UpdateVisuals(dtScaled, currentVisualBucket, buckets);
+        }
     }
 
     void StepActive()
@@ -337,7 +356,7 @@ public class BeltSimulationService : MonoBehaviour
                         return cellPos;
                     }
 
-                    if (!grid.GetCell(cellPos).hasItem && cell.type == GridService.CellType.Junction)
+                    if (!cell.hasItem && cell.type == GridService.CellType.Junction)
                     {
                         if (TryPullFrom(cellPos, cell.inB))
                         {
@@ -346,7 +365,7 @@ public class BeltSimulationService : MonoBehaviour
                     }
                 }
 
-                if (grid.GetCell(cellPos).hasItem)
+                if (cell.hasItem)
                     return cellPos;
             }
             return null;
@@ -397,16 +416,13 @@ public class BeltSimulationService : MonoBehaviour
         // Special: machine intake happens before entering the cell
         if (dest.type == GridService.CellType.Machine)
         {
-            Debug.Log($"[BeltSimulationService] Item at {cellPos} trying to move to machine at {destPos}");
             
             // Respect machine orientation: only accept if approaching from its input side
             var approachFromVec = -DirectionUtil.DirVec(outDir); // vector pointing from machine toward current cell
-            Debug.Log($"[BeltSimulationService] Approach vector: {approachFromVec}");
             
             PressMachine press;
             if (PressMachine.TryGetAt(destPos, out press) && press != null)
             {
-                Debug.Log($"[BeltSimulationService] Found PressMachine at {destPos}. Checking if it accepts from {approachFromVec}");
                 
                 if (press.AcceptsFromVec(approachFromVec))
                 {
@@ -416,7 +432,6 @@ public class BeltSimulationService : MonoBehaviour
                     try { started = press.OnItemArrived(); } catch { started = false; }
                     if (started)
                     {
-                        Debug.Log($"[BeltSimulationService] PressMachine started processing. Consuming item at {cellPos}.");
                         ConsumeItemAt(cellPos, theItem);
                     }
                     else
@@ -446,7 +461,6 @@ public class BeltSimulationService : MonoBehaviour
             if (PressMachine.TryGetAt(destPos, out press) && press != null)
             {
                 var approachFromVec = -DirectionUtil.DirVec(outDir);
-                Debug.Log($"[BeltSimulationService] Fallback intake: cell {destPos} not typed as Machine but press is registered. Approach {approachFromVec}");
                 if (press.AcceptsFromVec(approachFromVec))
                 {
                     var theItem = cell.item;
@@ -526,6 +540,7 @@ public class BeltSimulationService : MonoBehaviour
         public float elapsed;
         public float duration;
         public readonly Queue<Vector3> queue = new Queue<Vector3>();
+        public int bucket; // which bucket updates this visual
     }
 
     readonly Dictionary<Item, VisualState> visuals = new Dictionary<Item, VisualState>();
@@ -582,6 +597,12 @@ public class BeltSimulationService : MonoBehaviour
 
     void UpdateVisuals(float dt)
     {
+        // legacy path: delegate to bucketed version using current state
+        UpdateVisuals(dt, currentVisualBucket, Mathf.Max(1, visualUpdateBuckets));
+    }
+
+    void UpdateVisuals(float dt, int bucketIndex, int bucketCount)
+    {
         if (visuals.Count == 0) return;
         visualsRemoveBuffer.Clear();
         foreach (var kv in visuals)
@@ -589,6 +610,11 @@ public class BeltSimulationService : MonoBehaviour
             var item = kv.Key;
             var vs = kv.Value;
             if (vs.view == null) { visualsRemoveBuffer.Add(item); continue; }
+
+            // only update visuals in the current bucket
+            if ((vs.bucket % bucketCount) != bucketIndex)
+                continue;
+
             vs.elapsed += dt;
             float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
             vs.view.position = Vector3.Lerp(vs.start, vs.end, t);
@@ -639,7 +665,8 @@ public class BeltSimulationService : MonoBehaviour
             start = start,
             end = targetWorld,
             elapsed = 0f,
-            duration = ComputeSegmentDuration(start, targetWorld)
+            duration = ComputeSegmentDuration(start, targetWorld),
+            bucket = (nextVisualBucketAssignment++) % Mathf.Max(1, visualUpdateBuckets)
         };
         visuals[item] = vs;
     }
@@ -745,21 +772,13 @@ public class BeltSimulationService : MonoBehaviour
 
     void TryNotifyMachineAt(Vector2Int cellPos, Item item)
     {
-        Debug.Log($"[BeltSimulationService] Trying to notify machine at {cellPos} with item {item}");
-
         try
         {
             PressMachine press;
             if (PressMachine.TryGetAt(cellPos, out press) && press != null)
             {
-                Debug.Log($"[BeltSimulationService] Found PressMachine at {cellPos}. Calling OnItemArrived.");
                 press.OnItemArrived();
-                Debug.Log($"[BeltSimulationService] Successfully notified PressMachine at {cellPos}.");
                 return;
-            }
-            else
-            {
-                Debug.LogWarning($"[BeltSimulationService] PressMachine not found at {cellPos}.");
             }
         }
         catch (Exception ex)
@@ -772,8 +791,6 @@ public class BeltSimulationService : MonoBehaviour
     {
         try
         {
-            // Log as requested
-            Debug.Log($"[Press] item entered press from {cellPos}");
 
             // Remove visual with a short feedback tween end position matching current position (no move)
             if (item?.view != null)

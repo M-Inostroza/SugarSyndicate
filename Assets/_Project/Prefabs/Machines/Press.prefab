@@ -103,5 +103,5 @@ MonoBehaviour:
   facingVec: {x: 1, y: 0}
   itemPrefab: {fileID: 8971600722482412926, guid: 8704ee363b5f4034f8b6a9614377a0a8, type: 3}
   poolPrewarm: 8
-  processingSeconds: 4
+  processingSeconds: 3
   useGameTickForProcessing: 1
