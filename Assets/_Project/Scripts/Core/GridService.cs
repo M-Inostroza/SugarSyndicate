@@ -25,6 +25,7 @@ public class GridService : MonoBehaviour, IGridService
         public Direction outB = Direction.None;
         public Direction inA = Direction.None;
         public Direction inB = Direction.None;
+        public Direction inC = Direction.None; // additional input for 3-way merger
         public byte junctionToggle; // 0/1 toggler for split/merge policies
 
         // legacy support
@@ -94,11 +95,13 @@ public class GridService : MonoBehaviour, IGridService
         }
     }
 
-    public void SetJunctionCell(Vector2Int c, Direction inA, Direction inB, Direction outA, Direction outB)
+    // Updated: supports up to 3 inputs (inA/inB/inC) and 2 outputs (outA/outB).
+    // For a 3-to-1 merger, set inA/inB/inC and set outA to forward, outB to None.
+    public void SetJunctionCell(Vector2Int c, Direction inA, Direction inB, Direction inC, Direction outA, Direction outB)
     {
         var cell = GetCell(c);
         cell.type = CellType.Junction;
-        cell.inA = inA; cell.inB = inB; cell.outA = outA; cell.outB = outB; cell.junctionToggle = 0;
+        cell.inA = inA; cell.inB = inB; cell.inC = inC; cell.outA = outA; cell.outB = outB; cell.junctionToggle = 0;
         // legacy bridge
         cell.hasConveyor = true;
     }
@@ -107,7 +110,7 @@ public class GridService : MonoBehaviour, IGridService
     {
         var cell = GetCell(c);
         cell.type = CellType.Machine;
-        cell.inA = cell.inB = cell.outA = cell.outB = Direction.None;
+        cell.inA = cell.inB = cell.inC = cell.outA = cell.outB = Direction.None;
         cell.junctionToggle = 0;
         cell.hasConveyor = false;
         cell.conveyor = null;
@@ -120,7 +123,7 @@ public class GridService : MonoBehaviour, IGridService
         var cell = GetCell(c);
         if (cell == null) return;
         cell.type = CellType.Empty;
-        cell.inA = cell.inB = cell.outA = cell.outB = Direction.None;
+        cell.inA = cell.inB = cell.inC = cell.outA = cell.outB = Direction.None;
         cell.junctionToggle = 0;
         cell.hasConveyor = false;
         cell.conveyor = null;
@@ -138,6 +141,8 @@ public class GridService : MonoBehaviour, IGridService
             cell.type = CellType.Belt;
             cell.inA = DirectionUtil.Opposite(conveyor.direction);
             cell.outA = conveyor.direction;
+            cell.inB = cell.inC = Direction.None;
+            cell.outB = Direction.None;
         }
     }
 

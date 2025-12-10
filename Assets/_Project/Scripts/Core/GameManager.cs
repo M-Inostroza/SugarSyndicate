@@ -36,20 +36,7 @@ public class GameManager : MonoBehaviour
         // Always enter Build globally (SetState early-outs if already Build)
         SetState(GameState.Build);
 
-        try
-        {
-            var bmc = FindFirstObjectByType<BuildModeController>();
-            if (bmc != null)
-            {
-                // Start a default tool (conveyor) preview. This no longer changes global state.
-                bmc.StartConveyorBuildMode();
-            }
-            else
-            {
-                Debug.LogWarning("EnterBuildMode: No BuildModeController found in scene.");
-            }
-        }
-        catch { }
+        // Let the player choose what to build; no default tool is auto-selected here.
     }
 
     // Public helper for a global UI button to exit Build/Delete and return to Play

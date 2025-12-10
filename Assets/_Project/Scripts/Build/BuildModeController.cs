@@ -11,6 +11,8 @@ public class BuildModeController : MonoBehaviour
     [SerializeField] ConveyorPlacer conveyorPlacer;
 
     public static bool IsDragging { get; private set; } = false;
+    public static bool HasActiveTool { get; private set; } = false;
+    public static void SetToolActive(bool active) => HasActiveTool = active;
 
     public event Action onExitBuildMode;
 
@@ -78,8 +80,17 @@ public class BuildModeController : MonoBehaviour
 
             if (placed)
             {
-                if (!keepPlacing) CancelBuildMode();
-                else conveyorPlacer?.RefreshPreviewAfterPlace();
+                if (!keepPlacing)
+                {
+                    // If we are already in Build mode, just end the current preview but keep the game paused in Build.
+                    bool inBuildState = GameManager.Instance != null && GameManager.Instance.State == GameState.Build;
+                    if (inBuildState) EndCurrentPreview();
+                    else CancelBuildMode();
+                }
+                else
+                {
+                    conveyorPlacer?.RefreshPreviewAfterPlace();
+                }
             }
         }
     }
@@ -94,6 +105,7 @@ public class BuildModeController : MonoBehaviour
                 break;
         }
         current = BuildableType.None;
+        HasActiveTool = false;
     }
 
     public void StartBuildMode(BuildableType type)
@@ -102,10 +114,14 @@ public class BuildModeController : MonoBehaviour
         TryStopMachineBuilder();
         TryStopJunctionBuilder();
 
+        // Enter Build state so belt sim pauses item movement while placing
+        if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Build);
+
         // If a preview is already active, just end that preview and start the new one
         // without changing GameManager state. Global state is controlled elsewhere.
         if (current != BuildableType.None) EndCurrentPreview();
         current = type;
+        HasActiveTool = current != BuildableType.None;
 
         switch (current)
         {
@@ -136,6 +152,7 @@ public class BuildModeController : MonoBehaviour
                 break;
         }
         current = BuildableType.None;
+        HasActiveTool = false;
         onExitBuildMode?.Invoke();
 
         // Return to Play state when leaving build mode
@@ -171,9 +188,21 @@ public class BuildModeController : MonoBehaviour
     // UI helper to start conveyor build mode and immediately enable delete mode
     public void StartDeleteConveyorMode()
     {
-        StartBuildMode(BuildableType.Conveyor);
+        // Stop any other builders
+        TryStopMachineBuilder();
+        TryStopJunctionBuilder();
+
+        // Reset any active preview
+        if (current != BuildableType.None) EndCurrentPreview();
+
+        current = BuildableType.Conveyor;
+        HasActiveTool = true;
+
         // Enter global Delete state so systems can pause appropriately
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Delete);
+
+        // Start delete visuals/logic on placer
+        conveyorPlacer?.BeginPreview(); // ensures placer is ready for input
         conveyorPlacer?.StartDeleteMode();
     }
 
@@ -185,5 +214,11 @@ public class BuildModeController : MonoBehaviour
             // Reuse existing cancel logic to clean up previews etc.
             CancelBuildMode();
         }
+    }
+
+    // Helper to know if delete mode is active
+    public bool IsInDeleteMode()
+    {
+        return GameManager.Instance != null && GameManager.Instance.State == GameState.Delete;
     }
 }

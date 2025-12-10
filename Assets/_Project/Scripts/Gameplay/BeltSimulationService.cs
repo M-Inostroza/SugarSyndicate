@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using UnityEngine;
 
 public class BeltSimulationService : MonoBehaviour
@@ -137,10 +138,11 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (GameManager.Instance == null) return false;
         var s = GameManager.Instance.State;
-        // Respect the pauseWhileDragging toggle
+        // Always pause during Build/Delete so items freeze the moment you enter those modes
+        if (s == GameState.Build || s == GameState.Delete) return true;
+        // Otherwise, optionally pause if dragging is enabled via toggle (kept for future use)
         if (!pauseWhileDragging) return false;
-        // Pause item flow during Build and Delete modes
-        return s == GameState.Build || s == GameState.Delete;
+        return false;
     }
 
     void HandlePauseTransitions()
@@ -316,34 +318,30 @@ public class BeltSimulationService : MonoBehaviour
 
             if (cell.type == GridService.CellType.Belt || cell.type == GridService.CellType.Junction)
             {
-                // Modified: for junctions, detect whether inputs actually have items ready to push into this cell.
-                if (cell.type == GridService.CellType.Junction && cell.inA != Direction.None && cell.inB != Direction.None)
+                if (cell.type == GridService.CellType.Junction)
                 {
-                    // Determine readiness of each input (neighbor has item and outputs toward this cell)
-                    var neighborA = grid.GetCell(cellPos + DirectionUtil.DirVec(cell.inA));
-                    var neighborB = grid.GetCell(cellPos + DirectionUtil.DirVec(cell.inB));
-                    bool aReady = neighborA != null && neighborA.hasItem && HasOutputTowards(neighborA, DirectionUtil.Opposite(cell.inA));
-                    bool bReady = neighborB != null && neighborB.hasItem && HasOutputTowards(neighborB, DirectionUtil.Opposite(cell.inB));
+                    // Collect available inputs (up to 3)
+                    Direction[] inputs = new Direction[] { cell.inA, cell.inB, cell.inC };
+                    inputs = inputs.Where(d => DirectionUtil.IsCardinal(d)).ToArray();
 
-                    if (aReady && bReady)
+                    if (inputs.Length > 1)
                     {
-                        // Both sides have items waiting: enforce round-robin one-by-one behavior
-                        var tryDir = (cell.junctionToggle & 1) == 0 ? cell.inA : cell.inB;
-                        if (TryPullFrom(cellPos, tryDir))
+                        // round-robin across inputs for fairness
+                        int start = cell.junctionToggle % inputs.Length;
+                        for (int i = 0; i < inputs.Length; i++)
                         {
-                            // successful pull, flip toggle so next time the other side gets priority
-                            cell.junctionToggle ^= 1;
-                            return cellPos;
+                            var dir = inputs[(start + i) % inputs.Length];
+                            if (TryPullFrom(cellPos, dir))
+                            {
+                                cell.junctionToggle = (byte)((start + i + 1) % inputs.Length);
+                                return cellPos;
+                            }
                         }
-                        // If chosen side wasn't able to pull (race/edge case), do not attempt the other side this step
                         return null;
                     }
-                    else
+                    else if (inputs.Length == 1)
                     {
-                        // Only one (or none) side is ready: fall back to opportunistic behavior
-                        if (aReady && TryPullFrom(cellPos, cell.inA))
-                            return cellPos;
-                        if (bReady && TryPullFrom(cellPos, cell.inB))
+                        if (TryPullFrom(cellPos, inputs[0]))
                             return cellPos;
                     }
                 }
@@ -375,12 +373,14 @@ public class BeltSimulationService : MonoBehaviour
         Direction outDir = Direction.None;
         Direction altOutDir = Direction.None; // Used only for splitter fallback if primary blocked
         bool twoOutputs = false;
+        bool multiInputs = false;
         if (cell.type == GridService.CellType.Belt)
         {
             outDir = cell.outA;
         }
         else if (cell.type == GridService.CellType.Junction)
         {
+            multiInputs = DirectionUtil.IsCardinal(cell.inA) || DirectionUtil.IsCardinal(cell.inB) || DirectionUtil.IsCardinal(cell.inC);
             if (cell.outA != Direction.None && cell.outB != Direction.None)
             {
                 twoOutputs = true;
@@ -405,8 +405,24 @@ public class BeltSimulationService : MonoBehaviour
         // If no valid output, keep the cell active so it can try again next step
         if (!DirectionUtil.IsCardinal(outDir)) { return cellPos; }
 
+        // Resolve destination and support splitter fallback: try primary, else alternate if available
         var destPos = cellPos + DirectionUtil.DirVec(outDir);
         var dest = grid.GetCell(destPos);
+        if (twoOutputs)
+        {
+            bool primaryBlocked = dest == null || dest.hasItem || !IsBeltLike(dest);
+            if (primaryBlocked)
+            {
+                var altPos = cellPos + DirectionUtil.DirVec(altOutDir);
+                var altDest = grid.GetCell(altPos);
+                if (altDest != null && !altDest.hasItem && IsBeltLike(altDest))
+                {
+                    destPos = altPos;
+                    dest = altDest;
+                    outDir = altOutDir;
+                }
+            }
+        }
 
         if (dest == null)
         {
@@ -498,7 +514,9 @@ public class BeltSimulationService : MonoBehaviour
         // Splitter alternation: if junction has exactly one input and two outputs, flip toggle after successful dispatch
         if (cell.type == GridService.CellType.Junction && twoOutputs)
         {
-            bool singleInput = (cell.inA == Direction.None) ^ (cell.inB == Direction.None); // XOR: true if exactly one input defined
+            bool singleInput = (cell.inA == Direction.None ? 0 : 1)
+                             + (cell.inB == Direction.None ? 0 : 1)
+                             + (cell.inC == Direction.None ? 0 : 1) <= 1;
             if (singleInput)
             {
                 cell.junctionToggle ^= 1; // alternate next output
@@ -812,7 +830,7 @@ public class BeltSimulationService : MonoBehaviour
         catch { }
     }
 
-    void ReseedActiveFromGrid()
+    public void ReseedActiveFromGrid()
     {
         if (grid == null) return;
         try

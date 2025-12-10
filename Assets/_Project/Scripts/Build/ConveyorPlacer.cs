@@ -31,6 +31,9 @@ public class ConveyorPlacer : MonoBehaviour
     readonly Dictionary<Conveyor, GhostData> ghostOriginalColors = new Dictionary<Conveyor, GhostData>();
     readonly Dictionary<Vector2Int, Conveyor> ghostByCell = new Dictionary<Vector2Int, Conveyor>();
     readonly Dictionary<GameObject, GhostData> genericGhostOriginalColors = new Dictionary<GameObject, GhostData>();
+    // delete overlays for junctions without a detectable visual
+    readonly HashSet<GameObject> deleteOverlayGhosts = new HashSet<GameObject>();
+    float cachedCellSize = 1f;
 
     // delete mode state
     bool isDeleting = false;
@@ -90,6 +93,7 @@ public class ConveyorPlacer : MonoBehaviour
                 .FirstOrDefault(m => m.Name == "SetBeltCell" && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == typeof(Vector2Int));
             try { var asm = type.Assembly; directionType = asm.GetTypes().FirstOrDefault(tt => tt.IsEnum && tt.Name == "Direction"); } catch { }
             if (directionType == null) directionType = FindDirectionType();
+            cachedCellSize = SafeGetCellSize(type, mb);
             break;
         }
     }
@@ -106,7 +110,7 @@ public class ConveyorPlacer : MonoBehaviour
         deferredRegistrations.Clear();
         // Clear any leftover ghost visuals from previous sessions
         RestoreGhostVisuals();
-        ghostOriginalColors.Clear(); ghostByCell.Clear(); genericGhostOriginalColors.Clear();
+        ghostOriginalColors.Clear(); ghostByCell.Clear(); genericGhostOriginalColors.Clear(); deleteOverlayGhosts.Clear();
         deleteMarkedCells.Clear();
         isDeleting = false;
         dragPath.Clear();
@@ -122,7 +126,7 @@ public class ConveyorPlacer : MonoBehaviour
         deferredRegistrations.Clear();
         // ensure any ghost visuals are cleared
         RestoreGhostVisuals();
-        ghostOriginalColors.Clear(); ghostByCell.Clear(); genericGhostOriginalColors.Clear();
+        ghostOriginalColors.Clear(); ghostByCell.Clear(); genericGhostOriginalColors.Clear(); deleteOverlayGhosts.Clear();
         deleteMarkedCells.Clear();
         isDeleting = false;
         dragPath.Clear();
@@ -265,6 +269,9 @@ public class ConveyorPlacer : MonoBehaviour
         if (Input.GetMouseButton(0) && isDragging)
         {
             if (isDeleting) { TryMarkCellFromDrag(cell); return; }
+
+            // Allow rotating the current tail toward the pointer even before leaving the cell
+            UpdateTailDirectionToPointer(world);
             
             // The initial belt is now placed in OnPointerDown, so we don't need to check for it here.
             
@@ -283,6 +290,36 @@ public class ConveyorPlacer : MonoBehaviour
             // DON'T place a belt here; OnPointerUp handles commit.
             isDragging = false; RestoreGhostVisuals(); dragStartCell = lastDragCell = new Vector2Int(int.MinValue, int.MinValue); dragStartWorld = Vector3.zero; FlushDeferredRegistrations(); dragPath.Clear();
         }
+    }
+
+    // Rotate the tail belt toward the current pointer position while still inside the same cell
+    void UpdateTailDirectionToPointer(Vector3 pointerWorld)
+    {
+        if (!isDragging || isDeleting) return;
+        // Determine which cell is currently the tail we should rotate
+        Vector2Int tailCell = new Vector2Int(int.MinValue, int.MinValue);
+        if (dragPath.Count > 0) tailCell = dragPath[dragPath.Count - 1];
+        else if (lastDragCell.x != int.MinValue) tailCell = lastDragCell;
+        else if (dragStartCell.x != int.MinValue) tailCell = dragStartCell;
+        if (tailCell.x == int.MinValue) return;
+
+        // Get center of tail cell
+        Vector3 center = Vector3.zero;
+        try { var worldObj = miCellToWorld?.Invoke(gridServiceInstance, new object[] { tailCell, 0f }); center = worldObj is Vector3 vv ? vv : Vector3.zero; } catch { }
+        var delta = (Vector2)(pointerWorld - center);
+        if (delta.magnitude < 0.05f) return; // too small to decide a direction
+        Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
+        // Prevent pointing directly back toward the previous segment to avoid conflicts
+        Vector2Int originDir = Vector2Int.zero;
+        if (dragPath.Count >= 2)
+        {
+            var prev = dragPath[dragPath.Count - 2];
+            originDir = tailCell - prev;
+        }
+        if (originDir != Vector2Int.zero && step == -originDir) return;
+        var dirName = DirectionNameFromDelta(step);
+        if (dirName == null) return;
+        UpdateBeltDirectionFast(tailCell, dirName);
     }
 
     void TryPlaceCellFromDrag(Vector2Int cell)
@@ -447,6 +484,8 @@ public class ConveyorPlacer : MonoBehaviour
 
             bool isLogicalBelt = false;
             bool isMachine = false;
+            bool isJunction = false;
+            GameObject junctionGo = null;
             try
             {
                 var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
@@ -470,7 +509,7 @@ public class ConveyorPlacer : MonoBehaviour
                                 if (typeVal != null)
                                 {
                                     var name = typeVal.ToString();
-                                    if (name == "Belt" || name == "Junction") isLogicalBelt = true;
+                                    if (name == "Belt" || name == "Junction") { isLogicalBelt = true; if (name == "Junction") isJunction = true; }
                                     if (name == "Machine") isMachine = true;
                                 }
                             }
@@ -481,8 +520,8 @@ public class ConveyorPlacer : MonoBehaviour
             }
             catch { }
 
-            // If there is no conveyor (belt) and no logical belt and no machine, do not mark this cell for deletion.
-            if (conv == null && !isLogicalBelt && !isMachine)
+            // If there is no conveyor (belt) and no logical belt/junction and no machine, do not mark this cell for deletion.
+            if (conv == null && !isLogicalBelt && !isMachine && !isJunction)
             {
                 // Check for a machine visual anyway as a fallback via physics
                 var mg = FindMachineAtCell(cell);
@@ -493,17 +532,38 @@ public class ConveyorPlacer : MonoBehaviour
             // mark for deletion
             deleteMarkedCells.Add(cell);
 
+            bool debugApplied = false;
+
             if (conv != null)
             {
                 ApplyDeleteGhostToConveyor(conv);
                 try { ghostByCell[cell] = conv; } catch { }
+                debugApplied = true;
             }
             else
             {
-                // Belt visual or machine visual
-                var go = isLogicalBelt ? FindBeltVisualAtCell(cell) : FindMachineAtCell(cell);
-                if (go != null) ApplyDeleteGhostToGameObject(go);
+                // Belt visual, machine visual, or junction visual (prefer junction if flagged)
+                GameObject go = null;
+                if (isJunction) go = FindJunctionAtCell(cell);
+                if (go == null && isLogicalBelt) go = FindBeltVisualAtCell(cell);
+                if (go == null && isMachine) go = FindMachineAtCell(cell);
+                if (go == null && isJunction) go = FindJunctionAtCell(cell);
+                if (go != null)
+                {
+                    ApplyDeleteGhostToGameObject(go);
+                    if (isJunction) junctionGo = go;
+                    debugApplied = true;
+                }
+                // Always attempt junction tint as a fallback if no visual found yet
+                if (!debugApplied && (isJunction || true))
+                {
+                    if (ApplyDeleteGhostToJunctionVisualsAtCell(cell))
+                    {
+                        debugApplied = true;
+                    }
+                }
             }
+
         }
         catch { }
     }
@@ -541,6 +601,7 @@ public class ConveyorPlacer : MonoBehaviour
                     try { Destroy(conv.gameObject); } catch { }
                     try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
                     removedSomething = true;
+                    ClearLogicalCell(cell); // ensure logical grid data is wiped so simulation stops using this belt
                 }
                 else
                 {
@@ -557,16 +618,29 @@ public class ConveyorPlacer : MonoBehaviour
                             if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
                         }
                         catch { }
+                        ClearLogicalCell(cell);
                     }
                     else
                     {
-                        // Try belt visual next
-                        var go = FindBeltVisualAtCell(cell);
-                        if (go != null)
+                        // Try junction visual/object
+                        var jg = FindJunctionAtCell(cell);
+                        if (jg != null)
                         {
-                            try { genericGhostOriginalColors.Remove(go); } catch { }
-                            try { Destroy(go); } catch { }
+                            try { Destroy(jg); } catch { }
                             removedSomething = true;
+                            ClearLogicalCell(cell);
+                        }
+                        else
+                        {
+                            // Try belt visual next
+                            var go = FindBeltVisualAtCell(cell);
+                            if (go != null)
+                            {
+                                try { genericGhostOriginalColors.Remove(go); } catch { }
+                                try { Destroy(go); } catch { }
+                                removedSomething = true;
+                                ClearLogicalCell(cell);
+                            }
                         }
                     }
                 }
@@ -585,19 +659,27 @@ public class ConveyorPlacer : MonoBehaviour
                             {
                                 var t = cellObj.GetType();
                                 var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                bool wasJunction = false;
                                 if (fiType != null)
                                 {
                                     var name = fiType.GetValue(cellObj)?.ToString();
                                     if (name == "Belt" || name == "Junction" || name == "Machine")
                                     {
+                                        wasJunction = name == "Junction";
                                         if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
                                         removedSomething = true;
                                     }
+                                }
+                                if (wasJunction)
+                                {
+                                    // If junction logical data existed, ensure any visual is destroyed too
+                                    DestroyJunctionVisualsAtCell(cell);
                                 }
                             }
                         }
                     }
                     catch { }
+                    if (removedSomething) ClearLogicalCell(cell);
                 }
 
                 if (removedSomething)
@@ -605,16 +687,38 @@ public class ConveyorPlacer : MonoBehaviour
                     TryClearItemAtCell(cell);
                 }
 
+                DestroyDeleteOverlayForCell(cell);
                 TryRegisterCellInBeltSim(cell);
                 deleteMarkedCells.Remove(cell);
             }
             catch { }
         }
         MarkGraphDirtyIfPresent();
+
+        // Ensure belt simulation no longer keeps items moving along removed belts.
+        try
+        {
+            var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            foreach (var mb in all)
+            {
+                if (mb == null) continue;
+                var t = mb.GetType();
+                if (t.Name == "BeltSimulationService")
+                {
+                    var mi = t.GetMethod("ReseedActiveFromGrid", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (mi != null)
+                    {
+                        mi.Invoke(mb, null);
+                    }
+                    break;
+                }
+            }
+        }
+        catch { }
     }
 
-    // Immediate delete variant for use in operations where we don't want to mark cells (like drag cancellation)
-    bool DeleteCellImmediate(Vector2Int cell)
+    // Public immediate delete at mouse (tap)
+    public bool DeleteCellImmediate(Vector2Int cell)
     {
         try
         {
@@ -637,12 +741,19 @@ public class ConveyorPlacer : MonoBehaviour
                 try { Destroy(conv.gameObject); } catch { }
                 try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
                 removedSomething = true;
+                ClearLogicalCell(cell);
             }
             else
             {
                 // Machine visual first
                 var mg = FindMachineAtCell(cell);
                 if (mg != null) { try { Destroy(mg); } catch { } removedSomething = true; }
+                if (!removedSomething)
+                {
+                    // Junction visual
+                    var jg = FindJunctionAtCell(cell);
+                    if (jg != null) { try { Destroy(jg); } catch { } removedSomething = true; }
+                }
                 if (!removedSomething)
                 {
                     // Belt visual
@@ -663,14 +774,20 @@ public class ConveyorPlacer : MonoBehaviour
                         {
                             var t = cellObj.GetType();
                             var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            bool wasJunction = false;
                             if (fiType != null)
                             {
                                 var name = fiType.GetValue(cellObj)?.ToString();
                                 if (name == "Belt" || name == "Junction" || name == "Machine")
                                 {
+                                    wasJunction = name == "Junction";
                                     if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
                                     removedSomething = true;
                                 }
+                            }
+                            if (wasJunction)
+                            {
+                                DestroyJunctionVisualsAtCell(cell);
                             }
                         }
                     }
@@ -680,6 +797,7 @@ public class ConveyorPlacer : MonoBehaviour
 
             if (removedSomething)
             {
+                ClearLogicalCell(cell);
                 TryClearItemAtCell(cell);
             }
 
@@ -996,6 +1114,7 @@ public class ConveyorPlacer : MonoBehaviour
             }
         }
         catch { }
+        DestroyDeleteOverlays();
         ghostOriginalColors.Clear(); genericGhostOriginalColors.Clear(); ghostByCell.Clear();
     }
 
@@ -1310,6 +1429,230 @@ public class ConveyorPlacer : MonoBehaviour
         return null;
     }
 
+    // Helper: find a junction object at a cell center (splitter/merger visuals tagged as Junction)
+    GameObject FindJunctionAtCell(Vector2Int cell)
+    {
+        try
+        {
+            if (miCellToWorld == null || gridServiceInstance == null) return null;
+            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            // Primary: physics overlap (if junction has collider)
+            var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+            foreach (var col in cols)
+            {
+                if (col == null) continue;
+                // Search any MonoBehaviour up the parent chain whose type name suggests a junction
+                var parents = col.GetComponentsInParent<MonoBehaviour>(true);
+                foreach (var mb in parents)
+                {
+                    if (mb == null) continue;
+                    var tn = mb.GetType().Name;
+                    if (tn.Contains("Junction") || tn.Contains("Splitter") || tn.Contains("Merger"))
+                        return mb.gameObject;
+                }
+                // fallback: detect by name contains Splitter/Merger
+                var go = col.GetComponentInParent<Transform>()?.gameObject;
+                if (go != null && (go.name.Contains("Splitter") || go.name.Contains("Merger")))
+                    return go;
+            }
+
+            // Fallback: position-based search in belt container and scene transforms
+            var container = ContainerLocator.GetBeltContainer();
+            if (container != null)
+            {
+                foreach (Transform child in container)
+                {
+                    if (child == null) continue;
+                    if (Mathf.Abs(child.position.x - center.x) < 0.05f && Mathf.Abs(child.position.y - center.y) < 0.05f)
+                    {
+                        var tn = child.name;
+                        if (tn.Contains("Splitter") || tn.Contains("Merger") || tn.Contains("Junction"))
+                            return child.gameObject;
+                    }
+                }
+            }
+            var allRoots = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsSortMode.None);
+            foreach (var tr in allRoots)
+            {
+                if (tr == null) continue;
+                if (Mathf.Abs(tr.position.x - center.x) < 0.05f && Mathf.Abs(tr.position.y - center.y) < 0.05f)
+                {
+                    var tn = tr.name;
+                    if (tn.Contains("Splitter") || tn.Contains("Merger") || tn.Contains("Junction"))
+                        return tr.gameObject;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    void DestroyJunctionVisualsAtCell(Vector2Int cell)
+    {
+        try
+        {
+            var worldObj = miCellToWorld?.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+            foreach (var col in cols)
+            {
+                if (col == null) continue;
+                var parents = col.GetComponentsInParent<MonoBehaviour>(true);
+                foreach (var mb in parents)
+                {
+                    if (mb == null) continue;
+                    var tn = mb.GetType().Name;
+                    if (tn.Contains("Junction") || tn.Contains("Splitter") || tn.Contains("Merger"))
+                    {
+                        try { Destroy(mb.gameObject); } catch { }
+                        break;
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    bool ApplyDeleteGhostToJunctionVisualsAtCell(Vector2Int cell)
+    {
+        try
+        {
+            if (miCellToWorld == null || gridServiceInstance == null) return false;
+            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            float size = Mathf.Max(0.5f, SafeGetCellSize());
+            var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * size * 0.9f, 0f);
+            var seen = new HashSet<GameObject>();
+            bool applied = false;
+            foreach (var col in cols)
+            {
+                if (col == null) continue;
+                var parents = col.GetComponentsInParent<Transform>(true);
+                foreach (var tr in parents)
+                {
+                    if (tr == null || tr.gameObject == null) continue;
+                    if (seen.Contains(tr.gameObject)) continue;
+                    var tn = tr.gameObject.name;
+                    if (tn.Contains("Splitter") || tn.Contains("Merger") || tn.Contains("Junction"))
+                    {
+                        ApplyDeleteGhostToGameObject(tr.gameObject);
+                        seen.Add(tr.gameObject);
+                        applied = true;
+                    }
+                }
+            }
+
+            // If we still didn't tint anything, tint any renderer at this cell as a fallback
+            if (!applied)
+            {
+                foreach (var col in cols)
+                {
+                    if (col == null) continue;
+                    var root = col.GetComponentInParent<Transform>()?.gameObject;
+                    if (root != null && !seen.Contains(root))
+                    {
+                        ApplyDeleteGhostToGameObject(root);
+                        seen.Add(root);
+                        applied = true;
+                    }
+                }
+
+                if (!applied)
+                {
+                    // Position-based search across all transforms using cell size tolerance
+                    float tol = size * 0.55f;
+                    var all = UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsSortMode.None);
+                    foreach (var tr in all)
+                    {
+                        if (tr == null) continue;
+                        if (Mathf.Abs(tr.position.x - center.x) < tol && Mathf.Abs(tr.position.y - center.y) < tol)
+                        {
+                            ApplyDeleteGhostToGameObject(tr.gameObject);
+                            applied = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!applied)
+            {
+                SpawnDeleteOverlayAtCell(cell);
+            }
+            return applied;
+        }
+        catch { return false; }
+    }
+
+    void SpawnDeleteOverlayAtCell(Vector2Int cell)
+    {
+        try
+        {
+            if (miCellToWorld == null || gridServiceInstance == null) return;
+            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            var go = new GameObject("JunctionDeleteOverlay");
+            go.transform.position = center;
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0,0,Texture2D.whiteTexture.width, Texture2D.whiteTexture.height), new Vector2(0.5f,0.5f));
+            var col = blockedColor;
+            col.a = Mathf.Clamp01(col.a);
+            sr.color = col;
+            sr.sortingOrder = 5000;
+            deleteOverlayGhosts.Add(go);
+        }
+        catch { }
+    }
+
+    void DestroyDeleteOverlayForCell(Vector2Int cell)
+    {
+        try
+        {
+            Vector3 center = Vector3.zero;
+            if (miCellToWorld != null && gridServiceInstance != null)
+            {
+                var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+                center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            }
+            foreach (var go in new List<GameObject>(deleteOverlayGhosts))
+            {
+                if (go == null) { deleteOverlayGhosts.Remove(go); continue; }
+                if (center == Vector3.zero || (Vector2)go.transform.position == (Vector2)center)
+                {
+                    try { Destroy(go); } catch { }
+                    deleteOverlayGhosts.Remove(go);
+                }
+            }
+        }
+        catch { }
+    }
+
+    float SafeGetCellSize(Type gridType = null, object gridInstance = null)
+    {
+        try
+        {
+            object inst = gridInstance ?? gridServiceInstance;
+            var type = gridType ?? inst?.GetType();
+            if (type == null) return cachedCellSize;
+            var pi = type.GetProperty("CellSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (pi != null) return Mathf.Max(0.01f, Convert.ToSingle(pi.GetValue(inst)));
+            var fi = type.GetField("cellSize", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (fi != null) return Mathf.Max(0.01f, Convert.ToSingle(fi.GetValue(inst)));
+        }
+        catch { }
+        return cachedCellSize;
+    }
+
+    void DestroyDeleteOverlays()
+    {
+        foreach (var go in new List<GameObject>(deleteOverlayGhosts))
+        {
+            if (go != null) { try { Destroy(go); } catch { } }
+        }
+        deleteOverlayGhosts.Clear();
+    }
+
     void TryClearItemAtCell(Vector2Int cell)
     {
         try
@@ -1342,6 +1685,18 @@ public class ConveyorPlacer : MonoBehaviour
             catch { }
             try { fiItem.SetValue(cellObj, null); } catch { }
             try { fiHasItem.SetValue(cellObj, false); } catch { }
+        }
+        catch { }
+    }
+
+    // Wipe logical belt data so simulation no longer treats the cell as a belt
+    void ClearLogicalCell(Vector2Int cell)
+    {
+        try
+        {
+            if (!EnsureGridServiceCached()) return;
+            var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+            if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
         }
         catch { }
     }

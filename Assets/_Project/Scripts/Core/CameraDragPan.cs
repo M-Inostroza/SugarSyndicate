@@ -155,8 +155,46 @@ public class CameraDragPan : MonoBehaviour
             if (stateObj == null) return true;
 
             var name = stateObj.ToString();
-            return string.Equals(name, "Play", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(name, "Play", StringComparison.OrdinalIgnoreCase)) return true;
+
+            // Allow panning in Build/Delete when no build tool is active
+            if (string.Equals(name, "Build", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "Delete", StringComparison.OrdinalIgnoreCase))
+            {
+                return !HasActiveBuildTool();
+            }
+
+            // other states: default allow
+            return true;
         }
         catch { return true; }
+    }
+
+    bool HasActiveBuildTool()
+    {
+        try
+        {
+            var type = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a => {
+                    try { return a.GetTypes(); } catch { return Array.Empty<Type>(); }
+                })
+                .FirstOrDefault(t => t.Name == "BuildModeController");
+            if (type == null) return false;
+
+            // static property HasActiveTool
+            var pi = type.GetProperty("HasActiveTool", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (pi != null && pi.PropertyType == typeof(bool))
+            {
+                try { return (bool)pi.GetValue(null, null); } catch { }
+            }
+
+            var fi = type.GetField("HasActiveTool", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (fi != null && fi.FieldType == typeof(bool))
+            {
+                try { return (bool)fi.GetValue(null); } catch { }
+            }
+        }
+        catch { }
+        return false;
     }
 }

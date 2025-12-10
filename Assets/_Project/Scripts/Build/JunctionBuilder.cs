@@ -25,7 +25,7 @@ public class JunctionBuilder : MonoBehaviour
     object grid;
     MethodInfo miWorldToCell;
     MethodInfo miCellToWorld;
-    MethodInfo miSetJunctionCell; // void SetJunctionCell(Vector2Int, Direction, Direction, Direction, Direction)
+    MethodInfo miSetJunctionCell; // void SetJunctionCell(Vector2Int, Direction, Direction, Direction, Direction, Direction)
     MethodInfo miGetCell;
 
     // Direction enum type (resolve at runtime to avoid compile-time dependency/ambiguity)
@@ -64,8 +64,10 @@ public class JunctionBuilder : MonoBehaviour
                 miCellToWorld = t.GetMethod("CellToWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(float) }, null);
                 // Find SetJunctionCell by name & arity to avoid compile-time Direction dependency
                 miSetJunctionCell = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    // prefer 6-parameter version (with inC) but fall back to old 5-param if present
+                    .OrderByDescending(m => m.GetParameters().Length)
                     .FirstOrDefault(m => m.Name == "SetJunctionCell"
-                        && m.GetParameters().Length == 5
+                        && m.GetParameters().Length >= 5
                         && m.GetParameters()[0].ParameterType == typeof(Vector2Int));
                 miGetCell = t.GetMethod("GetCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
             }
@@ -100,6 +102,8 @@ public class JunctionBuilder : MonoBehaviour
         waitRelease = true;
         activationFrame = Time.frameCount;
         ClearPreviewState();
+        // Mark build tool active to lock camera pan while orienting
+        try { BuildModeController.SetToolActive(true); } catch { }
     }
 
     void Update()
@@ -134,6 +138,7 @@ public class JunctionBuilder : MonoBehaviour
             CancelPreview();
             awaitingWorldClick = false;
             mode = Mode.None;
+            try { BuildModeController.SetToolActive(false); } catch { }
             return;
         }
 
@@ -170,6 +175,7 @@ public class JunctionBuilder : MonoBehaviour
                 placing = false;
                 awaitingWorldClick = false;
                 mode = Mode.None;
+                try { BuildModeController.SetToolActive(false); } catch { }
             }
         }
     }
@@ -180,6 +186,7 @@ public class JunctionBuilder : MonoBehaviour
         awaitingWorldClick = false;
         CancelPreview();
         mode = Mode.None;
+        try { BuildModeController.SetToolActive(false); } catch { }
     }
 
     bool TryCellFromWorld(Vector3 world, out Vector2Int cell)
@@ -270,19 +277,22 @@ public class JunctionBuilder : MonoBehaviour
             try { return Enum.ToObject(directionType, idx); } catch { return null; }
         }
 
-        object inA = null, inB = null, outA = null, outB = null;
+        object inA = null, inB = null, inC = null, outA = null, outB = null;
         if (mode == Mode.Splitter)
         {
             // 1 input (from back) -> 2 outputs (left & right)
             inA = V2DirObj(back);
             outA = V2DirObj(left);
             outB = V2DirObj(right);
+            inB = V2DirObj(new Vector2Int(0, 0)); // None
+            inC = V2DirObj(new Vector2Int(0, 0));
         }
         else if (mode == Mode.Merger)
         {
-            // 2 inputs (left & right) -> 1 output (forward)
+            // 3 inputs (left, right, back) -> 1 output (forward)
             inA = V2DirObj(left);
             inB = V2DirObj(right);
+            inC = V2DirObj(back);
             outA = V2DirObj(outForward);
             outB = V2DirObj(new Vector2Int(0, 0)); // None
         }
@@ -298,8 +308,12 @@ public class JunctionBuilder : MonoBehaviour
             {
                 // Ensure non-null values: use None where missing
                 var noneObj = V2DirObj(new Vector2Int(0, 0));
-                inA = inA ?? noneObj; inB = inB ?? noneObj; outA = outA ?? noneObj; outB = outB ?? noneObj;
-                miSetJunctionCell.Invoke(grid, new object[] { cell, inA, inB, outA, outB });
+                inA = inA ?? noneObj; inB = inB ?? noneObj; inC = inC ?? noneObj; outA = outA ?? noneObj; outB = outB ?? noneObj;
+                var pars = miSetJunctionCell.GetParameters().Length;
+                if (pars >= 6)
+                    miSetJunctionCell.Invoke(grid, new object[] { cell, inA, inB, inC, outA, outB });
+                else
+                    miSetJunctionCell.Invoke(grid, new object[] { cell, inA, inB, outA, outB }); // fallback for legacy signature
             }
         }
         catch { }
