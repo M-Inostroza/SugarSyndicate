@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: f030217a0b984a44f91aefa58f9877c0
+guid: 34659a112688a2c46aa60cedb949c8d2
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -4777001922966654454
-    second: Intersection_0
+      213: 7455919550432169414
+    second: Sugar cane_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Intersection_0
+      name: Sugar cane_0
       rect:
         serializedVersion: 2
-        x: 0
-        y: 0
-        width: 100
-        height: 100
+        x: 167
+        y: 72
+        width: 734
+        height: 873
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: a02f63a8f0ea4bdb0800000000000000
-      internalID: -4777001922966654454
+      spriteID: 6cd4665f35fb87760800000000000000
+      internalID: 7455919550432169414
       vertices: []
       indices: 
       edges: []

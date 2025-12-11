@@ -10,9 +10,9 @@ GameObject:
   m_Component:
   - component: {fileID: 2379343749919079794}
   - component: {fileID: 4201051881256447682}
-  - component: {fileID: 575072498275767619}
+  - component: {fileID: -7087319423469114050}
   m_Layer: 0
-  m_Name: Shreder
+  m_Name: Colorizer
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -77,7 +77,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 4
-  m_Sprite: {fileID: 2910263088704340353, guid: 758ac8fcc18e3da479d1d10ef5b799bf, type: 3}
+  m_Sprite: {fileID: 7715335333941566167, guid: 5c1e583ac5501964c8d59369a281ed95, type: 3}
   m_Color: {r: 0.5943396, g: 0.5943396, b: 0.5943396, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -88,7 +88,7 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
---- !u!114 &575072498275767619
+--- !u!114 &-7087319423469114050
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -97,14 +97,15 @@ MonoBehaviour:
   m_GameObject: {fileID: 2678353271812311813}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 45e7b9d4a7e363d45af2094cbc0c6e5d, type: 3}
+  m_Script: {fileID: 11500000, guid: 1af334b5bec041e4c8a1cf1ac521a41a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   grid: {fileID: 0}
   belt: {fileID: 0}
   facingVec: {x: 1, y: 0}
-  itemPrefab: {fileID: 8971600722482412926, guid: fc6bf7feddf2e8f42ac34f4741c395c0, type: 3}
+  itemPrefab: {fileID: 0}
+  outputColor: {r: 1, g: 0.495283, b: 0.495283, a: 1}
   poolPrewarm: 8
-  processingSeconds: 3
+  processingSeconds: 0.5
   useGameTickForProcessing: 1
   enableDebugLogs: 0

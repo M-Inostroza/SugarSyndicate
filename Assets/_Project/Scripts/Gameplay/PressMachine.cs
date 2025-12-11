@@ -1,22 +1,12 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
-public class PressMachine : MonoBehaviour
+public class PressMachine : MonoBehaviour, IMachine
 {
-    static readonly Dictionary<Vector2Int, PressMachine> s_byCell = new Dictionary<Vector2Int, PressMachine>();
-
-    // Cached refs to avoid reflection per cycle
-    static object s_beltInstance;
-    static MethodInfo s_trySpawnMI;
-    static Type s_itemType;
-    static FieldInfo s_itemViewField;
-    static object s_gridInstance;
-    static MethodInfo s_cellToWorldMI;
-    static MethodInfo s_poolGetWithPrefab;
-    static MethodInfo s_poolGetLegacy;
+    [Header("Services")]
+    [SerializeField] GridService grid;
+    [SerializeField] BeltSimulationService belt;
 
     [Header("Orientation")]
     [Tooltip("Output/facing vector. Input is the opposite side. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
@@ -41,8 +31,10 @@ public class PressMachine : MonoBehaviour
 
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
+    public Vector2Int Cell => cell;
 
     Vector2Int cell;
+    bool registered;
 
     // State
     bool busy;               // true after accepting an input until output successfully spawns
@@ -66,27 +58,23 @@ public class PressMachine : MonoBehaviour
     {
         DLog($"[PressMachine] Awake called for {gameObject.name} at position {transform.position}");
 
+        if (grid == null) grid = GridService.Instance;
+        if (belt == null) belt = BeltSimulationService.Instance;
+    }
+
+    void Start()
+    {
         if (!isGhost && itemPrefab != null)
         {
-            TryCallStatic("ItemViewPool", "Ensure", new object[] { itemPrefab, poolPrewarm });
+            ItemViewPool.Ensure(itemPrefab, poolPrewarm);
         }
 
-        if (isGhost) return;
+        if (isGhost || grid == null) return;
 
         TryRegisterAsMachineAndSnap();
-
-        // Fix: Prevent double registration by checking if already registered
-        if (s_byCell.ContainsKey(cell))
-        {
-            DWarn($"[PressMachine] Cell {cell} already registered. Removing old registration and registering this one.");
-            s_byCell.Remove(cell);
-        }
-
-        s_byCell[cell] = this;
+        MachineRegistry.Register(this);
+        registered = true;
         DLog($"[PressMachine] Registered at cell {cell} facing {OutputVec}");
-
-        // Resolve and cache heavy reflection once
-        WarmupCaches();
     }
 
     void OnEnable()
@@ -108,37 +96,39 @@ public class PressMachine : MonoBehaviour
 
     void OnDestroy()
     {
-        try { if (s_byCell.ContainsKey(cell) && s_byCell[cell] == this) s_byCell.Remove(cell); } catch { }
-        // Clear grid logical cell if this press is being deleted
         try
         {
-            var grid = FindGridService();
+            if (useGameTickForProcessing)
+            {
+                try { GameTick.OnTickStart -= OnTick; } catch { }
+            }
+            if (!registered) return;
+            MachineRegistry.Unregister(this);
+            if (grid == null) grid = GridService.Instance;
             if (grid != null)
             {
-                var t = grid.GetType();
-                var miClear = t.GetMethod("ClearCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
-                if (miClear != null) miClear.Invoke(grid, new object[] { cell });
-                var miGetCell = t.GetMethod("GetCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
-                if (miGetCell != null)
-                {
-                    var cellObj = miGetCell.Invoke(grid, new object[] { cell });
-                    if (cellObj != null)
-                    {
-                        var fiHasMachine = cellObj.GetType().GetField("hasMachine", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (fiHasMachine != null) fiHasMachine.SetValue(cellObj, false);
-                    }
-                }
+                grid.ClearCell(cell);
+                var c = grid.GetCell(cell);
+                if (c != null) c.hasMachine = false;
             }
         }
         catch { }
     }
 
     public static bool TryGetAt(Vector2Int c, out PressMachine press)
-        => s_byCell.TryGetValue(c, out press);
-
-    public bool AcceptsFromVec(Vector2Int approachFromVec)
     {
-        DLog($"[PressMachine] AcceptsFromVec called for approach vector {approachFromVec} at cell {cell}");
+        press = null;
+        if (MachineRegistry.TryGet(c, out var machine) && machine is PressMachine pm)
+        {
+            press = pm;
+            return true;
+        }
+        return false;
+    }
+
+    public bool CanAcceptFrom(Vector2Int approachFromVec)
+    {
+        DLog($"[PressMachine] CanAcceptFrom called for approach vector {approachFromVec} at cell {cell}");
 
         // Must approach from the input side
         if (approachFromVec != InputVec)
@@ -160,113 +150,26 @@ public class PressMachine : MonoBehaviour
     {
         try
         {
-            var grid = FindGridService();
-            if (grid == null) { DWarn("[PressMachine] GridService not found"); return; }
-            var t = grid.GetType();
-            var miWorldToCell = t.GetMethod("WorldToCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector3) }, null);
-            var miCellToWorld = t.GetMethod("CellToWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(float) }, null);
-            var miSetMachine = t.GetMethod("SetMachineCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
-            if (miWorldToCell == null || miCellToWorld == null || miSetMachine == null) { DWarn("[PressMachine] GridService methods not found"); return; }
+            if (grid == null) grid = GridService.Instance;
+            if (grid == null) { Debug.LogWarning("[PressMachine] GridService not found"); return; }
 
-            var v = (Vector2Int)miWorldToCell.Invoke(grid, new object[] { transform.position });
-            cell = v;
-            // register as Machine
-            miSetMachine.Invoke(grid, new object[] { v });
+            cell = grid.WorldToCell(transform.position);
+            grid.SetMachineCell(cell);
             // snap to center
-            var world = (Vector3)miCellToWorld.Invoke(grid, new object[] { v, transform.position.z });
+            var world = grid.CellToWorld(cell, transform.position.z);
             transform.position = world;
         }
         catch (Exception ex) { DWarn($"[PressMachine] Registration failed: {ex.Message}"); }
     }
 
-    object FindGridService()
-    {
-        // 1) Prefer GridService.Instance to match BeltSimulationService
-        try
-        {
-            var type = FindTypeByName("GridService");
-            if (type != null)
-            {
-                var prop = type.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                if (prop != null)
-                {
-                    var inst = prop.GetValue(null, null) as MonoBehaviour;
-                    if (inst != null) return inst;
-                }
-            }
-        }
-        catch { }
-
-        // 2) Fallback: search scene objects
-        try
-        {
-            var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-            foreach (var mb in all) { if (mb != null && mb.GetType().Name == "GridService") return mb; }
-        }
-        catch { }
-        return null;
-    }
-
-    void WarmupCaches()
-    {
-        try
-        {
-            // Grid and helpers
-            if (s_gridInstance == null)
-            {
-                s_gridInstance = FindGridService();
-                if (s_gridInstance != null)
-                {
-                    var gt = s_gridInstance.GetType();
-                    s_cellToWorldMI = s_cellToWorldMI ?? gt.GetMethod("CellToWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(float) }, null);
-                }
-            }
-
-            // Belt singleton and TrySpawnItem
-            if (s_beltInstance == null)
-            {
-                s_beltInstance = FindSingletonByTypeName("BeltSimulationService");
-                if (s_beltInstance != null)
-                {
-                    var bt = s_beltInstance.GetType();
-                    s_trySpawnMI = s_trySpawnMI ?? bt.GetMethod("TrySpawnItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                }
-            }
-
-            // Item type + view field
-            if (s_itemType == null)
-            {
-                s_itemType = FindTypeByName("BeltSimulationService+Item") ?? FindTypeByName("GridService+Item") ?? FindTypeByName("Item");
-                if (s_itemType != null)
-                {
-                    s_itemViewField = s_itemViewField ?? s_itemType.GetField("view", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                }
-            }
-
-            // ItemViewPool Get methods
-            if (s_poolGetWithPrefab == null || s_poolGetLegacy == null)
-            {
-                var poolType = FindTypeByName("ItemViewPool");
-                if (poolType != null)
-                {
-                    if (s_poolGetWithPrefab == null)
-                        s_poolGetWithPrefab = poolType.GetMethod("Get", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[] { typeof(GameObject), typeof(Vector3), typeof(Quaternion), typeof(Transform) }, null);
-                    if (s_poolGetLegacy == null)
-                        s_poolGetLegacy = poolType.GetMethod("Get", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[] { typeof(Vector3), typeof(Quaternion), typeof(Transform) }, null);
-                }
-            }
-        }
-        catch { }
-    }
-
     // Return true if the item was accepted and processing started
-    public bool OnItemArrived()
+    public bool TryStartProcess(Item item)
     {
-        DLog($"[PressMachine] OnItemArrived called for cell {cell}");
+        DLog($"[PressMachine] TryStartProcess called for cell {cell}");
 
         if (busy)
         {
-            DWarn($"[PressMachine] OnItemArrived ignored because machine is busy.");
+            DWarn($"[PressMachine] TryStartProcess ignored because machine is busy.");
             return false;
         }
 
@@ -277,6 +180,9 @@ public class PressMachine : MonoBehaviour
         DLog($"[PressMachine] Input accepted at {cell}. Processing for {remainingTime:0.###} sec... busy={busy}, hasInputThisCycle={hasInputThisCycle}");
         return true;
     }
+
+    // Back-compat helper for any legacy callers
+    public bool OnItemArrived() => TryStartProcess(null);
 
     void OnTick()
     {
@@ -352,125 +258,37 @@ public class PressMachine : MonoBehaviour
             return false; 
         }
 
-        // Ensure caches are warm
-        WarmupCaches();
-
-        if (s_gridInstance == null || s_beltInstance == null || s_trySpawnMI == null || s_itemType == null)
+        if (grid == null) grid = GridService.Instance;
+        if (belt == null) belt = BeltSimulationService.Instance;
+        if (grid == null || belt == null)
         {
-            DWarn("[PressMachine] Missing cached refs (grid/belt/item).");
+            Debug.LogWarning("[PressMachine] Missing grid or belt service; cannot produce output.");
             return false;
         }
 
-        // Create Item instance
-        object itemObj = null;
-        try { itemObj = Activator.CreateInstance(s_itemType); } catch { itemObj = null; }
-        if (itemObj == null) { DWarn("[PressMachine] Failed to allocate item instance."); return false; }
+        var item = new Item();
 
         // Compute out cell
         var outCell = cell + OutputVec;
 
-        // Call TrySpawnItem(outCell, item) via cached MI
-        bool spawned = false;
-        try { spawned = (bool)s_trySpawnMI.Invoke(s_beltInstance, new object[] { outCell, itemObj }); }
-        catch (Exception ex) { DWarn($"[PressMachine] TrySpawnItem threw: {ex.Message}"); spawned = false; }
-
-        if (!spawned)
+        if (!belt.TrySpawnItem(outCell, item))
         {
             // Keep waitingToOutput=true; try again on a later tick
             return false;
         }
 
         // Attach view to item using pool if available
-        Transform view = null;
-        var parent = TryCallStatic("ContainerLocator", "GetItemContainer", null) as Transform;
-        Vector3 world = transform.position;
-        try
-        {
-            if (s_cellToWorldMI != null)
-                world = (Vector3)s_cellToWorldMI.Invoke(s_gridInstance, new object[] { outCell, itemPrefab.transform.position.z });
-        }
-        catch { }
-
-        try
-        {
-            if (s_poolGetWithPrefab != null)
-                view = s_poolGetWithPrefab.Invoke(null, new object[] { itemPrefab, world, Quaternion.identity, parent }) as Transform;
-            if (view == null && s_poolGetLegacy != null)
-                view = s_poolGetLegacy.Invoke(null, new object[] { world, Quaternion.identity, parent }) as Transform;
-        }
-        catch { }
-
+        var parent = ContainerLocator.GetItemContainer();
+        var world = grid.CellToWorld(outCell, itemPrefab.transform.position.z);
+        Transform view = ItemViewPool.Get(itemPrefab, world, Quaternion.identity, parent);
         if (view == null)
         {
             var go = parent != null ? Instantiate(itemPrefab, world, Quaternion.identity, parent) : Instantiate(itemPrefab, world, Quaternion.identity);
             view = go.transform;
         }
 
-        if (s_itemViewField != null)
-        {
-            try { s_itemViewField.SetValue(itemObj, view); } catch { }
-        }
+        item.view = view;
         if (view != null) view.position = world;
         return true;
-    }
-
-    static Type FindTypeByName(string name)
-    {
-        // Prefer the main game assembly to avoid conflicts with package types
-        try
-        {
-            var asm = Array.Find(AppDomain.CurrentDomain.GetAssemblies(), a => a != null && a.GetName().Name == "Assembly-CSharp");
-            if (asm != null)
-            {
-                try
-                {
-                    var tExact = Array.Find(asm.GetTypes(), tt => tt != null && tt.Name == name);
-                    if (tExact != null) return tExact;
-                }
-                catch { }
-            }
-        }
-        catch { }
-
-        // Fallback: first match across all assemblies
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            Type t = null;
-            try { t = Array.Find(asm.GetTypes(), tt => tt.Name == name); } catch { }
-            if (t != null) return t;
-        }
-        return null;
-    }
-
-    static object FindSingletonByTypeName(string name)
-    {
-        var type = FindTypeByName(name);
-        if (type == null) return null;
-        var prop = type.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        if (prop != null)
-        {
-            try { return prop.GetValue(null, null); } catch { }
-        }
-        // Fallback: find any object of that type in scene
-        try
-        {
-            var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-            foreach (var mb in all) { if (mb != null && mb.GetType().Name == name) return mb; }
-        }
-        catch { }
-        return null;
-    }
-
-    static MethodInfo FindStaticMethod(string typeName, string methodName, Type[] sig)
-    {
-        var type = FindTypeByName(typeName); if (type == null) return null;
-        try { return type.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, sig ?? Type.EmptyTypes, null); } catch { return null; }
-    }
-
-    static object TryCallStatic(string typeName, string methodName, object[] args)
-    {
-        var method = FindStaticMethod(typeName, methodName, args == null ? Type.EmptyTypes : Array.ConvertAll(args, a => a?.GetType() ?? typeof(object)));
-        if (method == null) return null;
-        try { return method.Invoke(null, args); } catch { return null; }
     }
 }

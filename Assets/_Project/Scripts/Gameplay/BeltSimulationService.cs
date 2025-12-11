@@ -140,8 +140,8 @@ public class BeltSimulationService : MonoBehaviour
         var s = GameManager.Instance.State;
         // Always pause during Build/Delete so items freeze the moment you enter those modes
         if (s == GameState.Build || s == GameState.Delete) return true;
-        // Otherwise, optionally pause if dragging is enabled via toggle (kept for future use)
-        if (!pauseWhileDragging) return false;
+        // Optionally pause while dragging build previews if enabled
+        if (pauseWhileDragging && BuildModeController.IsDragging) return true;
         return false;
     }
 
@@ -429,70 +429,15 @@ public class BeltSimulationService : MonoBehaviour
             return cellPos; // out of bounds; retry later
         }
         
-        // Special: machine intake happens before entering the cell
+        // Machines handle intake before entering the cell
         if (dest.type == GridService.CellType.Machine)
         {
-            
-            // Respect machine orientation: only accept if approaching from its input side
-            var approachFromVec = -DirectionUtil.DirVec(outDir); // vector pointing from machine toward current cell
-            
-            PressMachine press;
-            if (PressMachine.TryGetAt(destPos, out press) && press != null)
-            {
-                
-                if (press.AcceptsFromVec(approachFromVec))
-                {
-                    // Double-check acceptance at notify time to avoid consuming while busy
-                    var theItem = cell.item;
-                    bool started = false;
-                    try { started = press.OnItemArrived(); } catch { started = false; }
-                    if (started)
-                    {
-                        ConsumeItemAt(cellPos, theItem);
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"[BeltSimulationService] PressMachine reported busy at notify; keeping item at {cellPos}.");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"[BeltSimulationService] PressMachine rejected item from approach vector {approachFromVec}");
-                }
-                // Whether accepted or not, we do not move into the machine cell this step
+            if (TryHandOffToMachine(destPos, cellPos, outDir, cell, blockWhenMissing: true))
                 return cellPos;
-            }
-            else
-            {
-                Debug.LogWarning($"[BeltSimulationService] No PressMachine found at {destPos}");
-            }
-            // No registered press found: treat as blocked
-            return cellPos;
         }
-
-        // Fallback: if the grid cell isn't marked as Machine but we do have a registered press there,
-        // treat it like a machine intake. This guards against rare registration ordering issues.
+        else if (TryHandOffToMachine(destPos, cellPos, outDir, cell, blockWhenMissing: false))
         {
-            PressMachine press;
-            if (PressMachine.TryGetAt(destPos, out press) && press != null)
-            {
-                var approachFromVec = -DirectionUtil.DirVec(outDir);
-                if (press.AcceptsFromVec(approachFromVec))
-                {
-                    var theItem = cell.item;
-                    bool started = false;
-                    try { started = press.OnItemArrived(); } catch { started = false; }
-                    if (started)
-                    {
-                        ConsumeItemAt(cellPos, theItem);
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"[BeltSimulationService] PressMachine reported busy at notify; keeping item at {cellPos}.");
-                    }
-                }
-                return cellPos;
-            }
+            return cellPos;
         }
 
         if (dest.hasItem || !IsBeltLike(dest))
@@ -525,6 +470,44 @@ public class BeltSimulationService : MonoBehaviour
 
         // Return destination so caller schedules it for next step
         return destPos;
+    }
+
+    // Handle machine intake without coupling to specific machine types
+    bool TryHandOffToMachine(Vector2Int destPos, Vector2Int sourcePos, Direction outDir, GridService.Cell sourceCell, bool blockWhenMissing)
+    {
+        var approachFromVec = -DirectionUtil.DirVec(outDir);
+        if (!MachineRegistry.TryGet(destPos, out var machine) || machine == null)
+        {
+            if (blockWhenMissing)
+                Debug.LogWarning($"[BeltSimulationService] Machine cell at {destPos} has no registered machine; blocking item.");
+            return blockWhenMissing;
+        }
+
+        bool accepts = false;
+        try { accepts = machine.CanAcceptFrom(approachFromVec); }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[BeltSimulationService] Machine.CanAcceptFrom threw at {destPos}: {ex.Message}");
+            return true; // treat as blocked
+        }
+
+        if (!accepts)
+            return true; // machine present but not accepting now
+
+        var item = sourceCell?.item;
+        bool started = false;
+        try { started = machine.TryStartProcess(item); }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[BeltSimulationService] Machine.TryStartProcess threw at {destPos}: {ex.Message}");
+            started = false;
+        }
+
+        if (started)
+        {
+            ConsumeItemAt(sourcePos, item);
+        }
+        return true; // always stop movement toward machines this step
     }
 
     // Try to pull an item from neighbor into target cell. Returns true if a move occurred.
@@ -792,12 +775,8 @@ public class BeltSimulationService : MonoBehaviour
     {
         try
         {
-            PressMachine press;
-            if (PressMachine.TryGetAt(cellPos, out press) && press != null)
-            {
-                press.OnItemArrived();
-                return;
-            }
+            if (MachineRegistry.TryGet(cellPos, out var machine) && machine != null)
+                machine.TryStartProcess(item);
         }
         catch (Exception ex)
         {

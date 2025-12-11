@@ -6,6 +6,8 @@ public class MachineBuilder : MonoBehaviour
 {
     [Header("Setup")]
     [SerializeField] GameObject pressMachinePrefab;
+    [SerializeField] GameObject shrederPrefab;
+    [SerializeField] GameObject colorizerPrefab;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -21,6 +23,9 @@ public class MachineBuilder : MonoBehaviour
     Vector2Int baseCell;
     GameObject ghostGO;
     PressMachine ghostPress;
+    ColorizerMachine ghostColorizer;
+    GameObject activePrefab;
+    string activeName = "PressMachine";
 
     void Awake()
     {
@@ -131,12 +136,39 @@ public class MachineBuilder : MonoBehaviour
     // UI Button-friendly helper: drag this component into a Button.onClick and pick BuildPress
     public void BuildPress()
     {
+        activePrefab = pressMachinePrefab;
+        activeName = "PressMachine";
+        ArmPlacement();
+    }
+
+    public void BuildShreder()
+    {
+        activePrefab = shrederPrefab;
+        activeName = "Shreder";
+        ArmPlacement();
+    }
+
+    public void BuildColorizer()
+    {
+        activePrefab = colorizerPrefab;
+        activeName = "Colorizer";
+        ArmPlacement();
+    }
+
+    void ArmPlacement()
+    {
         // End any active conveyor preview WITHOUT changing global state
         TryEndConveyorPreviewWithoutState();
 
         // Only arm placement if currently in Build mode
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Build)
             return;
+
+        if (activePrefab == null)
+        {
+            Debug.LogWarning($"[MachineBuilder] No prefab assigned for {activeName}.");
+            return;
+        }
 
         // Wait for the next world click to place
         awaitingWorldClick = true;
@@ -219,10 +251,11 @@ public class MachineBuilder : MonoBehaviour
 
     void SpawnGhost(Vector2Int cell)
     {
-        if (pressMachinePrefab == null || grid == null || miCellToWorld == null) return;
+        if (activePrefab == null || grid == null || miCellToWorld == null) return;
         var pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
-        ghostGO = Instantiate(pressMachinePrefab, pos, Quaternion.identity);
+        ghostGO = Instantiate(activePrefab, pos, Quaternion.identity);
         ghostPress = ghostGO.GetComponent<PressMachine>();
+        ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
         if (ghostPress != null)
         {
             ghostPress.isGhost = true;
@@ -243,11 +276,12 @@ public class MachineBuilder : MonoBehaviour
         else if (outputDir == new Vector2Int(0, -1)) z = 270f;
         ghostGO.transform.rotation = Quaternion.Euler(0, 0, z);
         if (ghostPress != null) ghostPress.facingVec = outputDir;
+        if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
     }
 
     void Commit(Vector2Int cell, Vector2Int outputDir)
     {
-        Debug.Log($"[MachineBuilder] Committing PressMachine at cell {cell} facing {outputDir}");
+        Debug.Log($"[MachineBuilder] Committing {activeName} at cell {cell} facing {outputDir}");
 
         // Destroy ghost and place real prefab with same orientation
         Vector3 pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
@@ -256,14 +290,20 @@ public class MachineBuilder : MonoBehaviour
         // Ensure the target cell is not a belt anymore (remove any conveyor and clear logical belt)
         TryRemoveBeltAtCell(cell);
 
-        var go = Instantiate(pressMachinePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
-        Debug.Log($"[MachineBuilder] Instantiated PressMachine at position {pos}");
+        var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
+        Debug.Log($"[MachineBuilder] Instantiated {activeName} at position {pos}");
 
         var press = go.GetComponent<PressMachine>();
         if (press != null)
         {
             press.facingVec = outputDir; // Awake will register
-            Debug.Log($"[MachineBuilder] PressMachine facing set to {outputDir}");
+            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
+        }
+        var colorizer = go.GetComponent<ColorizerMachine>();
+        if (colorizer != null)
+        {
+            colorizer.facingVec = outputDir;
+            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
         }
 
         ClearPreviewState();
@@ -312,6 +352,8 @@ public class MachineBuilder : MonoBehaviour
         baseCell = default;
         ghostGO = null;
         ghostPress = null;
+        ghostColorizer = null;
+        activePrefab = null;
     }
 
     static float DirToZ(Vector2Int d)
