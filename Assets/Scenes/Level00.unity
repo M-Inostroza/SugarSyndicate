@@ -2498,6 +2498,10 @@ MonoBehaviour:
   origin: {x: -15, y: -7.5}
   cellSize: 1
   gridSize: {x: 30, y: 15}
+  waterColor: {r: 0.2, g: 0.5, b: 1, a: 0.25}
+  waterRects:
+  - origin: {x: 8, y: 9}
+    size: {x: 2, y: 2}
   showGridGizmos: 1
   onlyWhenSelected: 0
   showCellTypes: 1
@@ -4810,6 +4814,7 @@ MonoBehaviour:
   pressMachinePrefab: {fileID: 2678353271812311813, guid: 1bd4d9c976b78eb49a28e97542e43594, type: 3}
   shrederPrefab: {fileID: 2678353271812311813, guid: 0ef014f4a8123f147b01354b955d0d1f, type: 3}
   colorizerPrefab: {fileID: 2678353271812311813, guid: 662848fa58c1e3b4fa224fd0706778f0, type: 3}
+  waterPumpPrefab: {fileID: 0}
 --- !u!4 &2071044137
 Transform:
   m_ObjectHideFlags: 0

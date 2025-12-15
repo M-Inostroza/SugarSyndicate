@@ -12,6 +12,17 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField, Min(0.01f)] float cellSize = 1f;
     [SerializeField] Vector2Int gridSize = new Vector2Int(20, 12);
 
+    [System.Serializable]
+    public struct WaterRect
+    {
+        public Vector2Int origin; // bottom-left cell
+        public Vector2Int size;   // width/height in cells
+    }
+
+    [Header("Water")]
+    [SerializeField] Color waterColor = new Color(0.2f, 0.5f, 1f, 0.25f);
+    [SerializeField] List<WaterRect> waterRects = new();
+
     public float CellSize => cellSize;
 
     readonly Dictionary<Vector2Int, Cell> cells = new();
@@ -27,6 +38,7 @@ public class GridService : MonoBehaviour, IGridService
         public Direction inB = Direction.None;
         public Direction inC = Direction.None; // additional input for 3-way merger
         public byte junctionToggle; // 0/1 toggler for split/merge policies
+        public bool isWater;
 
         // legacy support
         public bool hasFloor;
@@ -43,6 +55,7 @@ public class GridService : MonoBehaviour, IGridService
         Instance = this;
         DontDestroyOnLoad(gameObject);
         WarmCells();
+        ApplyWaterRects();
     }
 
     // Ensure grid dictionary exists/config is sane in editor
@@ -54,6 +67,7 @@ public class GridService : MonoBehaviour, IGridService
         if (!Application.isPlaying)
         {
             WarmCells();
+            ApplyWaterRects();
         }
     }
 
@@ -63,6 +77,26 @@ public class GridService : MonoBehaviour, IGridService
         for (int y = 0; y < gridSize.y; y++)
             for (int x = 0; x < gridSize.x; x++)
                 cells[new Vector2Int(x, y)] = new Cell();
+    }
+
+    void ApplyWaterRects()
+    {
+        foreach (var kv in cells) kv.Value.isWater = false;
+        if (waterRects == null) return;
+        foreach (var wr in waterRects)
+        {
+            var size = new Vector2Int(Mathf.Max(0, wr.size.x), Mathf.Max(0, wr.size.y));
+            for (int y = 0; y < size.y; y++)
+            {
+                for (int x = 0; x < size.x; x++)
+                {
+                    var c = wr.origin + new Vector2Int(x, y);
+                    if (!InBounds(c)) continue;
+                    var cell = GetCell(c);
+                    if (cell != null) cell.isWater = true;
+                }
+            }
+        }
     }
 
     public Vector2Int WorldToCell(Vector3 world)
@@ -80,6 +114,8 @@ public class GridService : MonoBehaviour, IGridService
     public bool InBounds(Vector2Int c) => c.x >= 0 && c.y >= 0 && c.x < gridSize.x && c.y < gridSize.y;
 
     public Cell GetCell(Vector2Int c) => cells.TryGetValue(c, out var cell) ? cell : null;
+
+    public bool IsWater(Vector2Int c) => InBounds(c) && GetCell(c)?.isWater == true;
 
     // New API for the cell-based system
     public void SetBeltCell(Vector2Int c, Direction inA, Direction outA)
@@ -212,6 +248,12 @@ public class GridService : MonoBehaviour, IGridService
                 var cell = kv.Value;
                 var center = CellToWorld(c, 0f);
                 var size = new Vector3(cs * 0.95f, cs * 0.95f, 0.001f);
+
+                if (cell != null && cell.isWater)
+                {
+                    Gizmos.color = waterColor;
+                    Gizmos.DrawCube(center, size);
+                }
 
                 if (showCellTypes && cell != null)
                 {

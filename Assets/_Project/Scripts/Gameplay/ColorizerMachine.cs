@@ -19,6 +19,10 @@ public class ColorizerMachine : MonoBehaviour, IMachine
     [Tooltip("Color applied to the item's sprite renderer when re-emitted.")]
     [SerializeField] Color outputColor = Color.red;
 
+    [Header("Item Rules")]
+    [Tooltip("Logical item types accepted as input. Leave empty to accept any type.")]
+    [SerializeField] string[] acceptedItemTypes = new[] { "Sugar", "Cubes" };
+
     [Header("Processing")]
     [SerializeField, Min(0f)] float processingSeconds = 0.5f;
     [Tooltip("If true, processing advances on GameTick; otherwise it uses frame time.")]
@@ -106,7 +110,16 @@ public class ColorizerMachine : MonoBehaviour, IMachine
 
     public bool TryStartProcess(Item item)
     {
-        if (busy || item == null) return false;
+        if (busy) return false;
+        if (item == null) return false;
+
+        var accepted = ResolveAcceptedTypes();
+        if (!MatchesAcceptedTypes(item, accepted))
+        {
+            Debug.LogWarning($"[ColorizerMachine] Rejecting input at {cell}: expected {FormatAcceptedTypes(accepted)}, got '{FormatItemType(item.type)}'");
+            return false;
+        }
+
         busy = true;
         hasInputThisCycle = true;
         waitingToOutput = false;
@@ -155,6 +168,33 @@ public class ColorizerMachine : MonoBehaviour, IMachine
             }
         }
     }
+
+    string[] ResolveAcceptedTypes()
+    {
+        if (acceptedItemTypes == null) return Array.Empty<string>();
+        var list = new System.Collections.Generic.List<string>();
+        foreach (var t in acceptedItemTypes)
+        {
+            if (string.IsNullOrWhiteSpace(t)) continue;
+            list.Add(t.Trim());
+        }
+        return list.ToArray();
+    }
+
+    static bool MatchesAcceptedTypes(Item item, string[] acceptedTypes)
+    {
+        if (item == null) return false;
+        if (acceptedTypes == null || acceptedTypes.Length == 0) return true;
+        return item.IsAnyType(acceptedTypes);
+    }
+
+    static string FormatAcceptedTypes(string[] acceptedTypes)
+    {
+        if (acceptedTypes == null || acceptedTypes.Length == 0) return "'Any'";
+        return "'" + string.Join("', '", acceptedTypes) + "'";
+    }
+
+    static string FormatItemType(string raw) => string.IsNullOrWhiteSpace(raw) ? "Unknown" : raw;
 
     float GetTickDeltaSeconds()
     {

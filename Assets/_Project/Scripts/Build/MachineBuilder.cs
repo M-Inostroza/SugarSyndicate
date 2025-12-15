@@ -8,11 +8,13 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject pressMachinePrefab;
     [SerializeField] GameObject shrederPrefab;
     [SerializeField] GameObject colorizerPrefab;
+    [SerializeField] GameObject waterPumpPrefab;
 
     object grid;
     MethodInfo miWorldToCell;
     MethodInfo miCellToWorld;
     MethodInfo miGetCell;
+    MethodInfo miIsWater;
 
     bool awaitingWorldClick;
     bool waitRelease; // ignore the click that triggered the button until released
@@ -24,6 +26,7 @@ public class MachineBuilder : MonoBehaviour
     GameObject ghostGO;
     PressMachine ghostPress;
     ColorizerMachine ghostColorizer;
+    WaterPump ghostWaterPump;
     GameObject activePrefab;
     string activeName = "PressMachine";
 
@@ -77,6 +80,11 @@ public class MachineBuilder : MonoBehaviour
 
                 if (!TryCellFromWorld(world, out baseCell)) return;
                 if (IsBlocked(baseCell)) return;
+                if (RequiresWaterCell() && !IsWaterCell(baseCell))
+                {
+                    Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
+                    return;
+                }
                 SpawnGhost(baseCell);
                 placing = true;
             }
@@ -128,6 +136,7 @@ public class MachineBuilder : MonoBehaviour
                 miWorldToCell = t.GetMethod("WorldToCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector3) }, null);
                 miCellToWorld = t.GetMethod("CellToWorld", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int), typeof(float) }, null);
                 miGetCell = t.GetMethod("GetCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
+                miIsWater = t.GetMethod("IsWater", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Vector2Int) }, null);
             }
         }
         catch { }
@@ -152,6 +161,13 @@ public class MachineBuilder : MonoBehaviour
     {
         activePrefab = colorizerPrefab;
         activeName = "Colorizer";
+        ArmPlacement();
+    }
+
+    public void BuildWaterPump()
+    {
+        activePrefab = waterPumpPrefab;
+        activeName = "WaterPump";
         ArmPlacement();
     }
 
@@ -256,6 +272,7 @@ public class MachineBuilder : MonoBehaviour
         ghostGO = Instantiate(activePrefab, pos, Quaternion.identity);
         ghostPress = ghostGO.GetComponent<PressMachine>();
         ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
+        ghostWaterPump = ghostGO.GetComponent<WaterPump>();
         if (ghostPress != null)
         {
             ghostPress.isGhost = true;
@@ -277,6 +294,7 @@ public class MachineBuilder : MonoBehaviour
         ghostGO.transform.rotation = Quaternion.Euler(0, 0, z);
         if (ghostPress != null) ghostPress.facingVec = outputDir;
         if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
+        if (ghostWaterPump != null) ghostWaterPump.facingVec = outputDir;
     }
 
     void Commit(Vector2Int cell, Vector2Int outputDir)
@@ -289,6 +307,13 @@ public class MachineBuilder : MonoBehaviour
 
         // Ensure the target cell is not a belt anymore (remove any conveyor and clear logical belt)
         TryRemoveBeltAtCell(cell);
+
+        if (RequiresWaterCell() && !IsWaterCell(cell))
+        {
+            Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
+            ClearPreviewState();
+            return;
+        }
 
         var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
         Debug.Log($"[MachineBuilder] Instantiated {activeName} at position {pos}");
@@ -303,6 +328,12 @@ public class MachineBuilder : MonoBehaviour
         if (colorizer != null)
         {
             colorizer.facingVec = outputDir;
+            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
+        }
+        var pump = go.GetComponent<WaterPump>();
+        if (pump != null)
+        {
+            pump.facingVec = outputDir;
             Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
         }
 
@@ -353,6 +384,7 @@ public class MachineBuilder : MonoBehaviour
         ghostGO = null;
         ghostPress = null;
         ghostColorizer = null;
+        ghostWaterPump = null;
         activePrefab = null;
     }
 
@@ -379,5 +411,14 @@ public class MachineBuilder : MonoBehaviour
         var world = cam.ScreenToWorldPoint(mp);
         world.z = 0f;
         return world;
+    }
+
+    bool RequiresWaterCell() => activeName == "WaterPump";
+
+    bool IsWaterCell(Vector2Int cell)
+    {
+        if (grid == null || miIsWater == null) { CacheGrid(); if (grid == null || miIsWater == null) return false; }
+        try { return (bool)miIsWater.Invoke(grid, new object[] { cell }); }
+        catch { return false; }
     }
 }

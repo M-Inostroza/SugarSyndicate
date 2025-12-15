@@ -105,6 +105,9 @@ MonoBehaviour:
   facingVec: {x: 1, y: 0}
   itemPrefab: {fileID: 8971600722482412926, guid: fc6bf7feddf2e8f42ac34f4741c395c0, type: 3}
   poolPrewarm: 8
-  processingSeconds: 3
+  acceptedItemType: Cane
+  acceptedItemTypes: []
+  outputItemType: Sugar
+  processingSeconds: 2
   useGameTickForProcessing: 1
   enableDebugLogs: 0

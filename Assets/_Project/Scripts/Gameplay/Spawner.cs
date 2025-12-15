@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 public class Spawner : MonoBehaviour
@@ -6,6 +7,10 @@ public class Spawner : MonoBehaviour
 
     [Header("Prefabs")]
     [SerializeField] GameObject itemPrefab;
+
+    [Header("Item Identity")]
+    [Tooltip("Logical item type for spawned items; leave empty to use the prefab name.")]
+    [SerializeField] string itemType;
 
     [Header("When")]
     [SerializeField, Min(1)] int intervalTicks = 10;
@@ -67,7 +72,7 @@ public class Spawner : MonoBehaviour
         var dir = DirectionUtil.DirVec(outputDirection);
         var headCell = baseCell + dir;
 
-        var item = new Item { id = nextItemId };
+        var item = new Item { id = nextItemId, type = ResolveItemType() };
 
         bool spawned = false;
         Vector2Int spawnedCell = baseCell; // track where we actually placed the item
@@ -118,8 +123,15 @@ public class Spawner : MonoBehaviour
         if (item.view != null)
             item.view.position = world;
 
-        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} at {spawnedCell}");
+        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} ({item.type}) at {spawnedCell}");
         nextItemId++;
+    }
+
+    string ResolveItemType()
+    {
+        if (!string.IsNullOrWhiteSpace(itemType)) return itemType.Trim();
+        if (itemPrefab != null) return itemPrefab.name;
+        return string.Empty;
     }
 
 #if UNITY_EDITOR

@@ -17,6 +17,14 @@ public class PressMachine : MonoBehaviour, IMachine
     [SerializeField] GameObject itemPrefab;
     [SerializeField, Min(0)] int poolPrewarm = 8;
 
+    [Header("Item Rules")]
+    [Tooltip("Logical item type accepted as input. Leave empty to accept any type.")]
+    [SerializeField] string acceptedItemType = "Sugar";
+    [Tooltip("Additional logical item types accepted as input. Useful when multiple variants should be pressed.")]
+    [SerializeField] string[] acceptedItemTypes;
+    [Tooltip("Logical item type produced by this press. Defaults to prefab name when empty.")]
+    [SerializeField] string outputItemType = "Cubes";
+
     [Header("Processing")]
     [Tooltip("How many seconds are required to process one input into an output.")]
     [SerializeField, Min(0f)] float processingSeconds = 1.0f;
@@ -173,6 +181,19 @@ public class PressMachine : MonoBehaviour, IMachine
             return false;
         }
 
+        if (item == null)
+        {
+            Debug.LogWarning($"[PressMachine] Rejecting input at {cell}: item was null");
+            return false;
+        }
+
+        var acceptedTypes = ResolveAcceptedTypes();
+        if (!MatchesAcceptedTypes(item, acceptedTypes))
+        {
+            Debug.LogWarning($"[PressMachine] Rejecting input at {cell}: expected {FormatAcceptedTypes(acceptedTypes)}, got '{FormatItemType(item.type)}'");
+            return false;
+        }
+
         busy = true;
         hasInputThisCycle = true;
         waitingToOutput = false;
@@ -237,6 +258,45 @@ public class PressMachine : MonoBehaviour, IMachine
         }
     }
 
+    string[] ResolveAcceptedTypes()
+    {
+        // Combine legacy single entry with the array for flexible configuration.
+        var list = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrWhiteSpace(acceptedItemType)) list.Add(acceptedItemType.Trim());
+        if (acceptedItemTypes != null)
+        {
+            foreach (var t in acceptedItemTypes)
+            {
+                if (string.IsNullOrWhiteSpace(t)) continue;
+                list.Add(t.Trim());
+            }
+        }
+        return list.ToArray();
+    }
+
+    string ResolveOutputItemType()
+    {
+        if (!string.IsNullOrWhiteSpace(outputItemType)) return outputItemType.Trim();
+        if (itemPrefab != null) return itemPrefab.name;
+        return string.Empty;
+    }
+
+    static bool MatchesAcceptedTypes(Item item, string[] acceptedTypes)
+    {
+        // Empty accepted list means accept any type
+        if (item == null) return false;
+        if (acceptedTypes == null || acceptedTypes.Length == 0) return true;
+        return item.IsAnyType(acceptedTypes);
+    }
+
+    static string FormatItemType(string raw) => string.IsNullOrWhiteSpace(raw) ? "Unknown" : raw;
+
+    static string FormatAcceptedTypes(string[] acceptedTypes)
+    {
+        if (acceptedTypes == null || acceptedTypes.Length == 0) return "'Any'";
+        return "'" + string.Join("', '", acceptedTypes) + "'";
+    }
+
     float GetTickDeltaSeconds()
     {
         // Compute 1 / ticksPerSecond (fallback to 1/15)
@@ -266,7 +326,7 @@ public class PressMachine : MonoBehaviour, IMachine
             return false;
         }
 
-        var item = new Item();
+        var item = new Item { type = ResolveOutputItemType() };
 
         // Compute out cell
         var outCell = cell + OutputVec;
