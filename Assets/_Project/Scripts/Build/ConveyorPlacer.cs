@@ -748,6 +748,16 @@ public class ConveyorPlacer : MonoBehaviour
                 // Machine visual first
                 var mg = FindMachineAtCell(cell);
                 if (mg != null) { try { Destroy(mg); } catch { } removedSomething = true; }
+                // Water pipe
+                if (!removedSomething)
+                {
+                    var pipe = FindPipeAtCell(cell);
+                    if (pipe != null)
+                    {
+                        try { Destroy(pipe); } catch { }
+                        removedSomething = true;
+                    }
+                }
                 if (!removedSomething)
                 {
                     // Junction visual
@@ -1401,7 +1411,27 @@ public class ConveyorPlacer : MonoBehaviour
                 {
                     var conv = tr.GetComponent<Conveyor>() ?? tr.GetComponentInChildren<Conveyor>(true);
                     if (conv != null) return tr.gameObject;
+                    var pipe = tr.GetComponent<WaterPipe>() ?? tr.GetComponentInChildren<WaterPipe>(true);
+                    if (pipe != null) return tr.gameObject;
                 }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    GameObject FindPipeAtCell(Vector2Int cell)
+    {
+        try
+        {
+            var worldObj = miCellToWorld?.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            var pipes = UnityEngine.Object.FindObjectsByType<WaterPipe>(FindObjectsSortMode.None);
+            foreach (var p in pipes)
+            {
+                if (p == null) continue;
+                var pos = p.transform.position;
+                if (Mathf.Abs(pos.x - center.x) < 0.05f && Mathf.Abs(pos.y - center.y) < 0.05f)
+                    return p.gameObject;
             }
         }
         catch { }
