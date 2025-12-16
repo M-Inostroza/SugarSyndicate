@@ -6118,7 +6118,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -189.57983, y: -480}
+  m_AnchoredPosition: {x: 0, y: -435}
   m_SizeDelta: {x: 1500, y: 300}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1994418980
@@ -6134,7 +6134,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0, g: 0, b: 0, a: 0.15686275}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -6398,8 +6398,6 @@ MonoBehaviour:
   waterPumpPrefab: {fileID: 2678353271812311813, guid: 1f48ba58b9429514a941cfed3145d548, type: 3}
   waterPipePrefab: {fileID: 2678353271812311813, guid: 739416313e641574fa0a614166920a13, type: 3}
   waterOverlay: {fileID: 1021027031}
-  mixerOffsetRight: {x: 0, y: 0}
-  mixerOffsetUp: {x: 0, y: 0}
 --- !u!4 &2071044137
 Transform:
   m_ObjectHideFlags: 0

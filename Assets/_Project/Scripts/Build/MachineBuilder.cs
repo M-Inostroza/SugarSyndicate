@@ -14,9 +14,6 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject waterPumpPrefab;
     [SerializeField] GameObject waterPipePrefab;
     [SerializeField] WaterAreaOverlay waterOverlay;
-    [Header("Mixer Offsets (cells)")]
-    [SerializeField] Vector2 mixerOffsetRight = Vector2.zero;
-    [SerializeField] Vector2 mixerOffsetUp = Vector2.zero;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -770,15 +767,9 @@ public class MachineBuilder : MonoBehaviour
         if (cells.Count == 0 || miCellToWorld == null) return Vector3.zero;
         if (activeName == "Mixer" && cells.Count == 2)
         {
-            // Center between both cells, then apply facing-based offset in cell units
-            Vector3 sum = Vector3.zero;
-            foreach (var c in cells)
-                sum += (Vector3)miCellToWorld.Invoke(grid, new object[] { c, 0f });
-            var center = sum / cells.Count;
-            var cs = GetCellSize();
-            var offsetCells = MixerOffsetForFacing(facing);
-            center += new Vector3(offsetCells.x * cs, offsetCells.y * cs, 0f);
-            return center;
+            // Place mixer pivot on the base cell center and snap to half-cell increments (anchored to world origin).
+            var center = (Vector3)miCellToWorld.Invoke(grid, new object[] { origin, 0f });
+            return SnapToHalfCell(center);
         }
         Vector3 sum2 = Vector3.zero;
         foreach (var c in cells)
@@ -801,20 +792,11 @@ public class MachineBuilder : MonoBehaviour
         return 1f;
     }
 
-    Vector2 MixerOffsetForFacing(Vector2Int facing)
+    Vector3 SnapToHalfCell(Vector3 pos)
     {
-        // Offsets are expressed in cell units; default zero. Signs flip for opposite directions.
-        if (Mathf.Abs(facing.y) >= Mathf.Abs(facing.x))
-        {
-            // vertical
-            if (facing.y >= 0) return mixerOffsetUp;
-            return new Vector2(-mixerOffsetUp.x, -mixerOffsetUp.y);
-        }
-        else
-        {
-            // horizontal
-            if (facing.x >= 0) return mixerOffsetRight;
-            return new Vector2(-mixerOffsetRight.x, -mixerOffsetRight.y);
-        }
+        float cs = GetCellSize();
+        pos.x = Mathf.Floor(pos.x / cs) * cs + cs * 0.5f;
+        pos.y = Mathf.Floor(pos.y / cs) * cs + cs * 0.5f;
+        return pos;
     }
 }
