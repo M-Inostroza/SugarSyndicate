@@ -24,6 +24,10 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] List<WaterRect> waterRects = new();
 
     public float CellSize => cellSize;
+    public Vector2 Origin => origin;
+    public Vector2Int GridSize => gridSize;
+    public Color WaterColor => waterColor;
+    public IReadOnlyList<WaterRect> WaterRects => waterRects;
 
     readonly Dictionary<Vector2Int, Cell> cells = new();
 

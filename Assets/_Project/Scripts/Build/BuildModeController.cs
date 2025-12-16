@@ -129,6 +129,7 @@ public class BuildModeController : MonoBehaviour
                 conveyorPlacer?.BeginPreview();
                 break;
         }
+        if (current == BuildableType.Conveyor) BuildSelectionNotifier.Notify("Conveyor");
     }
 
     // UI-friendly overloads so Button.onClick can call without enum arguments
@@ -154,6 +155,7 @@ public class BuildModeController : MonoBehaviour
         current = BuildableType.None;
         HasActiveTool = false;
         onExitBuildMode?.Invoke();
+        BuildSelectionNotifier.Notify(null);
 
         // Return to Play state when leaving build mode
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Play);

@@ -98,6 +98,7 @@ public class JunctionBuilder : MonoBehaviour
         TryStopPressBuilder();
 
         mode = m;
+        BuildSelectionNotifier.Notify(mode == Mode.Splitter ? "Splitter" : "Merger");
         awaitingWorldClick = true;
         waitRelease = true;
         activationFrame = Time.frameCount;
@@ -343,6 +344,7 @@ public class JunctionBuilder : MonoBehaviour
     {
         if (ghostGO != null) Destroy(ghostGO);
         ClearPreviewState();
+        BuildSelectionNotifier.Notify(null);
     }
 
     void ClearPreviewState()

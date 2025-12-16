@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,6 +10,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject shrederPrefab;
     [SerializeField] GameObject colorizerPrefab;
     [SerializeField] GameObject waterPumpPrefab;
+    [SerializeField] WaterAreaOverlay waterOverlay;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -33,6 +35,7 @@ public class MachineBuilder : MonoBehaviour
     void Awake()
     {
         CacheGrid();
+        TryEnsureWaterOverlay();
     }
 
     void Update()
@@ -46,6 +49,7 @@ public class MachineBuilder : MonoBehaviour
                 awaitingWorldClick = false;
                 placing = false;
             }
+            HideWaterOverlay();
             return;
         }
 
@@ -65,6 +69,7 @@ public class MachineBuilder : MonoBehaviour
         {
             CancelPreview();
             awaitingWorldClick = false;
+            HideWaterOverlay();
             return;
         }
 
@@ -118,6 +123,7 @@ public class MachineBuilder : MonoBehaviour
         placing = false;
         // Clear any ghost preview safely
         CancelPreview();
+        HideWaterOverlay();
     }
 
     void CacheGrid()
@@ -142,12 +148,62 @@ public class MachineBuilder : MonoBehaviour
         catch { }
     }
 
+    void TryEnsureWaterOverlay()
+    {
+        if (waterOverlay != null) return;
+        try
+        {
+            var gs = grid as GridService ?? GridService.Instance ?? FindAnyObjectByType<GridService>();
+            if (gs != null)
+            {
+                waterOverlay = WaterAreaOverlay.FindOrCreate(gs);
+                if (waterOverlay == null)
+                {
+                    var go = new GameObject("WaterAreaOverlay");
+                    go.transform.SetParent(gs.transform, false);
+                    waterOverlay = go.AddComponent<WaterAreaOverlay>();
+                    waterOverlay.GetType().GetField("grid", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.SetValue(waterOverlay, gs);
+                }
+            }
+        }
+        catch { }
+    }
+
+    void ShowWaterOverlay()
+    {
+        TryEnsureWaterOverlay();
+        try
+        {
+            waterOverlay?.Rebuild();
+            waterOverlay?.Show();
+            if (waterOverlay != null)
+            {
+                Debug.Log($"[MachineBuilder] Water overlay ready ({waterOverlay.LastQuadCount} quads).");
+            }
+            else
+                Debug.LogWarning("[MachineBuilder] Water overlay missing.");
+        }
+        catch { }
+    }
+
+    void HideWaterOverlay()
+    {
+        try { waterOverlay?.Hide(); } catch { }
+    }
+
+    void NotifySelectionChanged(string selectionName)
+    {
+        BuildSelectionNotifier.Notify(selectionName);
+    }
+
     // UI Button-friendly helper: drag this component into a Button.onClick and pick BuildPress
     public void BuildPress()
     {
         activePrefab = pressMachinePrefab;
         activeName = "PressMachine";
         ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
     }
 
     public void BuildShreder()
@@ -155,6 +211,8 @@ public class MachineBuilder : MonoBehaviour
         activePrefab = shrederPrefab;
         activeName = "Shreder";
         ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
     }
 
     public void BuildColorizer()
@@ -162,6 +220,8 @@ public class MachineBuilder : MonoBehaviour
         activePrefab = colorizerPrefab;
         activeName = "Colorizer";
         ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
     }
 
     public void BuildWaterPump()
@@ -169,6 +229,8 @@ public class MachineBuilder : MonoBehaviour
         activePrefab = waterPumpPrefab;
         activeName = "WaterPump";
         ArmPlacement();
+        NotifySelectionChanged(activeName);
+        ShowWaterOverlay();
     }
 
     void ArmPlacement()
@@ -176,9 +238,9 @@ public class MachineBuilder : MonoBehaviour
         // End any active conveyor preview WITHOUT changing global state
         TryEndConveyorPreviewWithoutState();
 
-        // Only arm placement if currently in Build mode
+        // Ensure we enter Build mode so placement + overlay stay active
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Build)
-            return;
+            GameManager.Instance.SetState(GameState.Build);
 
         if (activePrefab == null)
         {
@@ -375,6 +437,7 @@ public class MachineBuilder : MonoBehaviour
     {
         if (ghostGO != null) Destroy(ghostGO);
         ClearPreviewState();
+        NotifySelectionChanged(null);
     }
 
     void ClearPreviewState()

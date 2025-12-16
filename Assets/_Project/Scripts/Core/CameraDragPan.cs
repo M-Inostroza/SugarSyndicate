@@ -17,6 +17,7 @@ public class CameraDragPan : MonoBehaviour
 
     [Header("Target")]
     [SerializeField] Camera targetCamera; // defaults to Camera.main
+    [SerializeField] GridService gridService;
 
     [Header("Input")]
     [SerializeField] MouseButton panButton = MouseButton.Left;
@@ -25,6 +26,10 @@ public class CameraDragPan : MonoBehaviour
     [Header("Behavior")]
     [Tooltip("Multiplier for drag amount. 1 means exact 1:1 world drag distance.")]
     [SerializeField, Min(0.01f)] float dragSensitivity = 1f;
+
+    [Header("Bounds")]
+    [SerializeField] bool constrainToGrid = true;
+    [SerializeField, Min(0f)] float edgePadding = 0.1f;
 
     [Header("Smoothing")]
     [Tooltip("Smooth camera towards drag target to avoid jitter.")]
@@ -42,6 +47,7 @@ public class CameraDragPan : MonoBehaviour
     void Awake()
     {
         if (targetCamera == null) targetCamera = Camera.main;
+        if (gridService == null) gridService = GridService.Instance;
     }
 
     void Update()
@@ -82,10 +88,13 @@ public class CameraDragPan : MonoBehaviour
 
             if (smooth)
             {
-                targetCamera.transform.position = Vector3.SmoothDamp(targetCamera.transform.position, desired, ref smoothVelocity, smoothTime);
+                var pos = Vector3.SmoothDamp(targetCamera.transform.position, desired, ref smoothVelocity, smoothTime);
+                ClampToGrid(ref pos);
+                targetCamera.transform.position = pos;
             }
             else
             {
+                ClampToGrid(ref desired);
                 targetCamera.transform.position = desired;
             }
         }
@@ -196,5 +205,37 @@ public class CameraDragPan : MonoBehaviour
         }
         catch { }
         return false;
+    }
+
+    void ClampToGrid(ref Vector3 pos)
+    {
+        if (!constrainToGrid) return;
+        if (targetCamera == null) return;
+        if (gridService == null) gridService = GridService.Instance;
+        if (gridService == null) return;
+        if (!targetCamera.orthographic) return; // only clamp orthographic cameras
+
+        var origin = (Vector2)gridService.Origin;
+        var size = gridService.GridSize;
+        float cs = gridService.CellSize;
+        float minX = origin.x;
+        float minY = origin.y;
+        float maxX = origin.x + size.x * cs;
+        float maxY = origin.y + size.y * cs;
+
+        float halfH = targetCamera.orthographicSize;
+        float halfW = halfH * targetCamera.aspect;
+        float pad = edgePadding;
+
+        float clampMinX = minX + halfW + pad;
+        float clampMaxX = maxX - halfW - pad;
+        float clampMinY = minY + halfH + pad;
+        float clampMaxY = maxY - halfH - pad;
+
+        // If camera view is larger than grid, center it and bail
+        if (clampMinX > clampMaxX) { pos.x = (minX + maxX) * 0.5f; }
+        else pos.x = Mathf.Clamp(pos.x, clampMinX, clampMaxX);
+        if (clampMinY > clampMaxY) { pos.y = (minY + maxY) * 0.5f; }
+        else pos.y = Mathf.Clamp(pos.y, clampMinY, clampMaxY);
     }
 }
