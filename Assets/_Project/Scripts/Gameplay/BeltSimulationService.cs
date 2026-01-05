@@ -55,6 +55,7 @@ public class BeltSimulationService : MonoBehaviour
     // bucket state
     int currentVisualBucket;
     int nextVisualBucketAssignment;
+    List<Item>[] visualBuckets;
 
     // track pause transitions
     bool wasPaused;
@@ -125,7 +126,7 @@ public class BeltSimulationService : MonoBehaviour
         {
             // Snap visuals to logical cell centers and clear any in-flight interpolation
             SnapAllItemViewsToCells();
-            visuals.Clear();
+            ClearVisuals();
             ReseedActiveFromGrid();
             wasPaused = false;
             // prevent immediate processing on the same frame which causes visual jump
@@ -162,7 +163,7 @@ public class BeltSimulationService : MonoBehaviour
                     vs.view.position = current;
                     vs.queue.Clear();
                 }
-                visuals.Clear();
+                ClearVisuals();
             }
             wasPaused = true;
         }
@@ -170,7 +171,7 @@ public class BeltSimulationService : MonoBehaviour
         {
             // exiting pause: snap all item views to their current cell centers & reseed
             SnapAllItemViewsToCells();
-            visuals.Clear();
+            ClearVisuals();
             ReseedActiveFromGrid();
             wasPaused = false;
             // prevent immediate processing on the same frame which causes visual jump
@@ -495,6 +496,8 @@ public class BeltSimulationService : MonoBehaviour
             return true; // machine present but not accepting now
 
         var item = sourceCell?.item;
+        if (item != null && pendingConsume.ContainsKey(item))
+            return true; // already handing off to a sink
         bool started = false;
         try { started = machine.TryStartProcess(item); }
         catch (Exception ex)
@@ -505,7 +508,22 @@ public class BeltSimulationService : MonoBehaviour
 
         if (started)
         {
-            ConsumeItemAt(sourcePos, item);
+            if (machine is Truck)
+            {
+                if (item == null || !smoothMovement || item.view == null)
+                {
+                    ConsumeItemAt(sourcePos, item, destPos);
+                }
+                else
+                {
+                    MoveView(item, sourcePos, destPos);
+                    pendingConsume[item] = new PendingConsume { source = sourcePos, dest = destPos };
+                }
+            }
+            else
+            {
+                ConsumeItemAt(sourcePos, item);
+            }
         }
         return true; // always stop movement toward machines this step
     }
@@ -545,6 +563,12 @@ public class BeltSimulationService : MonoBehaviour
     }
 
     readonly Dictionary<Item, VisualState> visuals = new Dictionary<Item, VisualState>();
+    struct PendingConsume
+    {
+        public Vector2Int source;
+        public Vector2Int dest;
+    }
+    readonly Dictionary<Item, PendingConsume> pendingConsume = new Dictionary<Item, PendingConsume>();
 
     float ComputeSegmentDuration(Vector3 a, Vector3 b)
     {
@@ -605,16 +629,26 @@ public class BeltSimulationService : MonoBehaviour
     void UpdateVisuals(float dt, int bucketIndex, int bucketCount)
     {
         if (visuals.Count == 0) return;
-        visualsRemoveBuffer.Clear();
-        foreach (var kv in visuals)
-        {
-            var item = kv.Key;
-            var vs = kv.Value;
-            if (vs.view == null) { visualsRemoveBuffer.Add(item); continue; }
+        EnsureVisualBuckets();
+        if (bucketIndex < 0 || bucketIndex >= visualBuckets.Length) return;
 
-            // only update visuals in the current bucket
-            if ((vs.bucket % bucketCount) != bucketIndex)
+        var bucket = visualBuckets[bucketIndex];
+        if (bucket.Count == 0) return;
+
+        visualsRemoveBuffer.Clear();
+        for (int i = 0; i < bucket.Count; i++)
+        {
+            var item = bucket[i];
+            if (!visuals.TryGetValue(item, out var vs) || vs == null)
+            {
+                visualsRemoveBuffer.Add(item);
                 continue;
+            }
+            if (vs.view == null)
+            {
+                visualsRemoveBuffer.Add(item);
+                continue;
+            }
 
             vs.elapsed += dt;
             float t = vs.duration <= 0f ? 1f : Mathf.Clamp01(vs.elapsed / vs.duration);
@@ -631,12 +665,20 @@ public class BeltSimulationService : MonoBehaviour
                 }
                 else
                 {
-                    visualsRemoveBuffer.Add(item);
+                    if (pendingConsume.TryGetValue(item, out var pending))
+                    {
+                        pendingConsume.Remove(item);
+                        ConsumeItemAt(pending.source, item, pending.dest);
+                    }
+                    else
+                    {
+                        visualsRemoveBuffer.Add(item);
+                    }
                 }
             }
         }
         for (int i = 0; i < visualsRemoveBuffer.Count; i++)
-            visuals.Remove(visualsRemoveBuffer[i]);
+            RemoveVisual(visualsRemoveBuffer[i]);
     }
 
     // Enqueue a visual segment. If a segment is already in progress for this item, queue the next target
@@ -647,7 +689,7 @@ public class BeltSimulationService : MonoBehaviour
         {
             if (item?.view != null)
                 item.view.position = targetWorld;
-            visuals.Remove(item);
+            RemoveVisual(item);
             return;
         }
 
@@ -660,6 +702,8 @@ public class BeltSimulationService : MonoBehaviour
 
         // Start a new segment from the current view position towards the target
         var start = item.view != null ? item.view.position : startWorld;
+        EnsureVisualBuckets();
+        int bucket = (nextVisualBucketAssignment++) % Mathf.Max(1, visualUpdateBuckets);
         var vs = new VisualState
         {
             view = item.view,
@@ -667,9 +711,10 @@ public class BeltSimulationService : MonoBehaviour
             end = targetWorld,
             elapsed = 0f,
             duration = ComputeSegmentDuration(start, targetWorld),
-            bucket = (nextVisualBucketAssignment++) % Mathf.Max(1, visualUpdateBuckets)
+            bucket = bucket
         };
         visuals[item] = vs;
+        visualBuckets[bucket].Add(item);
     }
 
     // backward compat overload (if ever needed elsewhere)
@@ -705,7 +750,7 @@ public class BeltSimulationService : MonoBehaviour
         {
             var pos = grid.CellToWorld(cellPos, item.view.position.z);
             item.view.position = pos;
-            visuals.Remove(item);
+            RemoveVisual(item);
         }
         // register for processing on next step
         lock (pendingActive)
@@ -713,6 +758,71 @@ public class BeltSimulationService : MonoBehaviour
             pendingActive.Add(cellPos);
         }
         return true;
+    }
+
+    // Immediately attempts a single logical step from a freshly spawned cell.
+    // Returns true if the item moved this frame.
+    public bool TryAdvanceSpawnedItem(Vector2Int cellPos)
+    {
+        if (grid == null) return false;
+        if (IsPaused()) return false;
+        var movedTo = StepCell(cellPos);
+        if (movedTo.HasValue)
+        {
+            active.Add(movedTo.Value);
+            return true;
+        }
+        return false;
+    }
+
+    void EnsureVisualBuckets()
+    {
+        int count = Mathf.Max(1, visualUpdateBuckets);
+        if (visualBuckets != null && visualBuckets.Length == count) return;
+
+        visualBuckets = new List<Item>[count];
+        for (int i = 0; i < count; i++) visualBuckets[i] = new List<Item>();
+
+        foreach (var kv in visuals)
+        {
+            var item = kv.Key;
+            var vs = kv.Value;
+            if (item == null || vs == null) continue;
+            int bucket = vs.bucket;
+            if (bucket < 0 || bucket >= count)
+                bucket = (nextVisualBucketAssignment++) % count;
+            vs.bucket = bucket;
+            visualBuckets[bucket].Add(item);
+        }
+    }
+
+    void RemoveVisual(Item item)
+    {
+        if (item == null) return;
+        pendingConsume.Remove(item);
+        if (visuals.Remove(item) && visualBuckets != null)
+        {
+            int count = visualBuckets.Length;
+            for (int i = 0; i < count; i++)
+                visualBuckets[i].Remove(item);
+        }
+    }
+
+    void ClearVisuals()
+    {
+        if (pendingConsume.Count > 0)
+        {
+            var toConsume = new List<KeyValuePair<Item, PendingConsume>>(pendingConsume);
+            for (int i = 0; i < toConsume.Count; i++)
+            {
+                var kv = toConsume[i];
+                ConsumeItemAt(kv.Value.source, kv.Key, kv.Value.dest);
+            }
+        }
+        visuals.Clear();
+        if (visualBuckets == null) return;
+        for (int i = 0; i < visualBuckets.Length; i++)
+            visualBuckets[i].Clear();
     }
 
     public void RegisterConveyor(Conveyor c)
@@ -784,7 +894,7 @@ public class BeltSimulationService : MonoBehaviour
         }
     }
 
-    void ConsumeItemAt(Vector2Int cellPos, Item item)
+    void ConsumeItemAt(Vector2Int cellPos, Item item, Vector2Int? destPos = null)
     {
         try
         {
@@ -792,11 +902,17 @@ public class BeltSimulationService : MonoBehaviour
             // Remove visual with a short feedback tween end position matching current position (no move)
             if (item?.view != null)
             {
+                if (destPos.HasValue && grid != null)
+                {
+                    var snap = grid.CellToWorld(destPos.Value, item.view.position.z);
+                    item.view.position = snap;
+                }
                 try { Destroy(item.view.gameObject); } catch { }
             }
             if (item != null)
             {
-                visuals.Remove(item);
+                RemoveVisual(item);
+                pendingConsume.Remove(item);
             }
             // Clear logical cell where the item was before the press
             var c = grid?.GetCell(cellPos);

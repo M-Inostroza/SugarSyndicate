@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using UnityEngine.Rendering;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -10,10 +11,13 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject pressMachinePrefab;
     [SerializeField] GameObject shrederPrefab;
     [SerializeField] GameObject colorizerPrefab;
-    [SerializeField] GameObject mixerPrefab;
     [SerializeField] GameObject waterPumpPrefab;
     [SerializeField] GameObject waterPipePrefab;
+    [SerializeField] GameObject minePrefab;
     [SerializeField] WaterAreaOverlay waterOverlay;
+    [SerializeField] SugarZoneOverlay sugarOverlay;
+    [SerializeField] int ghostSortingOrder = 10000;
+    [SerializeField] int mineSortingOrder = 1100;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -43,6 +47,7 @@ public class MachineBuilder : MonoBehaviour
     {
         CacheGrid();
         TryEnsureWaterOverlay();
+        TryEnsureSugarOverlay();
     }
 
     void Update()
@@ -57,6 +62,7 @@ public class MachineBuilder : MonoBehaviour
                 placing = false;
             }
             HideWaterOverlay();
+            HideSugarOverlay();
             return;
         }
 
@@ -77,6 +83,7 @@ public class MachineBuilder : MonoBehaviour
             CancelPreview();
             awaitingWorldClick = false;
             HideWaterOverlay();
+            HideSugarOverlay();
             return;
         }
 
@@ -127,6 +134,12 @@ public class MachineBuilder : MonoBehaviour
                     Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
                     return;
                 }
+                if (RequiresSugarCell() && !IsSugarCell(baseCell))
+                {
+                    Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+                    return;
+                }
+                TrySetBuildToolActive(true);
                 SpawnGhost(baseCell);
                 placing = true;
             }
@@ -162,6 +175,7 @@ public class MachineBuilder : MonoBehaviour
         // Clear any ghost preview safely
         CancelPreview();
         HideWaterOverlay();
+        HideSugarOverlay();
     }
 
     void CacheGrid()
@@ -208,6 +222,28 @@ public class MachineBuilder : MonoBehaviour
         catch { }
     }
 
+    void TryEnsureSugarOverlay()
+    {
+        if (sugarOverlay != null) return;
+        try
+        {
+            var gs = grid as GridService ?? GridService.Instance ?? FindAnyObjectByType<GridService>();
+            if (gs != null)
+            {
+                sugarOverlay = SugarZoneOverlay.FindOrCreate(gs);
+                if (sugarOverlay == null)
+                {
+                    var go = new GameObject("SugarZoneOverlay");
+                    go.transform.SetParent(gs.transform, false);
+                    sugarOverlay = go.AddComponent<SugarZoneOverlay>();
+                    sugarOverlay.GetType().GetField("grid", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                        ?.SetValue(sugarOverlay, gs);
+                }
+            }
+        }
+        catch { }
+    }
+
     void ShowWaterOverlay()
     {
         TryEnsureWaterOverlay();
@@ -228,6 +264,22 @@ public class MachineBuilder : MonoBehaviour
     void HideWaterOverlay()
     {
         try { waterOverlay?.Hide(); } catch { }
+    }
+
+    void ShowSugarOverlay()
+    {
+        TryEnsureSugarOverlay();
+        try
+        {
+            sugarOverlay?.Rebuild();
+            sugarOverlay?.Show();
+        }
+        catch { }
+    }
+
+    void HideSugarOverlay()
+    {
+        try { sugarOverlay?.Hide(); } catch { }
     }
 
     void NotifySelectionChanged(string selectionName)
@@ -417,6 +469,7 @@ public class MachineBuilder : MonoBehaviour
         ArmPlacement();
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
+        HideSugarOverlay();
     }
 
     public void BuildShreder()
@@ -426,6 +479,7 @@ public class MachineBuilder : MonoBehaviour
         ArmPlacement();
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
+        HideSugarOverlay();
     }
 
     public void BuildColorizer()
@@ -435,15 +489,7 @@ public class MachineBuilder : MonoBehaviour
         ArmPlacement();
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
-    }
-
-    public void BuildMixer()
-    {
-        activePrefab = mixerPrefab;
-        activeName = "Mixer";
-        ArmPlacement();
-        NotifySelectionChanged(activeName);
-        HideWaterOverlay();
+        HideSugarOverlay();
     }
 
     public void BuildWaterPump()
@@ -453,6 +499,7 @@ public class MachineBuilder : MonoBehaviour
         ArmPlacement();
         NotifySelectionChanged(activeName);
         ShowWaterOverlay();
+        HideSugarOverlay();
     }
 
     public void BuildWaterPipe()
@@ -462,6 +509,17 @@ public class MachineBuilder : MonoBehaviour
         ArmPlacement();
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
+        HideSugarOverlay();
+    }
+
+    public void BuildMine()
+    {
+        activePrefab = minePrefab;
+        activeName = "Mine";
+        ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
+        ShowSugarOverlay();
     }
 
     void ArmPlacement()
@@ -563,6 +621,7 @@ public class MachineBuilder : MonoBehaviour
         if (activePrefab == null || grid == null || miCellToWorld == null) return;
         var pos = GetFootprintCenterWorld(cell, new Vector2Int(1, 0));
         ghostGO = Instantiate(activePrefab, pos, Quaternion.identity);
+        ApplyGhostSorting(ghostGO);
         ghostPress = ghostGO.GetComponent<PressMachine>();
         ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
         ghostWaterPump = ghostGO.GetComponent<WaterPump>();
@@ -585,11 +644,29 @@ public class MachineBuilder : MonoBehaviour
         else if (outputDir == new Vector2Int(-1, 0)) z = 180f;
         else if (outputDir == new Vector2Int(0, -1)) z = 270f;
         ghostGO.transform.rotation = Quaternion.Euler(0, 0, z);
-        // Update position to footprint center (handles multi-cell like Mixer)
+        // Update position to footprint center
         ghostGO.transform.position = GetFootprintCenterWorld(cell, outputDir);
         if (ghostPress != null) ghostPress.facingVec = outputDir;
         if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
         if (ghostWaterPump != null) ghostWaterPump.facingVec = outputDir;
+    }
+
+    void ApplyGhostSorting(GameObject go)
+    {
+        if (go == null) return;
+        var group = go.GetComponentInChildren<SortingGroup>(true);
+        if (group != null) group.sortingOrder = ghostSortingOrder;
+        var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        foreach (var sr in srs) sr.sortingOrder = ghostSortingOrder;
+    }
+
+    void ApplyPlacedSorting(GameObject go, int sortingOrder)
+    {
+        if (go == null) return;
+        var group = go.GetComponentInChildren<SortingGroup>(true);
+        if (group != null) group.sortingOrder = sortingOrder;
+        var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        foreach (var sr in srs) sr.sortingOrder = sortingOrder;
     }
 
     void Commit(Vector2Int cell, Vector2Int outputDir)
@@ -610,8 +687,15 @@ public class MachineBuilder : MonoBehaviour
             ClearPreviewState();
             return;
         }
+        if (RequiresSugarCell() && !IsSugarCell(cell))
+        {
+            Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+            ClearPreviewState();
+            return;
+        }
 
         var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
+        if (RequiresSugarCell()) ApplyPlacedSorting(go, mineSortingOrder);
         Debug.Log($"[MachineBuilder] Instantiated {activeName} at position {pos}");
 
         var press = go.GetComponent<PressMachine>();
@@ -630,6 +714,12 @@ public class MachineBuilder : MonoBehaviour
         if (pump != null)
         {
             pump.facingVec = outputDir;
+            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
+        }
+        var mine = go.GetComponent<SugarMine>();
+        if (mine != null)
+        {
+            mine.SetFacing(outputDir);
             Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
         }
 
@@ -686,6 +776,7 @@ public class MachineBuilder : MonoBehaviour
         ClearPreviewState();
         NotifySelectionChanged(null);
         TrySetBuildToolActive(false);
+        HideSugarOverlay();
     }
 
     void ClearPreviewState()
@@ -728,12 +819,19 @@ public class MachineBuilder : MonoBehaviour
     }
 
     bool RequiresWaterCell() => activeName == "WaterPump";
+    bool RequiresSugarCell() => activeName == "Mine";
 
     bool IsWaterCell(Vector2Int cell)
     {
         if (grid == null || miIsWater == null) { CacheGrid(); if (grid == null || miIsWater == null) return false; }
         try { return (bool)miIsWater.Invoke(grid, new object[] { cell }); }
         catch { return false; }
+    }
+
+    bool IsSugarCell(Vector2Int cell)
+    {
+        var gs = grid as GridService ?? GridService.Instance ?? FindAnyObjectByType<GridService>();
+        return gs != null && gs.IsSugar(cell);
     }
 
     bool IsAnyBlocked(List<Vector2Int> cells)
@@ -744,59 +842,18 @@ public class MachineBuilder : MonoBehaviour
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)
     {
-        var cells = new List<Vector2Int> { origin };
-        if (activeName == "Mixer")
-        {
-            var offset = ComputeFootprintOffset(facing);
-            cells.Add(origin + offset);
-        }
-        return cells;
-    }
-
-    Vector2Int ComputeFootprintOffset(Vector2Int facing)
-    {
-        if (facing == Vector2Int.zero) return new Vector2Int(0, 1);
-        if (Mathf.Abs(facing.y) >= Mathf.Abs(facing.x))
-            return new Vector2Int(0, Math.Sign(facing.y == 0 ? 1 : facing.y));
-        return new Vector2Int(Math.Sign(facing.x == 0 ? 1 : facing.x), 0);
+        return new List<Vector2Int> { origin };
     }
 
     Vector3 GetFootprintCenterWorld(Vector2Int origin, Vector2Int facing)
     {
         var cells = GetFootprintCells(origin, facing);
         if (cells.Count == 0 || miCellToWorld == null) return Vector3.zero;
-        if (activeName == "Mixer" && cells.Count == 2)
-        {
-            // Place mixer pivot on the base cell center and snap to half-cell increments (anchored to world origin).
-            var center = (Vector3)miCellToWorld.Invoke(grid, new object[] { origin, 0f });
-            return SnapToHalfCell(center);
-        }
         Vector3 sum2 = Vector3.zero;
         foreach (var c in cells)
         {
             sum2 += (Vector3)miCellToWorld.Invoke(grid, new object[] { c, 0f });
         }
         return sum2 / cells.Count;
-    }
-
-    float GetCellSize()
-    {
-        if (grid is GridService gs) return gs.CellSize;
-        try
-        {
-            var t = grid.GetType();
-            var pi = t.GetProperty("CellSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (pi != null) return (float)pi.GetValue(grid);
-        }
-        catch { }
-        return 1f;
-    }
-
-    Vector3 SnapToHalfCell(Vector3 pos)
-    {
-        float cs = GetCellSize();
-        pos.x = Mathf.Floor(pos.x / cs) * cs + cs * 0.5f;
-        pos.y = Mathf.Floor(pos.y / cs) * cs + cs * 0.5f;
-        return pos;
     }
 }

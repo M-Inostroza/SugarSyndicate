@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: a79c47f32ad976c479e78d414f737860
+guid: 4c5c9114cc8fd8e4ab1460eb4edb6a0d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -5147464127756679176
-    second: Mixer_0
+      213: -4963935807285971671
+    second: Extractor_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,7 +97,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
+    buildTarget: Android
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Mixer_0
+      name: Extractor_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
         width: 100
-        height: 200
+        height: 100
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 8f74ff2f5a88098b0800000000000000
-      internalID: -5147464127756679176
+      spriteID: 925b0eeeeae8c1bb0800000000000000
+      internalID: -4963935807285971671
       vertices: []
       indices: 
       edges: []

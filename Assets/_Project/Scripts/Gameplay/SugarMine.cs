@@ -1,7 +1,8 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
-public class Spawner : MonoBehaviour
+public class SugarMine : MonoBehaviour
 {
     public Direction outputDirection = Direction.Right;
 
@@ -13,33 +14,40 @@ public class Spawner : MonoBehaviour
     [SerializeField] string itemType;
 
     [Header("When")]
-    [SerializeField, Min(1)] int intervalTicks = 10;
+    [FormerlySerializedAs("intervalTicks")]
+    [FormerlySerializedAs("spawnRate")]
+    [Tooltip("Spawns per second. Smaller = slower.")]
+    [SerializeField, Min(0.01f)] float spawnsPerSecond = 1f;
     [SerializeField] bool autoStart = true;
 
-    [Header("Pooling")] 
-    [Tooltip("Prewarm pool size (only first spawner with prefab matters)." )]
+    [Header("Pooling")]
+    [Tooltip("Prewarm pool size (only first mine with prefab matters).")]
     [SerializeField, Min(0)] int poolPrewarm = 32;
 
     [Header("Behavior")]
-    [Tooltip("If true, spawns prefer the head cell (in front of the spawner). If false, try base cell first then head as fallback.")]
+    [Tooltip("If true, spawns prefer the head cell (in front of the mine). If false, try base cell first then head as fallback.")]
     [SerializeField] bool preferHeadCell = true;
+    [Tooltip("If true, only spawn when the head cell is free (no fallback to the base cell).")]
+    [SerializeField] bool requireFreeHeadCell = true;
 
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
-    int tickCounter;
     bool running;
     int nextItemId = 1;
+    float spawnProgress;
+    GameTick tickSource;
 
     void OnEnable()
     {
         running = autoStart;
         GameTick.OnTickStart += OnTick;
+        if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
         if (itemPrefab != null)
         {
             ItemViewPool.Ensure(itemPrefab, poolPrewarm);
         }
-        if (debugLogging) Debug.Log($"[Spawner] Enabled at world {transform.position}");
+        if (debugLogging) Debug.Log($"[SugarMine] Enabled at world {transform.position}");
     }
 
     void OnDisable()
@@ -50,21 +58,27 @@ public class Spawner : MonoBehaviour
     void OnTick()
     {
         if (!running) return;
-        // Pause spawning while not in Play (e.g. Build/Delete modes)
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
-        tickCounter++;
-        if (tickCounter >= intervalTicks)
+        if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
+        float tps = tickSource != null ? tickSource.ticksPerSecond : 15f;
+        spawnProgress += spawnsPerSecond / Mathf.Max(1f, tps);
+        while (spawnProgress >= 1f)
         {
-            tickCounter = 0;
+            spawnProgress -= 1f;
             Spawn();
         }
+    }
+
+    public void SetFacing(Vector2Int dir)
+    {
+        outputDirection = DirFromVec(dir);
     }
 
     void Spawn()
     {
         if (GridService.Instance == null || BeltSimulationService.Instance == null)
         {
-            if (debugLogging) Debug.LogWarning("[Spawner] Missing GridService or BeltSimulationService.");
+            if (debugLogging) Debug.LogWarning("[SugarMine] Missing GridService or BeltSimulationService.");
             return;
         }
         var gs = GridService.Instance;
@@ -75,7 +89,7 @@ public class Spawner : MonoBehaviour
         var item = new Item { id = nextItemId, type = ResolveItemType() };
 
         bool spawned = false;
-        Vector2Int spawnedCell = baseCell; // track where we actually placed the item
+        Vector2Int spawnedCell = baseCell;
         if (preferHeadCell)
         {
             if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
@@ -83,7 +97,7 @@ public class Spawner : MonoBehaviour
                 spawned = true;
                 spawnedCell = headCell;
             }
-            else if (BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
+            else if (!requireFreeHeadCell && BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
             {
                 spawned = true;
                 spawnedCell = baseCell;
@@ -96,7 +110,7 @@ public class Spawner : MonoBehaviour
                 spawned = true;
                 spawnedCell = baseCell;
             }
-            else if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
+            else if (!requireFreeHeadCell && BeltSimulationService.Instance.TrySpawnItem(headCell, item))
             {
                 spawned = true;
                 spawnedCell = headCell;
@@ -106,7 +120,7 @@ public class Spawner : MonoBehaviour
         if (!spawned)
         {
             if (debugLogging)
-                Debug.LogWarning($"[Spawner] Unable to spawn item at {baseCell} or {headCell}");
+                Debug.LogWarning($"[SugarMine] Unable to spawn item at {baseCell} or {headCell}");
             return;
         }
 
@@ -114,7 +128,6 @@ public class Spawner : MonoBehaviour
         var world = gs.CellToWorld(spawnedCell, z);
         if (itemPrefab != null)
         {
-            // pooled acquire for this specific prefab
             var parent = ContainerLocator.GetItemContainer();
             var t = ItemViewPool.Get(itemPrefab, world, Quaternion.identity, parent);
             item.view = t;
@@ -123,7 +136,9 @@ public class Spawner : MonoBehaviour
         if (item.view != null)
             item.view.position = world;
 
-        if (debugLogging) Debug.Log($"[Spawner] Produced item {nextItemId} ({item.type}) at {spawnedCell}");
+        BeltSimulationService.Instance.TryAdvanceSpawnedItem(spawnedCell);
+
+        if (debugLogging) Debug.Log($"[SugarMine] Produced item {nextItemId} ({item.type}) at {spawnedCell}");
         nextItemId++;
     }
 
@@ -134,10 +149,19 @@ public class Spawner : MonoBehaviour
         return string.Empty;
     }
 
+    static Direction DirFromVec(Vector2Int dir)
+    {
+        if (dir == Vector2Int.up) return Direction.Up;
+        if (dir == Vector2Int.right) return Direction.Right;
+        if (dir == Vector2Int.down) return Direction.Down;
+        if (dir == Vector2Int.left) return Direction.Left;
+        return Direction.Right;
+    }
+
 #if UNITY_EDITOR
     void OnDrawGizmos()
     {
-        Gizmos.color = Color.green;
+        Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, 0.12f);
         var v = (Vector3)(Vector2)DirectionUtil.DirVec(outputDirection) * 0.8f;
         Gizmos.DrawLine(transform.position, transform.position + v);
