@@ -2907,6 +2907,60 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 2993725614040535738, guid: 231d3a84dca1bc745aeadce708a4bc24, type: 3}
   m_PrefabInstance: {fileID: 962896923}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &999842308
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 999842310}
+  - component: {fileID: 999842309}
+  m_Layer: 0
+  m_Name: Scanner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &999842309
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 999842308}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5df1f79577d1da04aadfc985cc308cb1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  grid: {fileID: 1021027029}
+  sugarOverlay: {fileID: 1021027032}
+  autoCreateOverlay: 1
+  enableInput: 1
+  scanKey: 9
+  scanDuration: 3
+  cooldown: 5
+  autoScanOnStart: 0
+  hideOverlayOnStart: 1
+  debugLogScanPress: 0
+--- !u!4 &999842310
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 999842308}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1021027028
 GameObject:
   m_ObjectHideFlags: 0
@@ -2918,6 +2972,7 @@ GameObject:
   - component: {fileID: 1021027030}
   - component: {fileID: 1021027029}
   - component: {fileID: 1021027031}
+  - component: {fileID: 1021027032}
   m_Layer: 0
   m_Name: Grid
   m_TagString: Untagged
@@ -2944,17 +2999,24 @@ MonoBehaviour:
   waterRects:
   - origin: {x: 8, y: 9}
     size: {x: 2, y: 2}
+  sugarZoneSize: 3
+  sugarOuterEfficiency: 1
+  sugarCenterEfficiency: 2.2
+  sugarZones:
+  - center: {x: 5, y: 7}
   showGridGizmos: 1
   onlyWhenSelected: 0
   showCellTypes: 1
+  showSugarZones: 1
   showItemMarkers: 1
   showIndices: 0
-  gridLineColor: {r: 1, g: 1, b: 1, a: 0.2}
-  boundsColor: {r: 1, g: 1, b: 1, a: 0.6}
+  gridLineColor: {r: 1, g: 1, b: 1, a: 0.39607844}
+  boundsColor: {r: 0.81886786, g: 0.81886786, b: 0.81886786, a: 0.6}
   beltColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
   junctionColor: {r: 1, g: 0.5, b: 0.1, a: 0.4}
   machineColor: {r: 0.2, g: 0.7, b: 1, a: 0.35}
   itemColor: {r: 0.2, g: 1, b: 0.4, a: 1}
+  sugarColor: {r: 1, g: 1, b: 1, a: 0.35}
 --- !u!4 &1021027030
 Transform:
   m_ObjectHideFlags: 0
@@ -2990,6 +3052,28 @@ MonoBehaviour:
   sortingLayerName: Default
   sortingOrder: 20
   visibleOnStart: 0
+--- !u!114 &1021027032
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1021027028}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f702bf0e44f660943b7350500442b1b7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  grid: {fileID: 0}
+  matchGridLayer: 1
+  outerColor: {r: 1, g: 1, b: 1, a: 0.03529412}
+  centerColor: {r: 1, g: 1, b: 1, a: 0.7}
+  highlightCenter: 1
+  padding: 0.05
+  zOffset: 0.05
+  sortingLayerName: Default
+  sortingOrder: 1000
+  visibleOnStart: 1
 --- !u!1 &1043894899
 GameObject:
   m_ObjectHideFlags: 0
@@ -6641,3 +6725,4 @@ SceneRoots:
   - {fileID: 400603066}
   - {fileID: 676692912}
   - {fileID: 1567034241}
+  - {fileID: 999842310}

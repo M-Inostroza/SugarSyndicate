@@ -23,11 +23,27 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] Color waterColor = new Color(0.2f, 0.5f, 1f, 0.25f);
     [SerializeField] List<WaterRect> waterRects = new();
 
+    [System.Serializable]
+    public struct SugarZone
+    {
+        public Vector2Int center; // center cell (zone is NxN, odd size)
+    }
+
+    [Header("Sugar")]
+    [SerializeField, Min(1)] int sugarZoneSize = 3;
+    [SerializeField, Min(0f)] float sugarOuterEfficiency = 1f;
+    [SerializeField, Min(0f)] float sugarCenterEfficiency = 2f;
+    [SerializeField] List<SugarZone> sugarZones = new();
+
     public float CellSize => cellSize;
     public Vector2 Origin => origin;
     public Vector2Int GridSize => gridSize;
     public Color WaterColor => waterColor;
     public IReadOnlyList<WaterRect> WaterRects => waterRects;
+    public float SugarOuterEfficiency => sugarOuterEfficiency;
+    public float SugarCenterEfficiency => sugarCenterEfficiency;
+    public int SugarZoneSize => sugarZoneSize;
+    public IReadOnlyList<SugarZone> SugarZones => sugarZones;
 
     readonly Dictionary<Vector2Int, Cell> cells = new();
 
@@ -43,6 +59,8 @@ public class GridService : MonoBehaviour, IGridService
         public Direction inC = Direction.None; // additional input for 3-way merger
         public byte junctionToggle; // 0/1 toggler for split/merge policies
         public bool isWater;
+        public bool isSugar;
+        public float sugarEfficiency;
 
         // legacy support
         public bool hasFloor;
@@ -60,6 +78,7 @@ public class GridService : MonoBehaviour, IGridService
         DontDestroyOnLoad(gameObject);
         WarmCells();
         ApplyWaterRects();
+        ApplySugarZones();
     }
 
     // Ensure grid dictionary exists/config is sane in editor
@@ -68,10 +87,16 @@ public class GridService : MonoBehaviour, IGridService
         if (gridSize.x < 1) gridSize.x = 1;
         if (gridSize.y < 1) gridSize.y = 1;
         if (cellSize < 0.01f) cellSize = 0.01f;
+        if (sugarZoneSize < 1) sugarZoneSize = 1;
+        if (sugarZoneSize % 2 == 0) sugarZoneSize += 1;
+        if (sugarOuterEfficiency < 0f) sugarOuterEfficiency = 0f;
+        if (sugarCenterEfficiency < 0f) sugarCenterEfficiency = 0f;
+        if (sugarCenterEfficiency < sugarOuterEfficiency) sugarCenterEfficiency = sugarOuterEfficiency;
         if (!Application.isPlaying)
         {
             WarmCells();
             ApplyWaterRects();
+            ApplySugarZones();
         }
     }
 
@@ -103,6 +128,37 @@ public class GridService : MonoBehaviour, IGridService
         }
     }
 
+    void ApplySugarZones()
+    {
+        foreach (var kv in cells)
+        {
+            var cell = kv.Value;
+            if (cell == null) continue;
+            cell.isSugar = false;
+            cell.sugarEfficiency = 0f;
+        }
+        if (sugarZones == null) return;
+        int size = Mathf.Max(1, sugarZoneSize);
+        if (size % 2 == 0) size += 1;
+        int half = size / 2;
+        foreach (var zone in sugarZones)
+        {
+            for (int y = -half; y <= half; y++)
+            {
+                for (int x = -half; x <= half; x++)
+                {
+                    var c = zone.center + new Vector2Int(x, y);
+                    if (!InBounds(c)) continue;
+                    var cell = GetCell(c);
+                    if (cell == null) continue;
+                    float eff = (x == 0 && y == 0) ? sugarCenterEfficiency : sugarOuterEfficiency;
+                    cell.isSugar = true;
+                    if (eff > cell.sugarEfficiency) cell.sugarEfficiency = eff;
+                }
+            }
+        }
+    }
+
     public Vector2Int WorldToCell(Vector3 world)
     {
         Vector2 p = (Vector2)world - origin;
@@ -120,6 +176,13 @@ public class GridService : MonoBehaviour, IGridService
     public Cell GetCell(Vector2Int c) => cells.TryGetValue(c, out var cell) ? cell : null;
 
     public bool IsWater(Vector2Int c) => InBounds(c) && GetCell(c)?.isWater == true;
+    public bool IsSugar(Vector2Int c) => InBounds(c) && GetCell(c)?.isSugar == true;
+    public float GetSugarEfficiency(Vector2Int c)
+    {
+        if (!InBounds(c)) return 0f;
+        var cell = GetCell(c);
+        return cell != null ? cell.sugarEfficiency : 0f;
+    }
 
     // New API for the cell-based system
     public void SetBeltCell(Vector2Int c, Direction inA, Direction outA)
@@ -199,6 +262,7 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] bool showGridGizmos = true;
     [SerializeField] bool onlyWhenSelected = false;
     [SerializeField] bool showCellTypes = true;
+    [SerializeField] bool showSugarZones = true;
     [SerializeField] bool showItemMarkers = true;
     [SerializeField] bool showIndices = false;
     [SerializeField] Color gridLineColor = new Color(1f, 1f, 1f, 0.2f);
@@ -207,6 +271,7 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] Color junctionColor = new Color(1f, 0.5f, 0.1f, 0.4f);
     [SerializeField] Color machineColor = new Color(0.2f, 0.7f, 1f, 0.35f);
     [SerializeField] Color itemColor = new Color(0.2f, 1f, 0.4f, 1f);
+    [SerializeField] Color sugarColor = new Color(1f, 1f, 1f, 0.35f);
 
     void OnDrawGizmos()
     {
@@ -256,6 +321,12 @@ public class GridService : MonoBehaviour, IGridService
                 if (cell != null && cell.isWater)
                 {
                     Gizmos.color = waterColor;
+                    Gizmos.DrawCube(center, size);
+                }
+
+                if (showSugarZones && cell != null && cell.isSugar)
+                {
+                    Gizmos.color = sugarColor;
                     Gizmos.DrawCube(center, size);
                 }
 
