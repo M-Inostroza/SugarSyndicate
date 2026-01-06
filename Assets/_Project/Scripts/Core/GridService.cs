@@ -34,6 +34,15 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField, Min(0f)] float sugarOuterEfficiency = 1f;
     [SerializeField, Min(0f)] float sugarCenterEfficiency = 2f;
     [SerializeField] List<SugarZone> sugarZones = new();
+    [Header("Sugar Distribution")]
+    [Tooltip("Shape of sugar falloff from center (higher = tighter core).")]
+    [SerializeField, Min(0.01f)] float sugarFalloffPower = 1f;
+    [Tooltip("Adds per-cell variation to sugar amounts (0 = none).")]
+    [SerializeField, Range(0f, 1f)] float sugarNoiseStrength = 0f;
+    [Tooltip("Noise scale for sugar variation (higher = more changes between neighboring cells).")]
+    [SerializeField, Min(0.001f)] float sugarNoiseScale = 0.5f;
+    [Tooltip("Seed for sugar variation.")]
+    [SerializeField] int sugarNoiseSeed = 1337;
 
     public float CellSize => cellSize;
     public Vector2 Origin => origin;
@@ -92,6 +101,10 @@ public class GridService : MonoBehaviour, IGridService
         if (sugarOuterEfficiency < 0f) sugarOuterEfficiency = 0f;
         if (sugarCenterEfficiency < 0f) sugarCenterEfficiency = 0f;
         if (sugarCenterEfficiency < sugarOuterEfficiency) sugarCenterEfficiency = sugarOuterEfficiency;
+        if (sugarFalloffPower < 0.01f) sugarFalloffPower = 0.01f;
+        if (sugarNoiseStrength < 0f) sugarNoiseStrength = 0f;
+        if (sugarNoiseStrength > 1f) sugarNoiseStrength = 1f;
+        if (sugarNoiseScale < 0.001f) sugarNoiseScale = 0.001f;
         if (!Application.isPlaying)
         {
             WarmCells();
@@ -151,12 +164,36 @@ public class GridService : MonoBehaviour, IGridService
                     if (!InBounds(c)) continue;
                     var cell = GetCell(c);
                     if (cell == null) continue;
-                    float eff = (x == 0 && y == 0) ? sugarCenterEfficiency : sugarOuterEfficiency;
+                    float eff = ComputeSugarEfficiency(c, zone.center, half);
                     cell.isSugar = true;
                     if (eff > cell.sugarEfficiency) cell.sugarEfficiency = eff;
                 }
             }
         }
+    }
+
+    float ComputeSugarEfficiency(Vector2Int cell, Vector2Int center, int half)
+    {
+        if (half <= 0) return sugarCenterEfficiency;
+        int dx = cell.x - center.x;
+        int dy = cell.y - center.y;
+        float maxDist = half;
+        float dist = Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dy));
+        float t = maxDist > 0f ? 1f - (dist / maxDist) : 1f;
+        t = Mathf.Clamp01(t);
+        if (sugarNoiseStrength > 0f)
+        {
+            float nx = (cell.x + sugarNoiseSeed) * sugarNoiseScale;
+            float ny = (cell.y + sugarNoiseSeed) * sugarNoiseScale;
+            float noise = Mathf.PerlinNoise(nx, ny);
+            float offset = (noise - 0.5f) * 2f * sugarNoiseStrength;
+            t = Mathf.Clamp01(t + offset);
+        }
+        if (!Mathf.Approximately(sugarFalloffPower, 1f))
+        {
+            t = Mathf.Pow(t, sugarFalloffPower);
+        }
+        return Mathf.Lerp(sugarOuterEfficiency, sugarCenterEfficiency, t);
     }
 
     public Vector2Int WorldToCell(Vector3 world)
@@ -272,6 +309,8 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] Color machineColor = new Color(0.2f, 0.7f, 1f, 0.35f);
     [SerializeField] Color itemColor = new Color(0.2f, 1f, 0.4f, 1f);
     [SerializeField] Color sugarColor = new Color(1f, 1f, 1f, 0.35f);
+    [SerializeField] Color sugarCenterColor = new Color(1f, 1f, 1f, 0.7f);
+    [SerializeField] bool sugarColorByEfficiency = true;
 
     void OnDrawGizmos()
     {
@@ -326,7 +365,18 @@ public class GridService : MonoBehaviour, IGridService
 
                 if (showSugarZones && cell != null && cell.isSugar)
                 {
-                    Gizmos.color = sugarColor;
+                    if (sugarColorByEfficiency)
+                    {
+                        float eff = cell.sugarEfficiency;
+                        float t = Mathf.Abs(sugarCenterEfficiency - sugarOuterEfficiency) > 0.0001f
+                            ? Mathf.InverseLerp(sugarOuterEfficiency, sugarCenterEfficiency, eff)
+                            : 1f;
+                        Gizmos.color = Color.Lerp(sugarColor, sugarCenterColor, Mathf.Clamp01(t));
+                    }
+                    else
+                    {
+                        Gizmos.color = sugarColor;
+                    }
                     Gizmos.DrawCube(center, size);
                 }
 

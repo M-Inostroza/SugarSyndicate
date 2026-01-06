@@ -31,6 +31,12 @@ public class PressMachine : MonoBehaviour, IMachine
     [Tooltip("If true, the press advances processing on GameTick; otherwise it uses frame time (Update).")]
     [SerializeField] bool useGameTickForProcessing = true;
 
+    [Header("Input Buffer")]
+    [Tooltip("How many input items are required to start one processing cycle.")]
+    [SerializeField, Min(1)] int inputsPerProcess = 3;
+    [Tooltip("Max items that can queue inside the press before belts block.")]
+    [SerializeField, Min(1)] int maxBufferedInputs = 9;
+
     [Header("Debug")]
     [Tooltip("Enable verbose debug logs for PressMachine.")]
     [SerializeField] bool enableDebugLogs = false;
@@ -51,6 +57,7 @@ public class PressMachine : MonoBehaviour, IMachine
 
     // NEW: track if an input was actually accepted for this cycle
     bool hasInputThisCycle;
+    int bufferedInputs;
 
     // --- Debug helpers (no-op unless enableDebugLogs is true) ---
     void DLog(string msg)
@@ -145,10 +152,11 @@ public class PressMachine : MonoBehaviour, IMachine
             return false;
         }
 
-        // Do not accept if already processing or waiting to output
-        if (busy)
+        if (inputsPerProcess < 1) inputsPerProcess = 1;
+        int maxBuffer = GetMaxBufferedInputs();
+        if (bufferedInputs >= maxBuffer)
         {
-            DWarn($"[PressMachine] Rejecting input: machine is busy");
+            DWarn($"[PressMachine] Rejecting input: buffer full ({bufferedInputs}/{maxBuffer})");
             return false;
         }
         return true;
@@ -175,12 +183,6 @@ public class PressMachine : MonoBehaviour, IMachine
     {
         DLog($"[PressMachine] TryStartProcess called for cell {cell}");
 
-        if (busy)
-        {
-            DWarn($"[PressMachine] TryStartProcess ignored because machine is busy.");
-            return false;
-        }
-
         if (item == null)
         {
             Debug.LogWarning($"[PressMachine] Rejecting input at {cell}: item was null");
@@ -194,11 +196,17 @@ public class PressMachine : MonoBehaviour, IMachine
             return false;
         }
 
-        busy = true;
-        hasInputThisCycle = true;
-        waitingToOutput = false;
-        remainingTime = Mathf.Max(0f, processingSeconds);
-        DLog($"[PressMachine] Input accepted at {cell}. Processing for {remainingTime:0.###} sec... busy={busy}, hasInputThisCycle={hasInputThisCycle}");
+        if (inputsPerProcess < 1) inputsPerProcess = 1;
+        int maxBuffer = GetMaxBufferedInputs();
+        if (bufferedInputs >= maxBuffer)
+        {
+            DWarn($"[PressMachine] TryStartProcess rejected: buffer full ({bufferedInputs}/{maxBuffer})");
+            return false;
+        }
+
+        bufferedInputs++;
+        DLog($"[PressMachine] Input buffered at {cell}: {bufferedInputs}/{inputsPerProcess}");
+        TryBeginProcessingFromBuffer();
         return true;
     }
 
@@ -254,8 +262,30 @@ public class PressMachine : MonoBehaviour, IMachine
                 remainingTime = 0f;
                 hasInputThisCycle = false;
                 DLog($"[PressMachine] Cycle complete at {cell}");
+                TryBeginProcessingFromBuffer();
             }
         }
+    }
+
+    void TryBeginProcessingFromBuffer()
+    {
+        if (busy) return;
+        int required = Mathf.Max(1, inputsPerProcess);
+        if (bufferedInputs < required) return;
+
+        bufferedInputs = Mathf.Max(0, bufferedInputs - required);
+        busy = true;
+        hasInputThisCycle = true;
+        waitingToOutput = false;
+        remainingTime = Mathf.Max(0f, processingSeconds);
+        DLog($"[PressMachine] Processing started at {cell}. Processing for {remainingTime:0.###} sec... busy={busy}, buffered={bufferedInputs}");
+    }
+
+    int GetMaxBufferedInputs()
+    {
+        int required = Mathf.Max(1, inputsPerProcess);
+        if (maxBufferedInputs < required) maxBufferedInputs = required;
+        return maxBufferedInputs;
     }
 
     string[] ResolveAcceptedTypes()
@@ -349,6 +379,7 @@ public class PressMachine : MonoBehaviour, IMachine
 
         item.view = view;
         if (view != null) view.position = world;
+        belt.TryAdvanceSpawnedItem(outCell);
         return true;
     }
 }

@@ -270,9 +270,6 @@ public class ConveyorPlacer : MonoBehaviour
         {
             if (isDeleting) { TryMarkCellFromDrag(cell); return; }
 
-            // Allow rotating the current tail toward the pointer even before leaving the cell
-            UpdateTailDirectionToPointer(world);
-            
             // The initial belt is now placed in OnPointerDown, so we don't need to check for it here.
             
             TryPlaceCellFromDrag(cell);

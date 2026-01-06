@@ -30,6 +30,10 @@ public class SugarMine : MonoBehaviour
     [Tooltip("If true, only spawn when the head cell is free (no fallback to the base cell).")]
     [SerializeField] bool requireFreeHeadCell = true;
 
+    [Header("Sugar")]
+    [Tooltip("If true, production rate scales with the sugar amount in the cell.")]
+    [SerializeField] bool scaleBySugarEfficiency = true;
+
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
@@ -61,7 +65,14 @@ public class SugarMine : MonoBehaviour
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
         float tps = tickSource != null ? tickSource.ticksPerSecond : 15f;
-        spawnProgress += spawnsPerSecond / Mathf.Max(1f, tps);
+        float rate = spawnsPerSecond;
+        if (scaleBySugarEfficiency && GridService.Instance != null)
+        {
+            var cell = GridService.Instance.WorldToCell(transform.position);
+            float eff = GridService.Instance.GetSugarEfficiency(cell);
+            rate *= Mathf.Max(0f, eff);
+        }
+        spawnProgress += rate / Mathf.Max(1f, tps);
         while (spawnProgress >= 1f)
         {
             spawnProgress -= 1f;

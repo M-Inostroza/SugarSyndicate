@@ -13,6 +13,8 @@ public class SugarZoneOverlay : MonoBehaviour
     [Header("Visuals")]
     [SerializeField] Color outerColor = new Color(1f, 1f, 1f, 0.35f);
     [SerializeField] Color centerColor = new Color(1f, 1f, 1f, 0.7f);
+    [Tooltip("If true, color blends from outer to center based on sugar amount.")]
+    [SerializeField] bool colorByEfficiency = true;
     [SerializeField] bool highlightCenter = true;
     [SerializeField, Min(0f)] float padding = 0.05f;
     [SerializeField] float zOffset = 0.05f; // base world Z for overlays
@@ -89,8 +91,18 @@ public class SugarZoneOverlay : MonoBehaviour
                 if (!grid.IsSugar(c)) continue;
                 var world = grid.CellToWorld(c, z);
                 var color = outerColor;
-                if (highlightCenter && centerEff > outerEff && grid.GetSugarEfficiency(c) >= centerEff - 0.0001f)
+                float eff = grid.GetSugarEfficiency(c);
+                if (colorByEfficiency)
+                {
+                    float t = Mathf.Abs(centerEff - outerEff) > 0.0001f
+                        ? Mathf.InverseLerp(outerEff, centerEff, eff)
+                        : 1f;
+                    color = Color.Lerp(outerColor, centerColor, Mathf.Clamp01(t));
+                }
+                else if (highlightCenter && centerEff > outerEff && eff >= centerEff - 0.0001f)
+                {
                     color = centerColor;
+                }
                 AddSprite(world, final, color);
             }
         }

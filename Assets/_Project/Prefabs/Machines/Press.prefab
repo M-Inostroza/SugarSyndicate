@@ -100,9 +100,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 45e7b9d4a7e363d45af2094cbc0c6e5d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  grid: {fileID: 0}
+  belt: {fileID: 0}
   facingVec: {x: 1, y: 0}
   itemPrefab: {fileID: 8971600722482412926, guid: 8704ee363b5f4034f8b6a9614377a0a8, type: 3}
-  poolPrewarm: 8
-  processingSeconds: 3
+  poolPrewarm: 16
+  acceptedItemType: Sugar
+  acceptedItemTypes: []
+  outputItemType: Cubes
+  processingSeconds: 2
   useGameTickForProcessing: 1
+  inputsPerProcess: 3
+  maxBufferedInputs: 10
   enableDebugLogs: 0

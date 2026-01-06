@@ -12,15 +12,21 @@ public class TimeManager : MonoBehaviour
     public static TimeManager Instance { get; private set; }
 
     [Header("Cycle Lengths (Seconds)")]
-    [SerializeField, Min(1f)] float dayLengthSeconds = 300f;
-    [SerializeField, Min(1f)] float nightLengthSeconds = 300f;
+    [SerializeField, Min(1f)] float dayLengthSeconds = 45f;
+    [SerializeField, Min(1f)] float nightLengthSeconds = 45f;
 
     [Header("State")]
     [SerializeField, Min(1)] int dayCount = 1;
     [SerializeField] TimePhase currentPhase = TimePhase.Day;
     [SerializeField] bool running = true;
 
+    [Header("Debug")]
+    [SerializeField] bool logPhaseEveryInterval = true;
+    [SerializeField, Min(0.1f)] float logIntervalSeconds = 5f;
+
     float phaseElapsed;
+    float totalElapsed;
+    float logElapsed;
 
     public event Action<TimePhase> OnPhaseChanged;
     public event Action<int> OnDayCountChanged;
@@ -48,6 +54,17 @@ public class TimeManager : MonoBehaviour
         float delta = Time.deltaTime;
         if (delta <= 0f) return;
 
+        totalElapsed += delta;
+        if (logPhaseEveryInterval && logIntervalSeconds > 0f)
+        {
+            logElapsed += delta;
+            while (logElapsed >= logIntervalSeconds)
+            {
+                logElapsed -= logIntervalSeconds;
+                Debug.Log($"[TimeManager] Time: {totalElapsed:F1}s, Phase: {currentPhase}");
+            }
+        }
+
         phaseElapsed += delta;
         float duration = PhaseDuration;
         while (phaseElapsed >= duration)
@@ -70,6 +87,8 @@ public class TimeManager : MonoBehaviour
         dayCount = Mathf.Max(1, newDayCount);
         currentPhase = startPhase;
         phaseElapsed = 0f;
+        totalElapsed = 0f;
+        logElapsed = 0f;
         OnDayCountChanged?.Invoke(dayCount);
         OnPhaseChanged?.Invoke(currentPhase);
         OnPhaseTimeChanged?.Invoke(PhaseRemaining);

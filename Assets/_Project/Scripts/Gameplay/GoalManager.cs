@@ -42,6 +42,10 @@ public class GoalManager : MonoBehaviour
     [Header("UI")]
     [SerializeField] TMP_Text goalText;
     [SerializeField] TMP_Text progressText;
+    [SerializeField] TMP_Text secondaryGoalText;
+    [SerializeField] TMP_Text secondaryProgressText;
+    [SerializeField] TMP_Text secondaryGoalText2;
+    [SerializeField] TMP_Text secondaryProgressText2;
 
     int itemsDelivered;
     bool completed;
@@ -51,20 +55,28 @@ public class GoalManager : MonoBehaviour
     BonusObjective[] activeBonusObjectives;
     bool[] bonusCompleted;
     int startDayCount;
+    TimeManager timeManager;
 
     void Awake()
     {
         ResolveGoalForLevel();
     }
 
+    void Start()
+    {
+        HookTimeManager();
+    }
+
     void OnEnable()
     {
         Truck.OnItemDelivered += OnItemDelivered;
+        HookTimeManager();
     }
 
     void OnDisable()
     {
         Truck.OnItemDelivered -= OnItemDelivered;
+        if (timeManager != null) timeManager.OnDayCountChanged -= OnDayCountChanged;
     }
 
     void ResolveGoalForLevel()
@@ -85,6 +97,7 @@ public class GoalManager : MonoBehaviour
             Debug.Log($"[GoalManager] Level {currentLevel} target: {itemTarget} ({FormatItemType(goalItemType)})");
             NotifyGoalText();
             UpdateProgressText();
+            UpdateSecondaryUI();
             return;
         }
 
@@ -94,6 +107,7 @@ public class GoalManager : MonoBehaviour
         Debug.LogWarning($"[GoalManager] No goal configured for level {currentLevel}.");
         NotifyGoalText();
         UpdateProgressText();
+        UpdateSecondaryUI();
     }
 
     void OnItemDelivered(string itemType)
@@ -104,6 +118,7 @@ public class GoalManager : MonoBehaviour
         Debug.Log($"[GoalManager] Items delivered: {itemsDelivered}/{itemTarget} ({FormatItemType(goalItemType)})");
         UpdateProgressText();
         UpdateBonusObjectives();
+        UpdateSecondaryUI();
         if (!completed && autoCompleteOnTarget && itemsDelivered >= itemTarget)
             CompleteGoal();
     }
@@ -114,6 +129,7 @@ public class GoalManager : MonoBehaviour
         completed = true;
         Debug.Log("[GoalManager] Goal complete.");
         EvaluateTimeBonuses();
+        UpdateSecondaryUI();
         // TODO: hook into your level complete flow.
     }
 
@@ -126,7 +142,7 @@ public class GoalManager : MonoBehaviour
     public string GetProgressText()
     {
         if (!hasGoal) return "- / -";
-        return $"{Mathf.Min(itemsDelivered, itemTarget)} / {itemTarget}";
+        return $"{Mathf.Max(0, itemsDelivered)} / {itemTarget}";
     }
 
     public int BonusObjectiveCount => activeBonusObjectives != null ? activeBonusObjectives.Length : 0;
@@ -147,11 +163,36 @@ public class GoalManager : MonoBehaviour
         {
             case BonusObjectiveType.DeliverExtraItems:
             {
-                int required = itemTarget + Mathf.Max(1, objective.extraItemCount);
-                return $"Deliver {required} {FormatItemType(goalItemType)}";
+                int extra = Mathf.Max(1, objective.extraItemCount);
+                return $"Deliver {extra} bonus {FormatItemType(goalItemType)}";
             }
             case BonusObjectiveType.FinishUnderDays:
                 return $"Finish in under {Mathf.Max(1, objective.maxDays)} days";
+            default:
+                return string.Empty;
+        }
+    }
+
+    public string GetBonusObjectiveProgressText(int index)
+    {
+        if (activeBonusObjectives == null) return string.Empty;
+        if (index < 0 || index >= activeBonusObjectives.Length) return string.Empty;
+        var objective = activeBonusObjectives[index];
+        switch (objective.type)
+        {
+            case BonusObjectiveType.DeliverExtraItems:
+            {
+                int requiredExtra = Mathf.Max(1, objective.extraItemCount);
+                int extraDelivered = Mathf.Max(0, itemsDelivered - itemTarget);
+                return $"{Mathf.Min(extraDelivered, requiredExtra)} / {requiredExtra}";
+            }
+            case BonusObjectiveType.FinishUnderDays:
+            {
+                int maxDays = Mathf.Max(1, objective.maxDays);
+                int elapsedDays = GetElapsedDays();
+                int shown = Mathf.Min(elapsedDays, maxDays);
+                return $"{shown} / {maxDays}";
+            }
             default:
                 return string.Empty;
         }
@@ -187,6 +228,25 @@ public class GoalManager : MonoBehaviour
         progressText.text = GetProgressText();
     }
 
+    void UpdateSecondaryUI()
+    {
+        UpdateSecondarySlot(0, secondaryGoalText, secondaryProgressText);
+        UpdateSecondarySlot(1, secondaryGoalText2, secondaryProgressText2);
+    }
+
+    void UpdateSecondarySlot(int index, TMP_Text goal, TMP_Text progress)
+    {
+        if (goal == null && progress == null) return;
+        if (activeBonusObjectives == null || index < 0 || index >= activeBonusObjectives.Length)
+        {
+            if (goal != null) goal.text = string.Empty;
+            if (progress != null) progress.text = string.Empty;
+            return;
+        }
+        if (goal != null) goal.text = GetBonusObjectiveText(index);
+        if (progress != null) progress.text = GetBonusObjectiveProgressText(index);
+    }
+
     void UpdateBonusObjectives()
     {
         if (activeBonusObjectives == null || bonusCompleted == null) return;
@@ -198,8 +258,9 @@ public class GoalManager : MonoBehaviour
             {
                 case BonusObjectiveType.DeliverExtraItems:
                 {
-                    int required = itemTarget + Mathf.Max(1, objective.extraItemCount);
-                    if (itemsDelivered >= required)
+                    int requiredExtra = Mathf.Max(1, objective.extraItemCount);
+                    int extraDelivered = Mathf.Max(0, itemsDelivered - itemTarget);
+                    if (extraDelivered >= requiredExtra)
                     {
                         bonusCompleted[i] = true;
                         Debug.Log($"[GoalManager] Bonus complete: {GetBonusObjectiveText(i)}");
@@ -235,12 +296,27 @@ public class GoalManager : MonoBehaviour
 
     int GetCurrentDayCount()
     {
-        return TimeManager.Instance != null ? TimeManager.Instance.DayCount : 1;
+        var tm = timeManager != null ? timeManager : TimeManager.Instance;
+        return tm != null ? tm.DayCount : 1;
     }
 
     int GetElapsedDays()
     {
         int current = GetCurrentDayCount();
         return Mathf.Max(1, current - startDayCount + 1);
+    }
+
+    void HookTimeManager()
+    {
+        if (timeManager != null) return;
+        timeManager = TimeManager.Instance ?? FindAnyObjectByType<TimeManager>();
+        if (timeManager != null)
+            timeManager.OnDayCountChanged += OnDayCountChanged;
+    }
+
+    void OnDayCountChanged(int dayCount)
+    {
+        if (!hasGoal) return;
+        UpdateSecondaryUI();
     }
 }

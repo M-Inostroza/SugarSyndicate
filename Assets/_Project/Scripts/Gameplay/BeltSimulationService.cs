@@ -17,6 +17,7 @@ public class BeltSimulationService : MonoBehaviour
     readonly List<Vector2Int> stepBuffer = new List<Vector2Int>(256);
     readonly HashSet<Vector2Int> movedBuffer = new HashSet<Vector2Int>();
     readonly List<Item> visualsRemoveBuffer = new List<Item>(64);
+    readonly List<HandoffClear> handoffClearBuffer = new List<HandoffClear>(64);
 
     [Header("Speed")]
     [Tooltip("If true, the belt sim runs on GameTick; otherwise it steps every frame.")]
@@ -280,6 +281,8 @@ public class BeltSimulationService : MonoBehaviour
             }
         }
 
+        FlushHandoffClears();
+
         // Clear one-time suppression flags at the end of a logical step
         if (suppressPullOnceAfterUnpausing)
             suppressPullOnceAfterUnpausing = false;
@@ -498,32 +501,29 @@ public class BeltSimulationService : MonoBehaviour
         var item = sourceCell?.item;
         if (item != null && pendingConsume.ContainsKey(item))
             return true; // already handing off to a sink
-        bool started = false;
-        try { started = machine.TryStartProcess(item); }
+
+        if (item == null)
+            return true;
+
+        if (smoothMovement && item.view != null)
+        {
+            MoveView(item, sourcePos, destPos);
+            pendingConsume[item] = new PendingConsume { source = sourcePos, dest = destPos, machine = machine };
+            ScheduleHandoffClear(sourcePos, item);
+            return true;
+        }
+
+        bool ok = false;
+        try { ok = machine.TryStartProcess(item); }
         catch (Exception ex)
         {
             Debug.LogWarning($"[BeltSimulationService] Machine.TryStartProcess threw at {destPos}: {ex.Message}");
-            started = false;
+            ok = false;
         }
 
-        if (started)
+        if (ok)
         {
-            if (machine is Truck)
-            {
-                if (item == null || !smoothMovement || item.view == null)
-                {
-                    ConsumeItemAt(sourcePos, item, destPos);
-                }
-                else
-                {
-                    MoveView(item, sourcePos, destPos);
-                    pendingConsume[item] = new PendingConsume { source = sourcePos, dest = destPos };
-                }
-            }
-            else
-            {
-                ConsumeItemAt(sourcePos, item);
-            }
+            ConsumeItemAt(sourcePos, item, destPos);
         }
         return true; // always stop movement toward machines this step
     }
@@ -567,6 +567,12 @@ public class BeltSimulationService : MonoBehaviour
     {
         public Vector2Int source;
         public Vector2Int dest;
+        public IMachine machine;
+    }
+    struct HandoffClear
+    {
+        public Vector2Int cell;
+        public Item item;
     }
     readonly Dictionary<Item, PendingConsume> pendingConsume = new Dictionary<Item, PendingConsume>();
 
@@ -668,7 +674,7 @@ public class BeltSimulationService : MonoBehaviour
                     if (pendingConsume.TryGetValue(item, out var pending))
                     {
                         pendingConsume.Remove(item);
-                        ConsumeItemAt(pending.source, item, pending.dest);
+                        CompletePendingConsume(item, pending);
                     }
                     else
                     {
@@ -767,6 +773,7 @@ public class BeltSimulationService : MonoBehaviour
         if (grid == null) return false;
         if (IsPaused()) return false;
         var movedTo = StepCell(cellPos);
+        FlushHandoffClears();
         if (movedTo.HasValue)
         {
             active.Add(movedTo.Value);
@@ -816,7 +823,7 @@ public class BeltSimulationService : MonoBehaviour
             for (int i = 0; i < toConsume.Count; i++)
             {
                 var kv = toConsume[i];
-                ConsumeItemAt(kv.Value.source, kv.Key, kv.Value.dest);
+                CompletePendingConsume(kv.Key, kv.Value);
             }
         }
         visuals.Clear();
@@ -881,6 +888,39 @@ public class BeltSimulationService : MonoBehaviour
         EnqueueVisualMove(item, start, end);
     }
 
+    void CompletePendingConsume(Item item, PendingConsume pending)
+    {
+        if (item == null)
+        {
+            ConsumeItemAt(pending.source, item, pending.dest);
+            return;
+        }
+
+        if (pending.machine != null)
+        {
+            bool started = false;
+            try { started = pending.machine.TryStartProcess(item); }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[BeltSimulationService] Machine.TryStartProcess threw at {pending.dest}: {ex.Message}");
+                started = false;
+            }
+
+            if (!started)
+            {
+                if (item.view != null && grid != null)
+                {
+                    var snap = grid.CellToWorld(pending.source, item.view.position.z);
+                    item.view.position = snap;
+                }
+                RemoveVisual(item);
+                return;
+            }
+        }
+
+        ConsumeItemAt(pending.source, item, pending.dest);
+    }
+
     void TryNotifyMachineAt(Vector2Int cellPos, Item item)
     {
         try
@@ -918,11 +958,36 @@ public class BeltSimulationService : MonoBehaviour
             var c = grid?.GetCell(cellPos);
             if (c != null)
             {
+                if (item == null || c.item == item)
+                {
+                    c.item = null;
+                    c.hasItem = false;
+                }
+            }
+        }
+        catch { }
+    }
+
+    void ScheduleHandoffClear(Vector2Int cellPos, Item item)
+    {
+        if (item == null) return;
+        handoffClearBuffer.Add(new HandoffClear { cell = cellPos, item = item });
+    }
+
+    void FlushHandoffClears()
+    {
+        if (handoffClearBuffer.Count == 0) return;
+        for (int i = 0; i < handoffClearBuffer.Count; i++)
+        {
+            var clear = handoffClearBuffer[i];
+            var c = grid?.GetCell(clear.cell);
+            if (c != null && c.item == clear.item)
+            {
                 c.item = null;
                 c.hasItem = false;
             }
         }
-        catch { }
+        handoffClearBuffer.Clear();
     }
 
     public void ReseedActiveFromGrid()
