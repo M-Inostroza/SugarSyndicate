@@ -2,7 +2,7 @@ using UnityEngine;
 using DG.Tweening;
 
 /// <summary>
-/// Handles simple stepped zoom (Far <-> Neutral <-> Close) on an orthographic camera.
+/// Handles simple stepped zoom (Farthest <-> Far <-> Neutral <-> Close) on an orthographic camera.
 /// Public methods are intended to be wired to UI buttons.
 /// </summary>
 public class CameraZoomController : MonoBehaviour
@@ -11,6 +11,7 @@ public class CameraZoomController : MonoBehaviour
     [SerializeField] float closeSize = 2.8f;   // all in
     [SerializeField] float neutralSize = 3.6f; // middle
     [SerializeField] float farSize = 4.8f;     // zoomed out
+    [SerializeField] float farthestSize = 6.2f; // extra zoomed out
 
     [Header("Tween")] 
     [SerializeField, Min(0.01f)] float zoomDuration = 0.35f; 
@@ -20,7 +21,7 @@ public class CameraZoomController : MonoBehaviour
     Tweener currentTween;
     float targetSize; // last commanded target size
 
-    public enum ZoomLevel { Close, Neutral, Far }
+    public enum ZoomLevel { Close, Neutral, Far, Farthest }
 
     void Awake()
     {
@@ -45,9 +46,11 @@ public class CameraZoomController : MonoBehaviour
         float dClose = Mathf.Abs(value - closeSize);
         float dNeutral = Mathf.Abs(value - neutralSize);
         float dFar = Mathf.Abs(value - farSize);
-        if (dClose <= dNeutral && dClose <= dFar) return closeSize;
-        if (dNeutral <= dFar) return neutralSize;
-        return farSize;
+        float dFarthest = Mathf.Abs(value - farthestSize);
+        if (dClose <= dNeutral && dClose <= dFar && dClose <= dFarthest) return closeSize;
+        if (dNeutral <= dFar && dNeutral <= dFarthest) return neutralSize;
+        if (dFar <= dFarthest) return farSize;
+        return farthestSize;
     }
 
     ZoomLevel CurrentLevel
@@ -56,7 +59,8 @@ public class CameraZoomController : MonoBehaviour
         {
             if (Mathf.Approximately(targetSize, closeSize)) return ZoomLevel.Close;
             if (Mathf.Approximately(targetSize, neutralSize)) return ZoomLevel.Neutral;
-            return ZoomLevel.Far;
+            if (Mathf.Approximately(targetSize, farSize)) return ZoomLevel.Far;
+            return ZoomLevel.Farthest;
         }
     }
 
@@ -73,7 +77,7 @@ public class CameraZoomController : MonoBehaviour
     }
 
     /// <summary>
-    /// Zoom out one step (Close->Neutral, Neutral->Far, Far stays).
+    /// Zoom out one step (Close->Neutral, Neutral->Far, Far->Farthest, Farthest stays).
     /// </summary>
     public void ZoomOut()
     {
@@ -86,17 +90,23 @@ public class CameraZoomController : MonoBehaviour
                 TweenTo(farSize);
                 break;
             case ZoomLevel.Far:
+                TweenTo(farthestSize);
+                break;
+            case ZoomLevel.Farthest:
                 break; // already max
         }
     }
 
     /// <summary>
-    /// Zoom in one step (Far->Neutral, Neutral->Close, Close stays).
+    /// Zoom in one step (Farthest->Far, Far->Neutral, Neutral->Close, Close stays).
     /// </summary>
     public void ZoomIn()
     {
         switch (CurrentLevel)
         {
+            case ZoomLevel.Farthest:
+                TweenTo(farSize);
+                break;
             case ZoomLevel.Far:
                 TweenTo(neutralSize);
                 break;
