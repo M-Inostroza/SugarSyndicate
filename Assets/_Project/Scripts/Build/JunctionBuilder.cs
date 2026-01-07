@@ -18,6 +18,10 @@ public class JunctionBuilder : MonoBehaviour
     [Header("Ghost visuals")]
     [SerializeField] [Range(0f, 1f)] float ghostAlpha = 0.6f;
 
+    [Header("Economy")]
+    [SerializeField, Min(0)] int splitterCost = 0;
+    [SerializeField, Min(0)] int mergerCost = 0;
+
     enum Mode { None, Splitter, Merger }
     Mode mode = Mode.None;
 
@@ -257,6 +261,14 @@ public class JunctionBuilder : MonoBehaviour
 
     void Commit(Vector2Int cell, Vector2Int forward)
     {
+        int cost = mode == Mode.Splitter ? splitterCost : mergerCost;
+        if (!TrySpendBuildCost(cost, mode == Mode.Splitter ? "Splitter" : "Merger"))
+        {
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState();
+            return;
+        }
+
         // Destroy ghost
         if (ghostGO != null) Destroy(ghostGO);
 
@@ -332,6 +344,13 @@ public class JunctionBuilder : MonoBehaviour
             var go = parent != null ? Instantiate(prefab, pos, Quaternion.Euler(0, 0, DirToZ(forward)), parent)
                                     : Instantiate(prefab, pos, Quaternion.Euler(0, 0, DirToZ(forward)));
             go.name = mode == Mode.Splitter ? "SplitterJunction" : "MergerJunction";
+            try
+            {
+                var tag = go.GetComponent<BuildCostTag>();
+                if (tag == null) tag = go.AddComponent<BuildCostTag>();
+                tag.Cost = cost;
+            }
+            catch { }
         }
 
         // Prevent immediate pulls next step to let graph settle
@@ -353,6 +372,16 @@ public class JunctionBuilder : MonoBehaviour
         baseCell = default;
         ghostGO = null;
         facingVec = new Vector2Int(1, 0);
+    }
+
+    bool TrySpendBuildCost(int amount, string label)
+    {
+        if (amount <= 0) return true;
+        var gm = GameManager.Instance;
+        if (gm == null) return true;
+        if (gm.TrySpendMoney(amount)) return true;
+        Debug.LogWarning($"[JunctionBuilder] Not enough money to place {label}. Cost: {amount}.");
+        return false;
     }
 
     // End conveyor tool without altering global state (replaces old TryCancelConveyorBuildMode)

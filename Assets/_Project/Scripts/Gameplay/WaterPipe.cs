@@ -28,6 +28,18 @@ public class WaterPipe : MonoBehaviour
         if (waterNetwork == null) waterNetwork = WaterNetworkService.Instance;
         if (registered) waterNetwork?.UnregisterPipe(cell);
         registered = false;
+
+        try
+        {
+            if (grid == null) grid = GridService.Instance;
+            if (grid != null)
+            {
+                grid.ClearCell(cell);
+                var c = grid.GetCell(cell);
+                if (c != null) c.hasMachine = false;
+            }
+        }
+        catch { }
     }
 
     void TryRegister()

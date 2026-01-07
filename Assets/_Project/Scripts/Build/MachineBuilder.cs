@@ -19,6 +19,14 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
 
+    [Header("Economy")]
+    [SerializeField, Min(0)] int pressCost = 150;
+    [SerializeField, Min(0)] int shrederCost = 0;
+    [SerializeField, Min(0)] int colorizerCost = 0;
+    [SerializeField, Min(0)] int waterPumpCost = 0;
+    [SerializeField, Min(0)] int waterPipeCost = 0;
+    [SerializeField, Min(0)] int mineCost = 90;
+
     object grid;
     MethodInfo miWorldToCell;
     MethodInfo miCellToWorld;
@@ -40,8 +48,8 @@ public class MachineBuilder : MonoBehaviour
     GameObject activePrefab;
     string activeName = "PressMachine";
     bool placingPipePath;
-    readonly System.Collections.Generic.List<GameObject> ghostPipes = new System.Collections.Generic.List<GameObject>();
-    readonly System.Collections.Generic.List<Vector2Int> pipePath = new System.Collections.Generic.List<Vector2Int>();
+    readonly List<GameObject> ghostPipes = new List<GameObject>();
+    readonly List<Vector2Int> pipePath = new List<Vector2Int>();
 
     void Awake()
     {
@@ -294,6 +302,30 @@ public class MachineBuilder : MonoBehaviour
         try { BuildModeController.SetToolActive(active); } catch { }
     }
 
+    int GetCostForActiveName(string name)
+    {
+        return name switch
+        {
+            "PressMachine" => pressCost,
+            "Shreder" => shrederCost,
+            "Colorizer" => colorizerCost,
+            "WaterPump" => waterPumpCost,
+            "WaterPipe" => waterPipeCost,
+            "Mine" => mineCost,
+            _ => 0,
+        };
+    }
+
+    bool TrySpendBuildCost(int amount, string label)
+    {
+        if (amount <= 0) return true;
+        var gm = GameManager.Instance;
+        if (gm == null) return true;
+        if (gm.TrySpendMoney(amount)) return true;
+        Debug.LogWarning($"[MachineBuilder] Not enough money to place {label}. Cost: {amount}.");
+        return false;
+    }
+
     void StartPipePath(Vector2Int start)
     {
         ClearPipeGhosts();
@@ -331,34 +363,9 @@ public class MachineBuilder : MonoBehaviour
         }
     }
 
-    System.Collections.Generic.List<Vector2Int> BuildLinePath(Vector2Int a, Vector2Int b)
+    List<Vector2Int> BuildManhattanPath(Vector2Int start, Vector2Int end)
     {
-        // Legacy single-axis line: kept for reference (not used)
-        var path = new System.Collections.Generic.List<Vector2Int>();
-        var delta = b - a;
-        Vector2Int step;
-        int length;
-        if (Mathf.Abs(delta.x) >= Mathf.Abs(delta.y))
-        {
-            step = new Vector2Int(Mathf.Clamp(delta.x, -1, 1), 0);
-            length = Mathf.Abs(delta.x);
-        }
-        else
-        {
-            step = new Vector2Int(0, Mathf.Clamp(delta.y, -1, 1));
-            length = Mathf.Abs(delta.y);
-        }
-        path.Add(a);
-        for (int i = 1; i <= length; i++)
-        {
-            path.Add(a + step * i);
-        }
-        return path;
-    }
-
-    System.Collections.Generic.List<Vector2Int> BuildManhattanPath(Vector2Int start, Vector2Int end)
-    {
-        var path = new System.Collections.Generic.List<Vector2Int>();
+        var path = new List<Vector2Int>();
         path.Add(start);
         var cur = start;
 
@@ -429,6 +436,15 @@ public class MachineBuilder : MonoBehaviour
     void CommitPipePath()
     {
         if (pipePath.Count == 0) return;
+        int totalCost = waterPipeCost * pipePath.Count;
+        if (!CanAffordCost(totalCost))
+        {
+            Debug.LogWarning($"[MachineBuilder] Not enough money to place WaterPipe. Cost: {totalCost}.");
+            ClearPipeGhosts();
+            ClearPreviewState();
+            return;
+        }
+
         // Validate blocked cells
         foreach (var cell in pipePath)
         {
@@ -442,11 +458,25 @@ public class MachineBuilder : MonoBehaviour
             }
         }
 
+        if (!TrySpendBuildCost(totalCost, "WaterPipe"))
+        {
+            ClearPipeGhosts();
+            ClearPreviewState();
+            return;
+        }
+
         foreach (var cell in pipePath)
         {
             TryRemoveBeltAtCell(cell);
             var pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
             var go = Instantiate(activePrefab, pos, Quaternion.identity);
+            try
+            {
+                var tag = go.GetComponent<BuildCostTag>();
+                if (tag == null) tag = go.AddComponent<BuildCostTag>();
+                tag.Cost = waterPipeCost;
+            }
+            catch { }
             go.transform.rotation = RotationForPipeCell(cell);
         }
         ClearPipeGhosts();
@@ -673,6 +703,29 @@ public class MachineBuilder : MonoBehaviour
     {
         Debug.Log($"[MachineBuilder] Committing {activeName} at cell {cell} facing {outputDir}");
 
+        if (RequiresWaterCell() && !IsWaterCell(cell))
+        {
+            Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState();
+            return;
+        }
+        if (RequiresSugarCell() && !IsSugarCell(cell))
+        {
+            Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState();
+            return;
+        }
+
+        int cost = GetCostForActiveName(activeName);
+        if (!TrySpendBuildCost(cost, activeName))
+        {
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState();
+            return;
+        }
+
         // Destroy ghost and place real prefab with same orientation at footprint center
         Vector3 pos = GetFootprintCenterWorld(cell, outputDir);
         if (ghostGO != null) Destroy(ghostGO);
@@ -681,20 +734,14 @@ public class MachineBuilder : MonoBehaviour
         var footprint = GetFootprintCells(cell, outputDir);
         foreach (var fp in footprint) TryRemoveBeltAtCell(fp);
 
-        if (RequiresWaterCell() && !IsWaterCell(cell))
-        {
-            Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
-            ClearPreviewState();
-            return;
-        }
-        if (RequiresSugarCell() && !IsSugarCell(cell))
-        {
-            Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
-            ClearPreviewState();
-            return;
-        }
-
         var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
+        try
+        {
+            var tag = go.GetComponent<BuildCostTag>();
+            if (tag == null) tag = go.AddComponent<BuildCostTag>();
+            tag.Cost = cost;
+        }
+        catch { }
         if (RequiresSugarCell()) ApplyPlacedSorting(go, mineSortingOrder);
         Debug.Log($"[MachineBuilder] Instantiated {activeName} at position {pos}");
 
@@ -802,11 +849,6 @@ public class MachineBuilder : MonoBehaviour
         return 0f;
     }
 
-    static void TrySetGameState(string name)
-    {
-        // Deprecated: no-op (kept for binary compatibility if referenced elsewhere)
-    }
-
     static Vector3 GetMouseWorldOnPlane(Camera cam)
     {
         var mp = Input.mousePosition;
@@ -838,6 +880,14 @@ public class MachineBuilder : MonoBehaviour
     {
         foreach (var c in cells) if (IsBlocked(c)) return true;
         return false;
+    }
+
+    bool CanAffordCost(int amount)
+    {
+        if (amount <= 0) return true;
+        var gm = GameManager.Instance;
+        if (gm == null) return true;
+        return gm.Money >= amount;
     }
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)

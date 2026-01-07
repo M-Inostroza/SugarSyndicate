@@ -8,6 +8,10 @@ public class PipeDeletionTool : MonoBehaviour
 {
     [SerializeField] GameObject deletionGhostPrefab;
 
+    MachineBuilder cachedMachineBuilder;
+    bool didSearchMachineBuilder;
+    System.Reflection.FieldInfo fiWaterPipeCost;
+
     object grid;
     System.Reflection.MethodInfo miWorldToCell;
     System.Reflection.MethodInfo miCellToWorld;
@@ -40,6 +44,24 @@ public class PipeDeletionTool : MonoBehaviour
             }
         }
         catch { }
+    }
+
+    MachineBuilder GetMachineBuilderCached()
+    {
+        if (!didSearchMachineBuilder)
+        {
+            didSearchMachineBuilder = true;
+            cachedMachineBuilder = FindAnyObjectByType<MachineBuilder>();
+            if (cachedMachineBuilder != null)
+            {
+                try
+                {
+                    fiWaterPipeCost = cachedMachineBuilder.GetType().GetField("waterPipeCost", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                }
+                catch { }
+            }
+        }
+        return cachedMachineBuilder;
     }
 
     void Update()
@@ -107,7 +129,28 @@ public class PipeDeletionTool : MonoBehaviour
         foreach (var cell in path)
         {
             var go = FindPipeAtCell(cell);
-            if (go != null) Destroy(go);
+            if (go != null)
+            {
+                try
+                {
+                    int refund = 0;
+                    var tag = go.GetComponentInParent<BuildCostTag>() ?? go.GetComponentInChildren<BuildCostTag>(true);
+                    if (tag != null) refund = Mathf.Max(0, tag.Cost);
+                    if (refund <= 0)
+                    {
+                        // Fallback for older pipes without BuildCostTag
+                        var mb = GetMachineBuilderCached();
+                        if (mb != null)
+                        {
+                            if (fiWaterPipeCost != null) refund = Mathf.Max(0, (int)fiWaterPipeCost.GetValue(mb));
+                        }
+                    }
+                    if (refund > 0) GameManager.Instance?.AddMoney(refund);
+                }
+                catch { }
+
+                Destroy(go);
+            }
         }
     }
 

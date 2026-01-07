@@ -43,6 +43,150 @@ public class ConveyorPlacer : MonoBehaviour
     bool isDeleting = false;
     readonly HashSet<Vector2Int> deleteMarkedCells = new HashSet<Vector2Int>();
 
+    // Cached builder references for refund fallbacks (avoids repeated scene scans)
+    MachineBuilder cachedMachineBuilder;
+    bool didSearchMachineBuilder;
+    JunctionBuilder cachedJunctionBuilder;
+    bool didSearchJunctionBuilder;
+
+    // Cached reflected fields for costs
+    FieldInfo fiPressCost;
+    FieldInfo fiColorizerCost;
+    FieldInfo fiWaterPumpCost;
+    FieldInfo fiWaterPipeCost;
+    FieldInfo fiMineCost;
+    FieldInfo fiShrederCost;
+    FieldInfo fiSplitterCost;
+    FieldInfo fiMergerCost;
+
+    MachineBuilder GetMachineBuilderCached()
+    {
+        if (!didSearchMachineBuilder)
+        {
+            didSearchMachineBuilder = true;
+            cachedMachineBuilder = FindAnyObjectByType<MachineBuilder>();
+            if (cachedMachineBuilder != null)
+            {
+                try
+                {
+                    var t = cachedMachineBuilder.GetType();
+                    fiPressCost = t.GetField("pressCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiColorizerCost = t.GetField("colorizerCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiWaterPumpCost = t.GetField("waterPumpCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiWaterPipeCost = t.GetField("waterPipeCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiMineCost = t.GetField("mineCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiShrederCost = t.GetField("shrederCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                }
+                catch { }
+            }
+        }
+        return cachedMachineBuilder;
+    }
+
+    JunctionBuilder GetJunctionBuilderCached()
+    {
+        if (!didSearchJunctionBuilder)
+        {
+            didSearchJunctionBuilder = true;
+            cachedJunctionBuilder = FindAnyObjectByType<JunctionBuilder>();
+            if (cachedJunctionBuilder != null)
+            {
+                try
+                {
+                    var t = cachedJunctionBuilder.GetType();
+                    fiSplitterCost = t.GetField("splitterCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fiMergerCost = t.GetField("mergerCost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                }
+                catch { }
+            }
+        }
+        return cachedJunctionBuilder;
+    }
+
+    int GetRefundCostForPlacedObject(GameObject go)
+    {
+        if (go == null) return 0;
+        try
+        {
+            var tag = go.GetComponentInParent<BuildCostTag>();
+            if (tag == null) tag = go.GetComponentInChildren<BuildCostTag>(true);
+            if (tag != null) return Mathf.Max(0, tag.Cost);
+        }
+        catch { }
+
+        // Fallback inference for older placed objects without BuildCostTag
+        try
+        {
+            var mb = GetMachineBuilderCached();
+            if (mb != null)
+            {
+                int FieldCost(FieldInfo fi)
+                {
+                    try
+                    {
+                        if (fi == null) return 0;
+                        return Mathf.Max(0, (int)fi.GetValue(mb));
+                    }
+                    catch { return 0; }
+                }
+
+                if (go.GetComponentInParent<PressMachine>() != null) return FieldCost(fiPressCost);
+                if (go.GetComponentInParent<ColorizerMachine>() != null) return FieldCost(fiColorizerCost);
+                if (go.GetComponentInParent<WaterPump>() != null) return FieldCost(fiWaterPumpCost);
+                if (go.GetComponentInParent<SugarMine>() != null) return FieldCost(fiMineCost);
+                if (go.GetComponentInParent<WaterPipe>() != null) return FieldCost(fiWaterPipeCost);
+
+                // "Shreder" is a project spelling; infer from names if no dedicated component type.
+                if (go.name.Contains("Shreder") || go.name.Contains("Shredder")) return FieldCost(fiShrederCost);
+                try
+                {
+                    var monos = go.GetComponentsInChildren<MonoBehaviour>(true);
+                    foreach (var mono in monos)
+                    {
+                        if (mono == null) continue;
+                        var n = mono.GetType().Name;
+                        if (n.Contains("Shreder") || n.Contains("Shredder")) return FieldCost(fiShrederCost);
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        try
+        {
+            var jb = GetJunctionBuilderCached();
+            if (jb != null)
+            {
+                int FieldCost(FieldInfo fi)
+                {
+                    try
+                    {
+                        if (fi == null) return 0;
+                        return Mathf.Max(0, (int)fi.GetValue(jb));
+                    }
+                    catch { return 0; }
+                }
+
+                if (go.name.Contains("Splitter")) return FieldCost(fiSplitterCost);
+                if (go.name.Contains("Merger")) return FieldCost(fiMergerCost);
+            }
+        }
+        catch { }
+
+        return 0;
+    }
+
+    void RefundFullBuildCost(GameObject go)
+    {
+        try
+        {
+            int refund = GetRefundCostForPlacedObject(go);
+            if (refund > 0) GameManager.Instance?.AddMoney(refund);
+        }
+        catch { }
+    }
+
     // reflection cache for GridService
     object gridServiceInstance;
     MethodInfo miWorldToCell; // Vector2Int WorldToCell(Vector3)
@@ -611,6 +755,7 @@ public class ConveyorPlacer : MonoBehaviour
                     var mg = FindMachineAtCell(cell);
                     if (mg != null)
                     {
+                        RefundFullBuildCost(mg);
                         try { Destroy(mg); } catch { }
                         removedSomething = true;
                         // Clear machine flag in grid
@@ -624,10 +769,24 @@ public class ConveyorPlacer : MonoBehaviour
                     }
                     else
                     {
+                        // Try water pipe visual
+                        var pipe = FindPipeAtCell(cell);
+                        if (pipe != null)
+                        {
+                            RefundFullBuildCost(pipe);
+                            try { Destroy(pipe); } catch { }
+                            removedSomething = true;
+                            ClearLogicalCell(cell);
+                        }
+                    }
+
+                    if (!removedSomething)
+                    {
                         // Try junction visual/object
                         var jg = FindJunctionAtCell(cell);
                         if (jg != null)
                         {
+                            RefundFullBuildCost(jg);
                             try { Destroy(jg); } catch { }
                             removedSomething = true;
                             ClearLogicalCell(cell);
@@ -751,13 +910,14 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 // Machine visual first
                 var mg = FindMachineAtCell(cell);
-                if (mg != null) { try { Destroy(mg); } catch { } removedSomething = true; }
+                if (mg != null) { RefundFullBuildCost(mg); try { Destroy(mg); } catch { } removedSomething = true; }
                 // Water pipe
                 if (!removedSomething)
                 {
                     var pipe = FindPipeAtCell(cell);
                     if (pipe != null)
                     {
+                        RefundFullBuildCost(pipe);
                         try { Destroy(pipe); } catch { }
                         removedSomething = true;
                     }
@@ -766,7 +926,7 @@ public class ConveyorPlacer : MonoBehaviour
                 {
                     // Junction visual
                     var jg = FindJunctionAtCell(cell);
-                    if (jg != null) { try { Destroy(jg); } catch { } removedSomething = true; }
+                    if (jg != null) { RefundFullBuildCost(jg); try { Destroy(jg); } catch { } removedSomething = true; }
                 }
                 if (!removedSomething)
                 {
@@ -1687,6 +1847,7 @@ public class ConveyorPlacer : MonoBehaviour
                     var tn = mb.GetType().Name;
                     if (tn.Contains("Junction") || tn.Contains("Splitter") || tn.Contains("Merger"))
                     {
+                        RefundFullBuildCost(mb.gameObject);
                         try { Destroy(mb.gameObject); } catch { }
                         break;
                     }

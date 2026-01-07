@@ -12,6 +12,7 @@ public class Truck : MonoBehaviour, IMachine
 
     public static event Action<string> OnItemDelivered;
     public static event Action<int> OnSugarBlockDelivered;
+    public static event Action<bool> OnTrucksCalledChanged;
 
     public Vector2Int Cell => cell;
     public Vector2Int InputVec => Vector2Int.zero;
@@ -22,10 +23,23 @@ public class Truck : MonoBehaviour, IMachine
     bool isActive;
     const string SugarBlockType = "SugarBlock";
 
+    static bool trucksCalled;
+    public static bool TrucksCalled => trucksCalled;
+
     void Awake()
     {
         if (grid == null) grid = GridService.Instance;
-        isActive = activeOnStart;
+        isActive = trucksCalled || activeOnStart;
+    }
+
+    void OnEnable()
+    {
+        OnTrucksCalledChanged += HandleTrucksCalledChanged;
+    }
+
+    void OnDisable()
+    {
+        OnTrucksCalledChanged -= HandleTrucksCalledChanged;
     }
 
     void Start()
@@ -56,6 +70,19 @@ public class Truck : MonoBehaviour, IMachine
 
     public void Activate() => isActive = true;
     public void Deactivate() => isActive = false;
+
+    void HandleTrucksCalledChanged(bool called)
+    {
+        if (called) Activate();
+        else Deactivate();
+    }
+
+    public static void SetTrucksCalled(bool called)
+    {
+        if (trucksCalled == called) return;
+        trucksCalled = called;
+        try { OnTrucksCalledChanged?.Invoke(trucksCalled); } catch { }
+    }
 
     public bool CanAcceptFrom(Vector2Int approachFromVec)
     {
