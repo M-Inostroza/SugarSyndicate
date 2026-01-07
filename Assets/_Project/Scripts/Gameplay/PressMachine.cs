@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
-public class PressMachine : MonoBehaviour, IMachine
+public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -46,6 +46,16 @@ public class PressMachine : MonoBehaviour, IMachine
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
+    public int StoredItemCount
+    {
+        get
+        {
+            int count = Mathf.Max(0, bufferedInputs);
+            if (busy && hasInputThisCycle)
+                count += Mathf.Max(1, inputsPerProcess);
+            return count;
+        }
+    }
 
     Vector2Int cell;
     bool registered;
@@ -83,6 +93,9 @@ public class PressMachine : MonoBehaviour, IMachine
         {
             ItemViewPool.Ensure(itemPrefab, poolPrewarm);
         }
+
+        if (!isGhost)
+            EnsureStorageDisplay();
 
         if (isGhost || grid == null) return;
 
@@ -176,6 +189,12 @@ public class PressMachine : MonoBehaviour, IMachine
             transform.position = world;
         }
         catch (Exception ex) { DWarn($"[PressMachine] Registration failed: {ex.Message}"); }
+    }
+
+    void EnsureStorageDisplay()
+    {
+        if (GetComponent<MachineStorageDisplay>() != null) return;
+        gameObject.AddComponent<MachineStorageDisplay>();
     }
 
     // Return true if the item was accepted and processing started

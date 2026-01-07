@@ -509,6 +509,8 @@ public class BeltSimulationService : MonoBehaviour
         {
             MoveView(item, sourcePos, destPos);
             pendingConsume[item] = new PendingConsume { source = sourcePos, dest = destPos, machine = machine };
+            ClearSourceCellForHandoff(sourceCell, item);
+            TryPullIntoEmptyCell(sourcePos, sourceCell);
             ScheduleHandoffClear(sourcePos, item);
             return true;
         }
@@ -548,6 +550,41 @@ public class BeltSimulationService : MonoBehaviour
         from.hasItem = false;
         MoveView(dest.item, fromPos, target);
         return true;
+    }
+
+    bool TryPullIntoEmptyCell(Vector2Int cellPos, GridService.Cell cell)
+    {
+        if (cell == null || cell.hasItem) return false;
+        if (suppressPullOnceAfterUnpausing) return false;
+
+        if (cell.type == GridService.CellType.Junction)
+        {
+            Direction[] inputs = new Direction[] { cell.inA, cell.inB, cell.inC };
+            inputs = inputs.Where(d => DirectionUtil.IsCardinal(d)).ToArray();
+
+            if (inputs.Length > 1)
+            {
+                int start = cell.junctionToggle % inputs.Length;
+                for (int i = 0; i < inputs.Length; i++)
+                {
+                    var dir = inputs[(start + i) % inputs.Length];
+                    if (TryPullFrom(cellPos, dir))
+                    {
+                        cell.junctionToggle = (byte)((start + i + 1) % inputs.Length);
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (inputs.Length == 1)
+                return TryPullFrom(cellPos, inputs[0]);
+            return false;
+        }
+
+        if (cell.type == GridService.CellType.Belt)
+            return TryPullFrom(cellPos, cell.inA);
+
+        return false;
     }
 
     // Visual interpolation state
@@ -972,6 +1009,14 @@ public class BeltSimulationService : MonoBehaviour
     {
         if (item == null) return;
         handoffClearBuffer.Add(new HandoffClear { cell = cellPos, item = item });
+    }
+
+    void ClearSourceCellForHandoff(GridService.Cell cell, Item item)
+    {
+        if (cell == null || item == null) return;
+        if (cell.item != item) return;
+        cell.item = null;
+        cell.hasItem = false;
     }
 
     void FlushHandoffClears()

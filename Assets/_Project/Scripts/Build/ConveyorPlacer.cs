@@ -23,6 +23,10 @@ public class ConveyorPlacer : MonoBehaviour
     [Tooltip("Small sorting order offset applied to ghost previews to draw them just above existing belts without leaving mask range.")]
     [SerializeField] int ghostSortingOrderOffset = 1;
 
+    [Header("Economy")]
+    [SerializeField, Min(0)] int beltCost = 5;
+    [SerializeField] bool refundBeltOnDelete = true;
+
     Quaternion rotation = Quaternion.identity;
 
     class GhostData { public Color[] spriteColors; public int[] spriteOrders; public int[] spriteMaskInteractions; public RendererColor[] rendererColors; public bool spawnedByPlacer; public int? sortingGroupOrder; public int? sortingGroupLayerId; }
@@ -572,6 +576,7 @@ public class ConveyorPlacer : MonoBehaviour
         {
             try
             {
+                bool refundBelt = ShouldRefundBeltAtCell(cell);
                 bool removedSomething = false;
                 Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
                 if (conv == null)
@@ -682,6 +687,7 @@ public class ConveyorPlacer : MonoBehaviour
                 if (removedSomething)
                 {
                     TryClearItemAtCell(cell);
+                    if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
                 }
 
                 DestroyDeleteOverlayForCell(cell);
@@ -719,6 +725,7 @@ public class ConveyorPlacer : MonoBehaviour
     {
         try
         {
+            bool refundBelt = ShouldRefundBeltAtCell(cell);
             bool removedSomething = false;
             Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
             if (conv == null)
@@ -806,6 +813,7 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 ClearLogicalCell(cell);
                 TryClearItemAtCell(cell);
+                if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
             }
 
             TryRegisterCellInBeltSim(cell);
@@ -992,6 +1000,19 @@ public class ConveyorPlacer : MonoBehaviour
                         var pos = conv.transform.position; var rot = conv.transform.rotation;
                         var cell = (Vector2Int)miWorldToCell.Invoke(gridServiceInstance, new object[] { pos });
                         
+                        if (!TrySpendBeltCost(cell))
+                        {
+                            try { Destroy(conv.gameObject); } catch { }
+                            try
+                            {
+                                var keys = new List<Vector2Int>();
+                                foreach (var gk in ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
+                                foreach (var k in keys) ghostByCell.Remove(k);
+                            }
+                            catch { }
+                            continue;
+                        }
+
                         // restore any SortingGroup settings on the ghost before destroying
                         try
                         {
@@ -1215,6 +1236,11 @@ public class ConveyorPlacer : MonoBehaviour
             }
         }
 
+        if (!isDragging)
+        {
+            if (!TrySpendBeltCost(cell2)) return false;
+        }
+
         if (conveyorPrefab != null)
         {
             try
@@ -1361,6 +1387,92 @@ public class ConveyorPlacer : MonoBehaviour
         return gridServiceInstance != null && miWorldToCell != null && miCellToWorld != null;
     }
 
+    bool TrySpendBeltCost(Vector2Int cell)
+    {
+        if (beltCost <= 0) return true;
+        var gm = GameManager.Instance;
+        if (gm == null) return true;
+        if (!EnsureGridServiceCached()) return true;
+        if (HasExistingRealBelt(cell)) return true;
+        return gm.TrySpendMoney(beltCost);
+    }
+
+    bool ShouldRefundBeltAtCell(Vector2Int cell)
+    {
+        if (!refundBeltOnDelete || beltCost <= 0) return false;
+        if (GameManager.Instance == null) return false;
+        if (!EnsureGridServiceCached()) return false;
+
+        try
+        {
+            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+            if (getConv != null)
+            {
+                var existing = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
+                if (existing != null && !existing.isGhost) return true;
+            }
+        }
+        catch { }
+
+        if (TryGetLogicalCellInfo(cell, out var hasConv, out var typeName))
+        {
+            if (hasConv) return true;
+            if (typeName == "Belt") return true;
+        }
+
+        return false;
+    }
+
+    bool HasExistingRealBelt(Vector2Int cell)
+    {
+        if (!EnsureGridServiceCached()) return false;
+        try
+        {
+            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+            if (getConv != null)
+            {
+                var existing = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
+                if (existing != null && !existing.isGhost) return true;
+            }
+        }
+        catch { }
+
+        if (TryGetLogicalCellInfo(cell, out var hasConv, out var typeName))
+        {
+            if (hasConv) return true;
+            if (typeName == "Belt" || typeName == "Junction") return true;
+        }
+
+        return false;
+    }
+
+    bool TryGetLogicalCellInfo(Vector2Int cell, out bool hasConveyor, out string typeName)
+    {
+        hasConveyor = false;
+        typeName = null;
+        if (!EnsureGridServiceCached()) return false;
+        try
+        {
+            var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
+            if (getCell == null) return false;
+            var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
+            if (cellObj == null) return false;
+            var t = cellObj.GetType();
+            var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (fiHasConv != null)
+            {
+                try { hasConveyor = (bool)fiHasConv.GetValue(cellObj); } catch { hasConveyor = false; }
+            }
+            if (fiType != null)
+            {
+                typeName = fiType.GetValue(cellObj)?.ToString();
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
     int DirectionIndexFromName(string name)
     {
         return name switch { "Up" => 0, "Right" => 1, "Down" => 2, "Left" => 3, _ => 4 };
@@ -1435,24 +1547,67 @@ public class ConveyorPlacer : MonoBehaviour
         return null;
     }
 
-    // Helper: find a machine GameObject (e.g., PressMachine) at a cell center
+    // Helper: find a machine GameObject (press/mine/etc.) at a cell center
     GameObject FindMachineAtCell(Vector2Int cell)
     {
         try
         {
+            if (MachineRegistry.TryGet(cell, out var machine) && machine is MonoBehaviour mb)
+                return mb.gameObject;
+        }
+        catch { }
+
+        Vector3 center = Vector3.zero;
+        float tol = 0.05f;
+        bool hasCenter = false;
+        try
+        {
             if (miCellToWorld == null || gridServiceInstance == null) return null;
             var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
-            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            center = worldObj is Vector3 vv ? vv : Vector3.zero;
+            hasCenter = worldObj is Vector3;
+            tol = Mathf.Max(0.05f, SafeGetCellSize() * 0.45f);
+        }
+        catch { }
+
+        try
+        {
+            if (!hasCenter) return null;
             var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
             foreach (var col in cols)
             {
                 if (col == null) continue;
-                var press = col.GetComponentInParent<PressMachine>();
-                if (press != null && !press.isGhost)
-                    return press.gameObject;
+                var parents = col.GetComponentsInParent<MonoBehaviour>(true);
+                foreach (var parent in parents)
+                {
+                    if (parent == null) continue;
+                    if (parent is PressMachine press)
+                    {
+                        if (!press.isGhost) return press.gameObject;
+                        continue;
+                    }
+                    if (parent is IMachine) return parent.gameObject;
+                }
+                var mine = col.GetComponentInParent<SugarMine>();
+                if (mine != null) return mine.gameObject;
             }
         }
         catch { }
+
+        try
+        {
+            if (!hasCenter) return null;
+            var mines = UnityEngine.Object.FindObjectsByType<SugarMine>(FindObjectsSortMode.None);
+            foreach (var mine in mines)
+            {
+                if (mine == null) continue;
+                var pos = mine.transform.position;
+                if (Mathf.Abs(pos.x - center.x) < tol && Mathf.Abs(pos.y - center.y) < tol)
+                    return mine.gameObject;
+            }
+        }
+        catch { }
+
         return null;
     }
 

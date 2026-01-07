@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public enum GameState { Play, Build, Delete }
 
@@ -11,6 +12,8 @@ public class GameManager : MonoBehaviour
 
     [Header("Economy")]
     [SerializeField, Min(0)] int money = 0;
+    [SerializeField, Min(0)] int tutorialStartingMoney = 1500;
+    [SerializeField] bool applyTutorialStartMoney = true;
 
     public event Action<int> OnMoneyChanged;
     public int Money => money;
@@ -22,6 +25,29 @@ public class GameManager : MonoBehaviour
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        TryApplyTutorialStartMoney(SceneManager.GetActiveScene());
+    }
+
+    void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        TryApplyTutorialStartMoney(scene);
+    }
+
+    void TryApplyTutorialStartMoney(Scene scene)
+    {
+        if (!applyTutorialStartMoney) return;
+        if (scene.buildIndex != 0) return;
+        SetMoney(tutorialStartingMoney);
     }
 
     public void SetState(GameState s)
