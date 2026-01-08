@@ -2,6 +2,10 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 public enum GameState { Play, Build, Delete }
 
 public class GameManager : MonoBehaviour
@@ -26,6 +30,26 @@ public class GameManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         TryApplyTutorialStartMoney(SceneManager.GetActiveScene());
+    }
+
+    void Update()
+    {
+        // Global quit shortcut. If a build tool is active, Esc should remain "cancel tool".
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (BuildModeController.HasActiveTool)
+                return;
+            QuitGame();
+        }
+    }
+
+    public void QuitGame()
+    {
+#if UNITY_EDITOR
+        EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     void OnEnable()

@@ -139,10 +139,17 @@ public class GoalManager : MonoBehaviour
         return $"Deliver {itemTarget} {FormatItemType(goalItemType)}";
     }
 
+    public bool TryGetGoalItemType(out string itemType)
+    {
+        itemType = goalItemType;
+        return hasGoal && !string.IsNullOrWhiteSpace(itemType);
+    }
+
     public string GetProgressText()
     {
         if (!hasGoal) return "- / -";
-        return $"{Mathf.Max(0, itemsDelivered)} / {itemTarget}";
+        int shown = Mathf.Min(Mathf.Max(0, itemsDelivered), itemTarget);
+        return $"{shown} / {itemTarget}";
     }
 
     public int BonusObjectiveCount => activeBonusObjectives != null ? activeBonusObjectives.Length : 0;
@@ -184,7 +191,7 @@ public class GoalManager : MonoBehaviour
             {
                 int requiredExtra = Mathf.Max(1, objective.extraItemCount);
                 int extraDelivered = Mathf.Max(0, itemsDelivered - itemTarget);
-                return $"{Mathf.Min(extraDelivered, requiredExtra)} / {requiredExtra}";
+                return $"{extraDelivered} / {requiredExtra}";
             }
             case BonusObjectiveType.FinishUnderDays:
             {
@@ -318,5 +325,78 @@ public class GoalManager : MonoBehaviour
     {
         if (!hasGoal) return;
         UpdateSecondaryUI();
+    }
+
+    public bool IsMainMissionComplete()
+    {
+        if (!hasGoal) return false;
+        return itemsDelivered >= itemTarget;
+    }
+
+    bool IsBonusObjectiveCompleteComputed(int index)
+    {
+        if (activeBonusObjectives == null) return false;
+        if (index < 0 || index >= activeBonusObjectives.Length) return false;
+
+        var objective = activeBonusObjectives[index];
+        switch (objective.type)
+        {
+            case BonusObjectiveType.DeliverExtraItems:
+            {
+                int requiredExtra = Mathf.Max(1, objective.extraItemCount);
+                int extraDelivered = Mathf.Max(0, itemsDelivered - itemTarget);
+                return extraDelivered >= requiredExtra;
+            }
+            case BonusObjectiveType.FinishUnderDays:
+            {
+                int maxDays = Mathf.Max(1, objective.maxDays);
+                int elapsedDays = GetElapsedDays();
+                return elapsedDays <= maxDays;
+            }
+            default:
+                return false;
+        }
+    }
+
+    public void LogFinalMissionAndSideMissionStatuses()
+    {
+        if (!hasGoal)
+        {
+            Debug.Log("[GoalManager] Final Status: No goal configured.");
+            return;
+        }
+
+        string mainStatus = IsMainMissionComplete() ? "COMPLETE" : "INCOMPLETE";
+        Debug.Log($"[GoalManager] Final Main Mission: {mainStatus} | {GetGoalText()} | Progress: {GetProgressText()}");
+
+        int bonusCount = BonusObjectiveCount;
+        if (bonusCount <= 0)
+        {
+            Debug.Log("[GoalManager] Final Side Missions: None");
+            return;
+        }
+
+        for (int i = 0; i < bonusCount; i++)
+        {
+            string status = IsBonusObjectiveCompleteComputed(i) ? "COMPLETE" : "INCOMPLETE";
+            Debug.Log($"[GoalManager] Final Side Mission {i + 1}: {status} | {GetBonusObjectiveText(i)} | Progress: {GetBonusObjectiveProgressText(i)}");
+        }
+    }
+
+    public void GetStarCounts(out int earned, out int total)
+    {
+        earned = 0;
+        total = 0;
+        if (!hasGoal)
+            return;
+
+        // Main goal is worth 1 star.
+        total = 1 + BonusObjectiveCount;
+        if (IsMainMissionComplete()) earned++;
+
+        for (int i = 0; i < BonusObjectiveCount; i++)
+        {
+            if (IsBonusObjectiveCompleteComputed(i)) earned++;
+        }
     }
 }

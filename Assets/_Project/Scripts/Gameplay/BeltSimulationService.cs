@@ -945,11 +945,39 @@ public class BeltSimulationService : MonoBehaviour
 
             if (!started)
             {
-                if (item.view != null && grid != null)
+                // Machine no longer accepts (race between CanAcceptFrom and TryStartProcess).
+                // Restore the logical item back into the source cell so it can retry later,
+                // and ensure the view is no longer orphaned.
+                if (grid != null)
                 {
-                    var snap = grid.CellToWorld(pending.source, item.view.position.z);
-                    item.view.position = snap;
+                    if (item.view != null)
+                    {
+                        var snap = grid.CellToWorld(pending.source, item.view.position.z);
+                        item.view.position = snap;
+                    }
+
+                    var sourceCell = grid.GetCell(pending.source);
+                    if (sourceCell != null)
+                    {
+                        if (!sourceCell.hasItem || sourceCell.item == item)
+                        {
+                            sourceCell.item = item;
+                            sourceCell.hasItem = true;
+                            RegisterCell(pending.source);
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[BeltSimulationService] Machine rejected item after handoff, but source cell {pending.source} is occupied; destroying orphaned view to prevent stuck visuals.");
+                            try
+                            {
+                                if (item.view != null) Destroy(item.view.gameObject);
+                            }
+                            catch { }
+                            item.view = null;
+                        }
+                    }
                 }
+
                 RemoveVisual(item);
                 return;
             }

@@ -7,6 +7,12 @@ public interface IMachineStorage
     int StoredItemCount { get; }
 }
 
+// Optional extension for machines that want to display N / N.
+public interface IMachineStorageWithCapacity : IMachineStorage
+{
+    int Capacity { get; }
+}
+
 [DisallowMultipleComponent]
 public class MachineStorageDisplay : MonoBehaviour
 {
@@ -74,7 +80,12 @@ public class MachineStorageDisplay : MonoBehaviour
         if (hideWhenZero && count <= 0)
             text.text = string.Empty;
         else
-            text.text = count.ToString();
+        {
+            if (storage is IMachineStorageWithCapacity capped)
+                text.text = $"{count} / {Mathf.Max(0, capped.Capacity)}";
+            else
+                text.text = count.ToString();
+        }
     }
 
     void ApplySorting(TextMeshPro target)

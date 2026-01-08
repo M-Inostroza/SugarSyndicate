@@ -2,13 +2,20 @@ using System;
 using UnityEngine;
 
 // Simple sink that consumes any item. Counts SugarBlock deliveries.
-public class Truck : MonoBehaviour, IMachine
+public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
 {
     [Header("Services")]
     [SerializeField] GridService grid;
 
     [Header("State")]
     [SerializeField] bool activeOnStart = false;
+
+    [Header("Capacity")]
+    [SerializeField, Min(0)] int capacity = 30;
+    [SerializeField] int currentLoad;
+
+    public int StoredItemCount => Mathf.Max(0, currentLoad);
+    public int Capacity => Mathf.Max(0, capacity);
 
     public static event Action<string> OnItemDelivered;
     public static event Action<int> OnSugarBlockDelivered;
@@ -46,6 +53,9 @@ public class Truck : MonoBehaviour, IMachine
     {
         if (grid == null) grid = GridService.Instance;
         if (grid == null) return;
+
+        EnsureStorageDisplay();
+
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
@@ -94,8 +104,17 @@ public class Truck : MonoBehaviour, IMachine
         if (!isActive) return false;
         if (item == null) return false;
 
+        if (currentLoad >= capacity)
+        {
+            Debug.Log($"[Truck] Rejecting item; capacity full ({currentLoad}/{capacity}) at {cell}");
+            return false;
+        }
+
         var type = string.IsNullOrWhiteSpace(item.type) ? "Unknown" : item.type.Trim();
         Debug.Log($"[Truck] Accepted item '{type}' at {cell}");
+
+        currentLoad++;
+        LevelStats.RecordShipped(type);
         OnItemDelivered?.Invoke(type);
 
         if (IsSugarBlock(type))
@@ -105,6 +124,13 @@ public class Truck : MonoBehaviour, IMachine
         }
         return true; // consume any item
     }
+
+    void EnsureStorageDisplay()
+    {
+        if (GetComponent<MachineStorageDisplay>() != null) return;
+        gameObject.AddComponent<MachineStorageDisplay>();
+    }
+
 
     void TryRegisterAsMachineAndSnap()
     {
