@@ -11,6 +11,9 @@ public enum GameState { Play, Build, Delete }
 
 public class GameManager : MonoBehaviour
 {
+    const string SaveResetVersionKey = "Save.ResetVersion";
+    const int SaveResetVersion = 1;
+
     public static GameManager Instance { get; private set; }
 
     public GameState State { get; private set; } = GameState.Play;
@@ -49,8 +52,33 @@ public class GameManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
+        ResetAllMoneyOnce();
         LoadSucra();
         TryApplyTutorialStartMoney(SceneManager.GetActiveScene());
+    }
+
+    void ResetAllMoneyOnce()
+    {
+        // User-requested: start fresh after switching save systems.
+        // This runs once and records the version in ES3.
+        try
+        {
+            int applied = 0;
+            try { applied = ES3.Load<int>(SaveResetVersionKey, 0); } catch { applied = 0; }
+            if (applied == SaveResetVersion) return;
+
+            // Clear global Sucra from ES3 and legacy PlayerPrefs.
+            try { ES3.DeleteKey(sucraPlayerPrefsKey); } catch { }
+            try { PlayerPrefs.DeleteKey(sucraPlayerPrefsKey); } catch { }
+
+            // Reset runtime values.
+            try { SetSweetCredits(0); } catch { }
+            try { SetSucra(0); } catch { }
+
+            // Mark reset complete.
+            try { ES3.Save<int>(SaveResetVersionKey, SaveResetVersion); } catch { }
+        }
+        catch { }
     }
 
     void Update()
@@ -85,6 +113,16 @@ public class GameManager : MonoBehaviour
 
     void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        // Menu scenes should never inherit Build/Delete state from a previous level.
+        // Otherwise persistent overlays/tools (DontDestroyOnLoad) can bleed into menus.
+        if (string.Equals(scene.name, "Level selection", StringComparison.OrdinalIgnoreCase))
+        {
+            try { SetState(GameState.Play); } catch { }
+            try { if (TimeManager.Instance != null) TimeManager.Instance.SetRunning(true); } catch { }
+            try { BuildModeController.SetToolActive(false); } catch { }
+            try { BuildSelectionNotifier.Notify(null); } catch { }
+        }
+
         TryApplyTutorialStartMoney(scene);
     }
 
@@ -157,9 +195,12 @@ public class GameManager : MonoBehaviour
     void LoadSucra()
     {
         if (!persistSucra) return;
+
+        // Main save system: Easy Save 3.
         try
         {
-            sucra = Mathf.Max(0, PlayerPrefs.GetInt(sucraPlayerPrefsKey, sucra));
+            if (ES3.KeyExists(sucraPlayerPrefsKey))
+                sucra = Mathf.Max(0, ES3.Load<int>(sucraPlayerPrefsKey));
         }
         catch { }
     }
@@ -167,12 +208,9 @@ public class GameManager : MonoBehaviour
     void SaveSucra()
     {
         if (!persistSucra) return;
-        try
-        {
-            PlayerPrefs.SetInt(sucraPlayerPrefsKey, sucra);
-            PlayerPrefs.Save();
-        }
-        catch { }
+
+        // Main save system: Easy Save 3.
+        try { ES3.Save<int>(sucraPlayerPrefsKey, sucra); } catch { }
     }
 
     // Back-compat wrappers (existing scripts use these)
