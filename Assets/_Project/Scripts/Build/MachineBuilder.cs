@@ -441,7 +441,7 @@ public class MachineBuilder : MonoBehaviour
         {
             Debug.LogWarning($"[MachineBuilder] Not enough money to place WaterPipe. Cost: {totalCost}.");
             ClearPipeGhosts();
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -453,7 +453,7 @@ public class MachineBuilder : MonoBehaviour
             {
                 Debug.LogWarning($"[MachineBuilder] Cannot place pipe: cell {cell} blocked.");
                 ClearPipeGhosts();
-                TrySetBuildToolActive(false);
+                ClearPreviewState(clearActiveSelection: false);
                 return;
             }
         }
@@ -461,7 +461,7 @@ public class MachineBuilder : MonoBehaviour
         if (!TrySpendBuildCost(totalCost, "WaterPipe"))
         {
             ClearPipeGhosts();
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -480,8 +480,8 @@ public class MachineBuilder : MonoBehaviour
             go.transform.rotation = RotationForPipeCell(cell);
         }
         ClearPipeGhosts();
-        ClearPreviewState();
-        TrySetBuildToolActive(false);
+        // Keep the tool armed so the player can place another path without re-selecting.
+        ClearPreviewState(clearActiveSelection: false);
     }
 
     void ClearPipeGhosts()
@@ -566,6 +566,10 @@ public class MachineBuilder : MonoBehaviour
             Debug.LogWarning($"[MachineBuilder] No prefab assigned for {activeName}.");
             return;
         }
+
+        // Treat this as an active tool immediately (so Esc cancels tool instead of quitting,
+        // and to keep placement armed across repeated placements).
+        TrySetBuildToolActive(true);
 
         // Wait for the next world click to place
         awaitingWorldClick = true;
@@ -707,14 +711,14 @@ public class MachineBuilder : MonoBehaviour
         {
             Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
         if (RequiresSugarCell() && !IsSugarCell(cell))
         {
             Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -722,7 +726,7 @@ public class MachineBuilder : MonoBehaviour
         if (!TrySpendBuildCost(cost, activeName))
         {
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -773,7 +777,8 @@ public class MachineBuilder : MonoBehaviour
         // Mark footprint cells as machine in grid
         TryMarkMachineFootprint(footprint);
 
-        ClearPreviewState();
+        // Successful placement: clear only temporary preview state, keep tool selection armed.
+        ClearPreviewState(clearActiveSelection: false);
     }
 
     void TryRemoveBeltAtCell(Vector2Int cell)
@@ -820,13 +825,14 @@ public class MachineBuilder : MonoBehaviour
     void CancelPreview()
     {
         if (ghostGO != null) Destroy(ghostGO);
-        ClearPreviewState();
+        ClearPreviewState(clearActiveSelection: true);
         NotifySelectionChanged(null);
         TrySetBuildToolActive(false);
+        HideWaterOverlay();
         HideSugarOverlay();
     }
 
-    void ClearPreviewState()
+    void ClearPreviewState(bool clearActiveSelection = true)
     {
         placing = false;
         placingPipePath = false;
@@ -835,9 +841,9 @@ public class MachineBuilder : MonoBehaviour
         ghostPress = null;
         ghostColorizer = null;
         ghostWaterPump = null;
-        activePrefab = null;
+        if (clearActiveSelection) activePrefab = null;
         ClearPipeGhosts();
-        TrySetBuildToolActive(false);
+        if (clearActiveSelection) TrySetBuildToolActive(false);
     }
 
     static float DirToZ(Vector2Int d)
