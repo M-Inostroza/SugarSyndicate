@@ -7,8 +7,28 @@ using UnityEngine.UI;
 /// </summary>
 public class TruckCallController : MonoBehaviour
 {
+    [System.Serializable]
+    struct ItemValue
+    {
+        public string itemType;
+        public int value;
+    }
+
     [Header("Settings")]
     [SerializeField, Min(0f)] float activeSeconds = 30f;
+
+    [Header("Sucra Reward")]
+    [Tooltip("Base(Lv). If baseSucraByLevel doesn't include the current buildIndex, this value is used.")]
+    [SerializeField, Min(0)] int baseSucraDefault = 1000;
+
+    [Tooltip("Optional Base(Lv) overrides by buildIndex. Index 0 = first scene in Build Settings.")]
+    [SerializeField] int[] baseSucraByLevel;
+
+    [Tooltip("Item values used for ShipmentBonus: Σ(value[itemType] * shippedUnits[itemType]).")]
+    [SerializeField] ItemValue[] itemValues;
+
+    [Tooltip("Optional: +50 if time to first delivered item < 3 seconds after calling trucks.")]
+    [SerializeField] bool enableFastStartBonus = false;
 
     [Header("UI")]
     [Tooltip("Optional. If assigned, will be disabled after first use so trucks can't be called twice.")]
@@ -19,11 +39,18 @@ public class TruckCallController : MonoBehaviour
 
     Coroutine autoRecallRoutine;
     bool hasCalledTrucksThisLevel;
+    float calledAtTime = -1f;
+    float firstDeliveryAtTime = -1f;
 
     public void CallTrucks()
     {
         if (hasCalledTrucksThisLevel) return;
         hasCalledTrucksThisLevel = true;
+
+        calledAtTime = Time.time;
+        firstDeliveryAtTime = -1f;
+        Truck.OnItemDelivered -= HandleAnyItemDelivered;
+        Truck.OnItemDelivered += HandleAnyItemDelivered;
 
         if (callTrucksButton != null)
             callTrucksButton.interactable = false;
@@ -48,6 +75,12 @@ public class TruckCallController : MonoBehaviour
         Truck.SetTrucksCalled(false);
     }
 
+    void HandleAnyItemDelivered(string _)
+    {
+        if (firstDeliveryAtTime >= 0f) return;
+        firstDeliveryAtTime = Time.time;
+    }
+
     void OnDisable()
     {
         if (autoRecallRoutine != null)
@@ -55,6 +88,8 @@ public class TruckCallController : MonoBehaviour
             StopCoroutine(autoRecallRoutine);
             autoRecallRoutine = null;
         }
+
+        Truck.OnItemDelivered -= HandleAnyItemDelivered;
     }
 
     System.Collections.IEnumerator EndAfterWindow()
@@ -64,6 +99,9 @@ public class TruckCallController : MonoBehaviour
 
         // Deactivate trucks
         Truck.SetTrucksCalled(false);
+
+        // Stop listening for deliveries; the window is over.
+        Truck.OnItemDelivered -= HandleAnyItemDelivered;
 
         // Log final mission + side mission statuses
         try
@@ -80,7 +118,23 @@ public class TruckCallController : MonoBehaviour
         }
 
         // Populate summary UI
-        TryShowSummaryUI();
+        int sucraEarned = 0;
+        try
+        {
+            sucraEarned = CalculateSucraReward();
+            if (sucraEarned > 0 && GameManager.Instance != null)
+                GameManager.Instance.AddSucra(sucraEarned);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[TruckCallController] Failed to calculate/award Sucra: {e.Message}");
+        }
+
+        var summaryUI = TryShowSummaryUI();
+        if (summaryUI != null)
+        {
+            try { summaryUI.SetSucraEarned(sucraEarned); } catch { }
+        }
 
         // Finish the level (minimal implementation: stop time/simulation)
         try
@@ -93,7 +147,107 @@ public class TruckCallController : MonoBehaviour
         autoRecallRoutine = null;
     }
 
-    void TryShowSummaryUI()
+    int CalculateSucraReward()
+    {
+        int baseLv = GetBaseSucraForCurrentLevel();
+
+        // ShipmentBonus = Σ(value[p] * shippedUnits[p])
+        int shipmentBonus = 0;
+        var shipped = LevelStats.GetAllShippedCountsSnapshot();
+        foreach (var kvp in shipped)
+        {
+            int value = GetItemValueOrDefault(kvp.Key);
+            if (value <= 0) continue;
+            shipmentBonus += value * Mathf.Max(0, kvp.Value);
+        }
+
+        // EfficiencyBonus = max(0, BudgetRemaining * 0.25)
+        int budgetRemaining = 0;
+        try { if (GameManager.Instance != null) budgetRemaining = GameManager.Instance.SweetCredits; } catch { }
+        int efficiencyBonus = budgetRemaining > 0 ? Mathf.FloorToInt(budgetRemaining * 0.25f) : 0;
+
+        // Surplus is shippedUnitsTotal - orderQty (goal item only)
+        int surplusUnits = 0;
+        try
+        {
+            var goalManager = FindFirstObjectByType<GoalManager>();
+            if (goalManager != null && goalManager.TryGetOrderInfo(out _, out int orderQty, out int shippedInWindow))
+                surplusUnits = Mathf.Max(0, shippedInWindow - orderQty);
+        }
+        catch { }
+
+        // WindowBonuses = OverloadBonus + BalancedFleetBonus [+ FastStartBonus]
+        int overloadBonus = 3 * Mathf.Max(0, surplusUnits);
+        int balancedFleetBonus = IsBalancedFleet() ? Mathf.FloorToInt((baseLv + shipmentBonus) * 0.10f) : 0;
+        int fastStartBonus = 0;
+        if (enableFastStartBonus && calledAtTime >= 0f && firstDeliveryAtTime >= 0f)
+        {
+            float dt = firstDeliveryAtTime - calledAtTime;
+            if (dt < 3f) fastStartBonus = 50;
+        }
+        int windowBonuses = overloadBonus + balancedFleetBonus + fastStartBonus;
+
+        // OverdraftFee = ceil(max(0, -Budget) * 0.25)
+        int overdraftFee = budgetRemaining < 0 ? Mathf.CeilToInt((-budgetRemaining) * 0.25f) : 0;
+
+        int total = baseLv + shipmentBonus + efficiencyBonus + windowBonuses - overdraftFee;
+        return Mathf.Max(0, total);
+    }
+
+    int GetBaseSucraForCurrentLevel()
+    {
+        int idx = 0;
+        try { idx = UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex; } catch { }
+        if (baseSucraByLevel != null && idx >= 0 && idx < baseSucraByLevel.Length)
+            return Mathf.Max(0, baseSucraByLevel[idx]);
+        return Mathf.Max(0, baseSucraDefault);
+    }
+
+    int GetItemValueOrDefault(string itemType)
+    {
+        if (string.IsNullOrWhiteSpace(itemType)) return 0;
+        string t = itemType.Trim();
+
+        if (itemValues != null)
+        {
+            for (int i = 0; i < itemValues.Length; i++)
+            {
+                var iv = itemValues[i];
+                if (string.IsNullOrWhiteSpace(iv.itemType)) continue;
+                if (string.Equals(iv.itemType.Trim(), t, System.StringComparison.OrdinalIgnoreCase))
+                    return Mathf.Max(0, iv.value);
+            }
+        }
+
+        // Defaults from spec
+        if (string.Equals(t, "Dust", System.StringComparison.OrdinalIgnoreCase)) return 6;
+        if (string.Equals(t, "Syrup", System.StringComparison.OrdinalIgnoreCase)) return 10;
+        if (string.Equals(t, "Crystals", System.StringComparison.OrdinalIgnoreCase)) return 14;
+        if (string.Equals(t, "Clouds", System.StringComparison.OrdinalIgnoreCase)) return 12;
+        return 0;
+    }
+
+    bool IsBalancedFleet()
+    {
+        try
+        {
+            var trucks = FindObjectsByType<Truck>(FindObjectsSortMode.None);
+            if (trucks == null || trucks.Length == 0) return false;
+            for (int i = 0; i < trucks.Length; i++)
+            {
+                var t = trucks[i];
+                if (t == null) continue;
+                int cap = t.Capacity;
+                if (cap <= 0) return false;
+                float ratio = (float)t.StoredItemCount / cap;
+                if (ratio < 0.90f) return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    LevelSummaryUI TryShowSummaryUI()
     {
         try
         {
@@ -124,13 +278,14 @@ public class TruckCallController : MonoBehaviour
             if (ui == null)
             {
                 Debug.LogWarning("[TruckCallController] LevelSummaryUI not found; summary screen will not show.");
-                return;
+                return null;
             }
 
             ui.gameObject.SetActive(true);
             ui.transform.SetAsLastSibling();
             ui.Refresh();
+            return ui;
         }
-        catch { }
+        catch { return null; }
     }
 }

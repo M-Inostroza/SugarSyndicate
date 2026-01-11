@@ -182,7 +182,7 @@ public class ConveyorPlacer : MonoBehaviour
         try
         {
             int refund = GetRefundCostForPlacedObject(go);
-            if (refund > 0) GameManager.Instance?.AddMoney(refund);
+            if (refund > 0) GameManager.Instance?.AddSweetCredits(refund);
         }
         catch { }
     }
@@ -846,7 +846,7 @@ public class ConveyorPlacer : MonoBehaviour
                 if (removedSomething)
                 {
                     TryClearItemAtCell(cell);
-                    if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
+                    if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
                 }
 
                 DestroyDeleteOverlayForCell(cell);
@@ -973,7 +973,7 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 ClearLogicalCell(cell);
                 TryClearItemAtCell(cell);
-                if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
+                if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
             }
 
             TryRegisterCellInBeltSim(cell);
@@ -1554,7 +1554,7 @@ public class ConveyorPlacer : MonoBehaviour
         if (gm == null) return true;
         if (!EnsureGridServiceCached()) return true;
         if (HasExistingRealBelt(cell)) return true;
-        return gm.TrySpendMoney(beltCost);
+        return gm.TrySpendSweetCredits(beltCost);
     }
 
     bool ShouldRefundBeltAtCell(Vector2Int cell)

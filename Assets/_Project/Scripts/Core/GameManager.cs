@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -14,13 +15,31 @@ public class GameManager : MonoBehaviour
 
     public GameState State { get; private set; } = GameState.Play;
 
-    [Header("Economy")]
-    [SerializeField, Min(0)] int money = 0;
-    [SerializeField, Min(0)] int tutorialStartingMoney = 1500;
-    [SerializeField] bool applyTutorialStartMoney = true;
+    [Header("Sweet Credits (Level Budget)")]
+    [FormerlySerializedAs("money")]
+    [SerializeField, Min(0)] int sweetCredits = 0;
 
+    [FormerlySerializedAs("tutorialStartingMoney")]
+    [SerializeField, Min(0)] int tutorialStartingSweetCredits = 1500;
+
+    [FormerlySerializedAs("applyTutorialStartMoney")]
+    [SerializeField] bool applyTutorialStartSweetCredits = true;
+
+    public event Action<int> OnSweetCreditsChanged;
+    public int SweetCredits => sweetCredits;
+
+    [Header("Sucra (Global)")]
+    [Tooltip("Global currency that persists across levels/sessions.")]
+    [SerializeField, Min(0)] int sucra = 0;
+    [SerializeField] bool persistSucra = true;
+    [SerializeField] string sucraPlayerPrefsKey = "Currency.Sucra";
+
+    public event Action<int> OnSucraChanged;
+    public int Sucra => sucra;
+
+    // Back-compat: existing code treats Money as the per-level budget.
     public event Action<int> OnMoneyChanged;
-    public int Money => money;
+    public int Money => sweetCredits;
 
     // NOTE: Auto-spawn removed. Place a GameManager in each scene that needs it.
 
@@ -29,6 +48,8 @@ public class GameManager : MonoBehaviour
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+
+        LoadSucra();
         TryApplyTutorialStartMoney(SceneManager.GetActiveScene());
     }
 
@@ -69,9 +90,9 @@ public class GameManager : MonoBehaviour
 
     void TryApplyTutorialStartMoney(Scene scene)
     {
-        if (!applyTutorialStartMoney) return;
+        if (!applyTutorialStartSweetCredits) return;
         if (scene.buildIndex != 0) return;
-        SetMoney(tutorialStartingMoney);
+        SetSweetCredits(tutorialStartingSweetCredits);
     }
 
     public void SetState(GameState s)
@@ -87,27 +108,77 @@ public class GameManager : MonoBehaviour
         SetState(State == GameState.Play ? GameState.Build : GameState.Play);
     }
 
-    public void SetMoney(int amount)
+    public void SetSweetCredits(int amount)
     {
         int next = Mathf.Max(0, amount);
-        if (money == next) return;
-        money = next;
-        OnMoneyChanged?.Invoke(money);
+        if (sweetCredits == next) return;
+        sweetCredits = next;
+        OnSweetCreditsChanged?.Invoke(sweetCredits);
+        OnMoneyChanged?.Invoke(sweetCredits);
     }
 
-    public void AddMoney(int amount)
+    public void AddSweetCredits(int amount)
     {
         if (amount == 0) return;
-        SetMoney(money + amount);
+        SetSweetCredits(sweetCredits + amount);
     }
 
-    public bool TrySpendMoney(int amount)
+    public bool TrySpendSweetCredits(int amount)
     {
         if (amount <= 0) return true;
-        if (money < amount) return false;
-        SetMoney(money - amount);
+        if (sweetCredits < amount) return false;
+        SetSweetCredits(sweetCredits - amount);
         return true;
     }
+
+    public void SetSucra(int amount)
+    {
+        int next = Mathf.Max(0, amount);
+        if (sucra == next) return;
+        sucra = next;
+        OnSucraChanged?.Invoke(sucra);
+        SaveSucra();
+    }
+
+    public void AddSucra(int amount)
+    {
+        if (amount == 0) return;
+        SetSucra(sucra + amount);
+    }
+
+    public bool TrySpendSucra(int amount)
+    {
+        if (amount <= 0) return true;
+        if (sucra < amount) return false;
+        SetSucra(sucra - amount);
+        return true;
+    }
+
+    void LoadSucra()
+    {
+        if (!persistSucra) return;
+        try
+        {
+            sucra = Mathf.Max(0, PlayerPrefs.GetInt(sucraPlayerPrefsKey, sucra));
+        }
+        catch { }
+    }
+
+    void SaveSucra()
+    {
+        if (!persistSucra) return;
+        try
+        {
+            PlayerPrefs.SetInt(sucraPlayerPrefsKey, sucra);
+            PlayerPrefs.Save();
+        }
+        catch { }
+    }
+
+    // Back-compat wrappers (existing scripts use these)
+    public void SetMoney(int amount) => SetSweetCredits(amount);
+    public void AddMoney(int amount) => AddSweetCredits(amount);
+    public bool TrySpendMoney(int amount) => TrySpendSweetCredits(amount);
 
     // Enter build mode and start default build controller preview if available
     public void EnterBuildMode()

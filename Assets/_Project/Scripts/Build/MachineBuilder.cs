@@ -321,7 +321,7 @@ public class MachineBuilder : MonoBehaviour
         if (amount <= 0) return true;
         var gm = GameManager.Instance;
         if (gm == null) return true;
-        if (gm.TrySpendMoney(amount)) return true;
+        if (gm.TrySpendSweetCredits(amount)) return true;
         Debug.LogWarning($"[MachineBuilder] Not enough money to place {label}. Cost: {amount}.");
         return false;
     }
@@ -887,7 +887,7 @@ public class MachineBuilder : MonoBehaviour
         if (amount <= 0) return true;
         var gm = GameManager.Instance;
         if (gm == null) return true;
-        return gm.Money >= amount;
+        return gm.SweetCredits >= amount;
     }
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)

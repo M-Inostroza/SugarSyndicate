@@ -40,14 +40,14 @@ public class MoneyDisplay : MonoBehaviour
         gameManager = GameManager.Instance;
         if (gameManager == null) return;
 
-        gameManager.OnMoneyChanged += HandleMoneyChanged;
-        HandleMoneyChanged(gameManager.Money);
+        gameManager.OnSweetCreditsChanged += HandleMoneyChanged;
+        HandleMoneyChanged(gameManager.SweetCredits);
     }
 
     void UnhookGameManager()
     {
         if (gameManager == null) return;
-        gameManager.OnMoneyChanged -= HandleMoneyChanged;
+        gameManager.OnSweetCreditsChanged -= HandleMoneyChanged;
         gameManager = null;
     }
 

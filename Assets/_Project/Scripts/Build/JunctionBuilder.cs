@@ -379,7 +379,7 @@ public class JunctionBuilder : MonoBehaviour
         if (amount <= 0) return true;
         var gm = GameManager.Instance;
         if (gm == null) return true;
-        if (gm.TrySpendMoney(amount)) return true;
+        if (gm.TrySpendSweetCredits(amount)) return true;
         Debug.LogWarning($"[JunctionBuilder] Not enough money to place {label}. Cost: {amount}.");
         return false;
     }

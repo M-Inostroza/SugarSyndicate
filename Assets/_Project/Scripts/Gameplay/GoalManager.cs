@@ -145,6 +145,14 @@ public class GoalManager : MonoBehaviour
         return hasGoal && !string.IsNullOrWhiteSpace(itemType);
     }
 
+    public bool TryGetOrderInfo(out string itemType, out int orderQty, out int shippedInWindow)
+    {
+        itemType = goalItemType;
+        orderQty = itemTarget;
+        shippedInWindow = itemsDelivered;
+        return hasGoal && !string.IsNullOrWhiteSpace(itemType) && orderQty > 0;
+    }
+
     public string GetProgressText()
     {
         if (!hasGoal) return "- / -";
