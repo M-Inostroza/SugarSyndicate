@@ -12,8 +12,8 @@ public class TimeManager : MonoBehaviour
     public static TimeManager Instance { get; private set; }
 
     [Header("Cycle Lengths (Seconds)")]
-    [SerializeField, Min(1f)] float dayLengthSeconds = 45f;
-    [SerializeField, Min(1f)] float nightLengthSeconds = 45f;
+    [SerializeField, Min(1f)] float dayLengthSeconds = 100f;
+    [SerializeField, Min(1f)] float nightLengthSeconds = 100f;
 
     [Header("State")]
     [SerializeField, Min(1)] int dayCount = 1;
