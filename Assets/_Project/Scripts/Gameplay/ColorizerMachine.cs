@@ -5,7 +5,7 @@ using UnityEngine;
 /// Machine that takes an input item, applies a tint, and outputs the same item type.
 /// Uses the shared IMachine contract so belt logic remains generic.
 /// </summary>
-public class ColorizerMachine : MonoBehaviour, IMachine
+public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -34,6 +34,18 @@ public class ColorizerMachine : MonoBehaviour, IMachine
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
+    public bool IsProcessing => busy && hasInputThisCycle;
+    public float Progress01
+    {
+        get
+        {
+            if (!IsProcessing) return 0f;
+            if (processingSeconds <= 0f) return 1f;
+            if (waitingToOutput) return 1f;
+            float t = 1f - Mathf.Clamp01(remainingTime / Mathf.Max(0.0001f, processingSeconds));
+            return Mathf.Clamp01(t);
+        }
+    }
 
     Vector2Int cell;
     bool registered;
@@ -59,6 +71,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine
     {
         if (grid == null) return;
 
+        EnsureProgressDisplay();
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
@@ -216,6 +229,9 @@ public class ColorizerMachine : MonoBehaviour, IMachine
 
         var outCell = cell + OutputVec;
 
+        if (!TryResolveOutputTarget(outCell, out var targetMachine))
+            return false;
+
         // Reattach and tint the preserved view (if any)
         if (carriedView != null)
         {
@@ -226,8 +242,32 @@ public class ColorizerMachine : MonoBehaviour, IMachine
         }
         carriedItem.view = carriedView;
 
-        if (!belt.TrySpawnItem(outCell, carriedItem))
+        if (targetMachine != null)
+        {
+            bool ok = false;
+            try { ok = targetMachine.TryStartProcess(carriedItem); } catch { ok = false; }
+            if (!ok)
+            {
+                carriedItem.view = null;
+                return false;
+            }
+
+            carriedItem = null;
+            carriedView = null;
+            return true;
+        }
+
+        if (belt.IsVisualNearCell(outCell))
+        {
+            carriedItem.view = null;
             return false;
+        }
+
+        if (!belt.TrySpawnItem(outCell, carriedItem))
+        {
+            carriedItem.view = null;
+            return false;
+        }
 
         // Ensure tint is applied even if the view was positioned by TrySpawnItem
         if (carriedItem.view != null)
@@ -240,6 +280,33 @@ public class ColorizerMachine : MonoBehaviour, IMachine
         carriedView = null;
         return true;
     }
+
+    bool TryResolveOutputTarget(Vector2Int outCell, out IMachine targetMachine)
+    {
+        targetMachine = null;
+        try
+        {
+            if (MachineRegistry.TryGet(outCell, out var machine) && machine is IMachineStorageWithCapacity)
+            {
+                var approachFromVec = cell - outCell;
+                bool accepts = false;
+                try { accepts = machine.CanAcceptFrom(approachFromVec); } catch { return false; }
+                if (!accepts) return false;
+                targetMachine = machine;
+                return true;
+            }
+        }
+        catch { }
+
+        var cellData = grid.GetCell(outCell);
+        if (cellData == null) return false;
+        if (cellData.type == GridService.CellType.Machine) return false;
+        if (cellData.hasItem) return false;
+        return IsBeltLike(cellData);
+    }
+
+    static bool IsBeltLike(GridService.Cell c)
+        => c != null && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
 
     void TryRegisterAsMachineAndSnap()
     {
@@ -254,5 +321,11 @@ public class ColorizerMachine : MonoBehaviour, IMachine
             transform.position = world;
         }
         catch (Exception ex) { DWarn($"[ColorizerMachine] Registration failed: {ex.Message}"); }
+    }
+
+    void EnsureProgressDisplay()
+    {
+        if (GetComponent<MachineProgressDisplay>() != null) return;
+        gameObject.AddComponent<MachineProgressDisplay>();
     }
 }

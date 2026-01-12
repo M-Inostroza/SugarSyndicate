@@ -11,6 +11,16 @@ public class LevelSummaryUI : MonoBehaviour
     [SerializeField] TMP_Text starsEarnedText;
     [SerializeField] TMP_Text totalShippedText;
     [SerializeField] TMP_Text budgetText;
+    [SerializeField] TMP_Text sucraEarnedText;
+
+    int lastSucraEarned;
+
+    public void SetSucraEarned(int amount)
+    {
+        lastSucraEarned = Mathf.Max(0, amount);
+        if (sucraEarnedText != null)
+            sucraEarnedText.text = lastSucraEarned.ToString();
+    }
 
     public void Refresh()
     {
@@ -33,12 +43,15 @@ public class LevelSummaryUI : MonoBehaviour
         if (totalShippedText != null)
             totalShippedText.text = LevelStats.BuildShippedSummaryString();
 
-        // Budget (money remaining)
+        // Budget (Sweet Credits remaining)
         if (budgetText != null)
         {
-            int money = GameManager.Instance != null ? GameManager.Instance.Money : 0;
-            budgetText.text = money.ToString();
+            int sweetCredits = GameManager.Instance != null ? GameManager.Instance.SweetCredits : 0;
+            budgetText.text = sweetCredits.ToString();
         }
+
+        if (sucraEarnedText != null)
+            sucraEarnedText.text = lastSucraEarned.ToString();
     }
 
     public void ShowAndRefresh()

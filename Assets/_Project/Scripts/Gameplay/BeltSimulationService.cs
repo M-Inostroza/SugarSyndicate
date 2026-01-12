@@ -803,6 +803,31 @@ public class BeltSimulationService : MonoBehaviour
         return true;
     }
 
+    public bool IsVisualNearCell(Vector2Int cellPos)
+    {
+        if (grid == null || visuals.Count == 0) return false;
+        float posTol = Mathf.Max(0.01f, grid.CellSize * 0.25f);
+        float anchorTol = Mathf.Max(0.01f, grid.CellSize * 0.05f);
+        var center = grid.CellToWorld(cellPos, 0f);
+        foreach (var kv in visuals)
+        {
+            var vs = kv.Value;
+            if (vs == null) continue;
+            if (IsPosNearCell(vs.start, center, anchorTol) || IsPosNearCell(vs.end, center, anchorTol))
+                return true;
+            if (vs.view == null) continue;
+            var pos = vs.view.position;
+            if (IsPosNearCell(pos, center, posTol))
+                return true;
+        }
+        return false;
+    }
+
+    static bool IsPosNearCell(Vector3 pos, Vector3 center, float tol)
+    {
+        return Mathf.Abs(pos.x - center.x) <= tol && Mathf.Abs(pos.y - center.y) <= tol;
+    }
+
     // Immediately attempts a single logical step from a freshly spawned cell.
     // Returns true if the item moved this frame.
     public bool TryAdvanceSpawnedItem(Vector2Int cellPos)

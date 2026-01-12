@@ -145,7 +145,7 @@ public class PipeDeletionTool : MonoBehaviour
                             if (fiWaterPipeCost != null) refund = Mathf.Max(0, (int)fiWaterPipeCost.GetValue(mb));
                         }
                     }
-                    if (refund > 0) GameManager.Instance?.AddMoney(refund);
+                    if (refund > 0) GameManager.Instance?.AddSweetCredits(refund);
                 }
                 catch { }
 

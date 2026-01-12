@@ -107,6 +107,49 @@ public class BuildMenuController : MonoBehaviour
         if (hideButtonsWhileOpen && buttonContainer != null) buttonContainer.SetActive(true);
     }
 
+    // UI hook for "Back" buttons: hide panels and clear the active build tool.
+    public void OnBackPressed()
+    {
+        HideAll();
+        ClearActiveBuildTool();
+    }
+
+    void ClearActiveBuildTool()
+    {
+        try
+        {
+            var bmc = FindAnyObjectByType<BuildModeController>();
+            if (bmc != null)
+            {
+                bmc.ClearActiveTool();
+                return;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var mb = FindAnyObjectByType<MachineBuilder>();
+            if (mb != null) mb.StopBuilding();
+        }
+        catch { }
+
+        try
+        {
+            var jb = FindAnyObjectByType<JunctionBuilder>();
+            if (jb != null) jb.StopBuilding();
+        }
+        catch { }
+
+        try { BuildSelectionNotifier.Notify(null); } catch { }
+        try
+        {
+            if (GameManager.Instance != null && GameManager.Instance.State == GameState.Delete)
+                GameManager.Instance.SetState(GameState.Build);
+        }
+        catch { }
+    }
+
     GameObject ResolveToggleTarget(Category cat)
     {
         if (cat == null) return null;

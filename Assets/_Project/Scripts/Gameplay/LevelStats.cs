@@ -10,14 +10,19 @@ using UnityEngine.SceneManagement;
 /// </summary>
 public static class LevelStats
 {
-    static readonly Dictionary<string, int> shippedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    // Goal-only counts are used by the existing summary UI.
+    static readonly Dictionary<string, int> shippedGoalCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    // All shipped counts are used by reward calculations.
+    static readonly Dictionary<string, int> shippedAllCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     static bool initialized;
     static string goalItemType;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void Init()
     {
-        shippedCounts.Clear();
+        shippedGoalCounts.Clear();
+        shippedAllCounts.Clear();
         initialized = false;
     }
 
@@ -32,7 +37,8 @@ public static class LevelStats
 
     static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        shippedCounts.Clear();
+        shippedGoalCounts.Clear();
+        shippedAllCounts.Clear();
 
         goalItemType = null;
         try
@@ -49,7 +55,12 @@ public static class LevelStats
         if (string.IsNullOrWhiteSpace(itemType)) itemType = "Unknown";
         itemType = itemType.Trim();
 
-        // Only track goal items for the level summary.
+        if (shippedAllCounts.TryGetValue(itemType, out int allCount))
+            shippedAllCounts[itemType] = allCount + 1;
+        else
+            shippedAllCounts[itemType] = 1;
+
+        // Only track goal items for the existing level summary.
         if (string.IsNullOrWhiteSpace(goalItemType))
         {
             // Late-bind if GoalManager wasn't ready at sceneLoaded time.
@@ -64,24 +75,29 @@ public static class LevelStats
         if (string.IsNullOrWhiteSpace(goalItemType)) return;
         if (!string.Equals(itemType, goalItemType, StringComparison.OrdinalIgnoreCase)) return;
 
-        if (shippedCounts.TryGetValue(itemType, out int count))
-            shippedCounts[itemType] = count + 1;
+        if (shippedGoalCounts.TryGetValue(itemType, out int count))
+            shippedGoalCounts[itemType] = count + 1;
         else
-            shippedCounts[itemType] = 1;
+            shippedGoalCounts[itemType] = 1;
     }
 
     public static Dictionary<string, int> GetShippedCountsSnapshot()
     {
-        return new Dictionary<string, int>(shippedCounts, StringComparer.OrdinalIgnoreCase);
+        return new Dictionary<string, int>(shippedGoalCounts, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static Dictionary<string, int> GetAllShippedCountsSnapshot()
+    {
+        return new Dictionary<string, int>(shippedAllCounts, StringComparer.OrdinalIgnoreCase);
     }
 
     public static string BuildShippedSummaryString()
     {
-        if (shippedCounts.Count == 0) return "-";
+        if (shippedGoalCounts.Count == 0) return "-";
 
         var sb = new StringBuilder();
         bool first = true;
-        foreach (var kvp in shippedCounts)
+        foreach (var kvp in shippedGoalCounts)
         {
             if (!first) sb.AppendLine();
             first = false;

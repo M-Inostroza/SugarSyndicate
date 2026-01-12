@@ -14,6 +14,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject waterPumpPrefab;
     [SerializeField] GameObject waterPipePrefab;
     [SerializeField] GameObject minePrefab;
+    [SerializeField] GameObject storageContainerPrefab;
     [SerializeField] WaterAreaOverlay waterOverlay;
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
@@ -26,6 +27,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField, Min(0)] int waterPumpCost = 0;
     [SerializeField, Min(0)] int waterPipeCost = 0;
     [SerializeField, Min(0)] int mineCost = 90;
+    [SerializeField, Min(0)] int storageContainerCost = 0;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -45,6 +47,7 @@ public class MachineBuilder : MonoBehaviour
     PressMachine ghostPress;
     ColorizerMachine ghostColorizer;
     WaterPump ghostWaterPump;
+    StorageContainerMachine ghostStorage;
     GameObject activePrefab;
     string activeName = "PressMachine";
     bool placingPipePath;
@@ -312,6 +315,7 @@ public class MachineBuilder : MonoBehaviour
             "WaterPump" => waterPumpCost,
             "WaterPipe" => waterPipeCost,
             "Mine" => mineCost,
+            "StorageContainer" => storageContainerCost,
             _ => 0,
         };
     }
@@ -321,7 +325,7 @@ public class MachineBuilder : MonoBehaviour
         if (amount <= 0) return true;
         var gm = GameManager.Instance;
         if (gm == null) return true;
-        if (gm.TrySpendMoney(amount)) return true;
+        if (gm.TrySpendSweetCredits(amount)) return true;
         Debug.LogWarning($"[MachineBuilder] Not enough money to place {label}. Cost: {amount}.");
         return false;
     }
@@ -441,7 +445,7 @@ public class MachineBuilder : MonoBehaviour
         {
             Debug.LogWarning($"[MachineBuilder] Not enough money to place WaterPipe. Cost: {totalCost}.");
             ClearPipeGhosts();
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -453,7 +457,7 @@ public class MachineBuilder : MonoBehaviour
             {
                 Debug.LogWarning($"[MachineBuilder] Cannot place pipe: cell {cell} blocked.");
                 ClearPipeGhosts();
-                TrySetBuildToolActive(false);
+                ClearPreviewState(clearActiveSelection: false);
                 return;
             }
         }
@@ -461,7 +465,7 @@ public class MachineBuilder : MonoBehaviour
         if (!TrySpendBuildCost(totalCost, "WaterPipe"))
         {
             ClearPipeGhosts();
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -480,8 +484,8 @@ public class MachineBuilder : MonoBehaviour
             go.transform.rotation = RotationForPipeCell(cell);
         }
         ClearPipeGhosts();
-        ClearPreviewState();
-        TrySetBuildToolActive(false);
+        // Keep the tool armed so the player can place another path without re-selecting.
+        ClearPreviewState(clearActiveSelection: false);
     }
 
     void ClearPipeGhosts()
@@ -552,6 +556,16 @@ public class MachineBuilder : MonoBehaviour
         ShowSugarOverlay();
     }
 
+    public void BuildStorageContainer()
+    {
+        activePrefab = storageContainerPrefab;
+        activeName = "StorageContainer";
+        ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
+        HideSugarOverlay();
+    }
+
     void ArmPlacement()
     {
         // End any active conveyor preview WITHOUT changing global state
@@ -566,6 +580,10 @@ public class MachineBuilder : MonoBehaviour
             Debug.LogWarning($"[MachineBuilder] No prefab assigned for {activeName}.");
             return;
         }
+
+        // Treat this as an active tool immediately (so Esc cancels tool instead of quitting,
+        // and to keep placement armed across repeated placements).
+        TrySetBuildToolActive(true);
 
         // Wait for the next world click to place
         awaitingWorldClick = true;
@@ -655,12 +673,18 @@ public class MachineBuilder : MonoBehaviour
         ghostPress = ghostGO.GetComponent<PressMachine>();
         ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
         ghostWaterPump = ghostGO.GetComponent<WaterPump>();
+        ghostStorage = ghostGO.GetComponent<StorageContainerMachine>();
         if (ghostPress != null)
         {
             ghostPress.isGhost = true;
             // tint ghost
             var srs = ghostGO.GetComponentsInChildren<SpriteRenderer>(true);
             foreach (var sr in srs) { var c = sr.color; c.a = 0.6f; sr.color = c; }
+        }
+        if (ghostStorage != null)
+        {
+            ghostStorage.isGhost = true;
+            TintGhost(ghostGO);
         }
     }
 
@@ -679,6 +703,7 @@ public class MachineBuilder : MonoBehaviour
         if (ghostPress != null) ghostPress.facingVec = outputDir;
         if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
         if (ghostWaterPump != null) ghostWaterPump.facingVec = outputDir;
+        if (ghostStorage != null) ghostStorage.facingVec = outputDir;
     }
 
     void ApplyGhostSorting(GameObject go)
@@ -707,14 +732,23 @@ public class MachineBuilder : MonoBehaviour
         {
             Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
         if (RequiresSugarCell() && !IsSugarCell(cell))
         {
             Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
+            return;
+        }
+
+        var footprint = GetFootprintCells(cell, outputDir);
+        if (IsAnyBlocked(footprint))
+        {
+            Debug.LogWarning($"[MachineBuilder] Cannot place {activeName}: footprint blocked.");
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -722,7 +756,7 @@ public class MachineBuilder : MonoBehaviour
         if (!TrySpendBuildCost(cost, activeName))
         {
             if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState();
+            ClearPreviewState(clearActiveSelection: false);
             return;
         }
 
@@ -731,7 +765,6 @@ public class MachineBuilder : MonoBehaviour
         if (ghostGO != null) Destroy(ghostGO);
 
         // Ensure the target footprint cells are not belts anymore
-        var footprint = GetFootprintCells(cell, outputDir);
         foreach (var fp in footprint) TryRemoveBeltAtCell(fp);
 
         var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
@@ -769,11 +802,18 @@ public class MachineBuilder : MonoBehaviour
             mine.SetFacing(outputDir);
             Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
         }
+        var storage = go.GetComponent<StorageContainerMachine>();
+        if (storage != null)
+        {
+            storage.facingVec = outputDir;
+            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
+        }
 
         // Mark footprint cells as machine in grid
         TryMarkMachineFootprint(footprint);
 
-        ClearPreviewState();
+        // Successful placement: clear only temporary preview state, keep tool selection armed.
+        ClearPreviewState(clearActiveSelection: false);
     }
 
     void TryRemoveBeltAtCell(Vector2Int cell)
@@ -820,13 +860,14 @@ public class MachineBuilder : MonoBehaviour
     void CancelPreview()
     {
         if (ghostGO != null) Destroy(ghostGO);
-        ClearPreviewState();
+        ClearPreviewState(clearActiveSelection: true);
         NotifySelectionChanged(null);
         TrySetBuildToolActive(false);
+        HideWaterOverlay();
         HideSugarOverlay();
     }
 
-    void ClearPreviewState()
+    void ClearPreviewState(bool clearActiveSelection = true)
     {
         placing = false;
         placingPipePath = false;
@@ -835,9 +876,10 @@ public class MachineBuilder : MonoBehaviour
         ghostPress = null;
         ghostColorizer = null;
         ghostWaterPump = null;
-        activePrefab = null;
+        ghostStorage = null;
+        if (clearActiveSelection) activePrefab = null;
         ClearPipeGhosts();
-        TrySetBuildToolActive(false);
+        if (clearActiveSelection) TrySetBuildToolActive(false);
     }
 
     static float DirToZ(Vector2Int d)
@@ -887,11 +929,16 @@ public class MachineBuilder : MonoBehaviour
         if (amount <= 0) return true;
         var gm = GameManager.Instance;
         if (gm == null) return true;
-        return gm.Money >= amount;
+        return gm.SweetCredits >= amount;
     }
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)
     {
+        if (activeName == "StorageContainer")
+        {
+            var dir = facing == Vector2Int.zero ? Vector2Int.right : facing;
+            return new List<Vector2Int> { origin, origin + dir };
+        }
         return new List<Vector2Int> { origin };
     }
 

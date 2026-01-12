@@ -182,7 +182,7 @@ public class ConveyorPlacer : MonoBehaviour
         try
         {
             int refund = GetRefundCostForPlacedObject(go);
-            if (refund > 0) GameManager.Instance?.AddMoney(refund);
+            if (refund > 0) GameManager.Instance?.AddSweetCredits(refund);
         }
         catch { }
     }
@@ -475,8 +475,6 @@ public class ConveyorPlacer : MonoBehaviour
             // Don't do anything if the mouse is still in the start cell
             if (cell == dragStartCell) return;
 
-            dragHasMoved = true;
-            
             // This is the first actual movement. Place the STARTING belt now,
             // oriented towards the current cell.
             var delta = cell - dragStartCell;
@@ -485,18 +483,34 @@ public class ConveyorPlacer : MonoBehaviour
             if (dirName == null) return;
 
             // Place the very first belt and add it to the path
+            if (IsCellBlockedForBelt(dragStartCell)) return;
+            dragHasMoved = true;
             if (PlaceBeltAtCell(dragStartCell, dirName))
             {
                 dragPath.Add(dragStartCell);
             }
+            else
+            {
+                return;
+            }
             
             // Now, place the second belt to start the chain
             var nextCell = dragStartCell + step;
+            if (IsCellBlockedForBelt(nextCell))
+            {
+                lastDragCell = dragStartCell;
+                return;
+            }
             // Ensure no duplicate ghost at next cell
             RemoveGhostAtCell(nextCell);
             if (PlaceBeltAtCell(nextCell, dirName))
             {
                 dragPath.Add(nextCell);
+            }
+            else
+            {
+                lastDragCell = dragStartCell;
+                return;
             }
 
             // IMPORTANT: Update lastDragCell and exit.
@@ -546,6 +560,8 @@ public class ConveyorPlacer : MonoBehaviour
 
         // Ensure the previous belt now points toward this next step (rotate second-to-last)
         UpdateBeltDirectionFast(lastDragCell, dirNameNext);
+
+        if (IsCellBlockedForBelt(nextCellMove)) return;
 
         // Avoid duplicating ghosts in the next cell
         RemoveGhostAtCell(nextCellMove);
@@ -846,7 +862,7 @@ public class ConveyorPlacer : MonoBehaviour
                 if (removedSomething)
                 {
                     TryClearItemAtCell(cell);
-                    if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
+                    if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
                 }
 
                 DestroyDeleteOverlayForCell(cell);
@@ -973,7 +989,7 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 ClearLogicalCell(cell);
                 TryClearItemAtCell(cell);
-                if (refundBelt) GameManager.Instance?.AddMoney(beltCost);
+                if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
             }
 
             TryRegisterCellInBeltSim(cell);
@@ -1159,6 +1175,19 @@ public class ConveyorPlacer : MonoBehaviour
                     {
                         var pos = conv.transform.position; var rot = conv.transform.rotation;
                         var cell = (Vector2Int)miWorldToCell.Invoke(gridServiceInstance, new object[] { pos });
+
+                        if (IsCellBlockedForBelt(cell))
+                        {
+                            try { Destroy(conv.gameObject); } catch { }
+                            try
+                            {
+                                var keys = new List<Vector2Int>();
+                                foreach (var gk in ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
+                                foreach (var k in keys) ghostByCell.Remove(k);
+                            }
+                            catch { }
+                            continue;
+                        }
                         
                         if (!TrySpendBeltCost(cell))
                         {
@@ -1368,6 +1397,8 @@ public class ConveyorPlacer : MonoBehaviour
         if (miCellToWorld == null) return false;
         var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell2, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
 
+        if (IsCellBlockedForBelt(cell2)) return false;
+
         if (!isDragging && !BuildModeController.IsDragging)
         {
             try
@@ -1554,7 +1585,7 @@ public class ConveyorPlacer : MonoBehaviour
         if (gm == null) return true;
         if (!EnsureGridServiceCached()) return true;
         if (HasExistingRealBelt(cell)) return true;
-        return gm.TrySpendMoney(beltCost);
+        return gm.TrySpendSweetCredits(beltCost);
     }
 
     bool ShouldRefundBeltAtCell(Vector2Int cell)
@@ -1603,6 +1634,24 @@ public class ConveyorPlacer : MonoBehaviour
             if (typeName == "Belt" || typeName == "Junction") return true;
         }
 
+        return false;
+    }
+
+    bool IsCellBlockedForBelt(Vector2Int cell)
+    {
+        if (!EnsureGridServiceCached()) return false;
+        if (HasExistingRealBelt(cell)) return true;
+        if (TryGetLogicalCellInfo(cell, out var hasConv, out var typeName))
+        {
+            if (hasConv) return true;
+            if (typeName == "Machine" || typeName == "Belt" || typeName == "Junction") return true;
+        }
+        try
+        {
+            if (MachineRegistry.TryGet(cell, out var machine) && machine != null) return true;
+        }
+        catch { }
+        if (FindMachineAtCell(cell) != null) return true;
         return false;
     }
 
@@ -1714,6 +1763,20 @@ public class ConveyorPlacer : MonoBehaviour
         {
             if (MachineRegistry.TryGet(cell, out var machine) && machine is MonoBehaviour mb)
                 return mb.gameObject;
+        }
+        catch { }
+
+        try
+        {
+            var storages = UnityEngine.Object.FindObjectsByType<StorageContainerMachine>(FindObjectsSortMode.None);
+            foreach (var storage in storages)
+            {
+                if (storage == null || storage.isGhost) continue;
+                var inputCell = storage.Cell;
+                var footprintCell = inputCell + storage.OutputVec;
+                if (cell == inputCell || cell == footprintCell)
+                    return storage.gameObject;
+            }
         }
         catch { }
 

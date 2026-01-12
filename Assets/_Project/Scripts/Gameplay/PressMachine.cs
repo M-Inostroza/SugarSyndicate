@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
-public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
+public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -56,6 +56,18 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
             return count;
         }
     }
+    public bool IsProcessing => busy && hasInputThisCycle;
+    public float Progress01
+    {
+        get
+        {
+            if (!IsProcessing) return 0f;
+            if (processingSeconds <= 0f) return 1f;
+            if (waitingToOutput) return 1f;
+            float t = 1f - Mathf.Clamp01(remainingTime / Mathf.Max(0.0001f, processingSeconds));
+            return Mathf.Clamp01(t);
+        }
+    }
 
     Vector2Int cell;
     bool registered;
@@ -96,6 +108,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
 
         if (!isGhost)
             EnsureStorageDisplay();
+        if (!isGhost)
+            EnsureProgressDisplay();
 
         if (isGhost || grid == null) return;
 
@@ -195,6 +209,12 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
     {
         if (GetComponent<MachineStorageDisplay>() != null) return;
         gameObject.AddComponent<MachineStorageDisplay>();
+    }
+
+    void EnsureProgressDisplay()
+    {
+        if (GetComponent<MachineProgressDisplay>() != null) return;
+        gameObject.AddComponent<MachineProgressDisplay>();
     }
 
     // Return true if the item was accepted and processing started
@@ -375,16 +395,20 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
             return false;
         }
 
-        var item = new Item { type = ResolveOutputItemType() };
-
         // Compute out cell
         var outCell = cell + OutputVec;
 
-        if (!belt.TrySpawnItem(outCell, item))
+        if (!TryResolveOutputTarget(outCell, out var targetMachine))
         {
             // Keep waitingToOutput=true; try again on a later tick
             return false;
         }
+        if (targetMachine == null && belt.IsVisualNearCell(outCell))
+        {
+            return false;
+        }
+
+        var item = new Item { type = ResolveOutputItemType() };
 
         // Attach view to item using pool if available
         var parent = ContainerLocator.GetItemContainer();
@@ -398,7 +422,53 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage
 
         item.view = view;
         if (view != null) view.position = world;
+
+        if (targetMachine != null)
+        {
+            bool ok = false;
+            try { ok = targetMachine.TryStartProcess(item); } catch { ok = false; }
+            if (!ok)
+            {
+                if (view != null) ItemViewPool.Return(view);
+                return false;
+            }
+            return true;
+        }
+
+        if (!belt.TrySpawnItem(outCell, item))
+        {
+            if (view != null) ItemViewPool.Return(view);
+            return false;
+        }
+
         belt.TryAdvanceSpawnedItem(outCell);
         return true;
     }
+
+    bool TryResolveOutputTarget(Vector2Int outCell, out IMachine targetMachine)
+    {
+        targetMachine = null;
+        try
+        {
+            if (MachineRegistry.TryGet(outCell, out var machine) && machine is IMachineStorageWithCapacity)
+            {
+                var approachFromVec = cell - outCell;
+                bool accepts = false;
+                try { accepts = machine.CanAcceptFrom(approachFromVec); } catch { return false; }
+                if (!accepts) return false;
+                targetMachine = machine;
+                return true;
+            }
+        }
+        catch { }
+
+        var cellData = grid.GetCell(outCell);
+        if (cellData == null) return false;
+        if (cellData.type == GridService.CellType.Machine) return false;
+        if (cellData.hasItem) return false;
+        return IsBeltLike(cellData);
+    }
+
+    static bool IsBeltLike(GridService.Cell c)
+        => c != null && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
 }

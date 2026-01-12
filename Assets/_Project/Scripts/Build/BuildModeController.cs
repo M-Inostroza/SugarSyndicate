@@ -162,6 +162,24 @@ public class BuildModeController : MonoBehaviour
         var exitState = GameManager.Instance != null ? GameManager.Instance.State.ToString() : "<no GameManager>";
     }
 
+    // Clear any active build tool without leaving Build mode.
+    public void ClearActiveTool()
+    {
+        IsDragging = false;
+        TryStopMachineBuilder();
+        TryStopJunctionBuilder();
+
+        if (current != BuildableType.None)
+            EndCurrentPreview();
+
+        current = BuildableType.None;
+        HasActiveTool = false;
+        BuildSelectionNotifier.Notify(null);
+
+        if (GameManager.Instance != null && GameManager.Instance.State == GameState.Delete)
+            GameManager.Instance.SetState(GameState.Build);
+    }
+
     // When switching to belt building, stop any active MachineBuilder session
     void TryStopMachineBuilder()
     {

@@ -99,57 +99,74 @@ public class SugarMine : MonoBehaviour
 
         var item = new Item { id = nextItemId, type = ResolveItemType() };
 
-        bool spawned = false;
-        Vector2Int spawnedCell = baseCell;
+        bool delivered = false;
+        bool spawnedOnBelt = false;
+        Vector2Int outputCell = baseCell;
         if (preferHeadCell)
         {
-            if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
+            if (TrySendToMachine(gs, headCell, baseCell, item))
             {
-                spawned = true;
-                spawnedCell = headCell;
+                delivered = true;
+                outputCell = headCell;
+            }
+            else if (BeltSimulationService.Instance.TrySpawnItem(headCell, item))
+            {
+                delivered = true;
+                spawnedOnBelt = true;
+                outputCell = headCell;
+            }
+            else if (!requireFreeHeadCell && TrySendToMachine(gs, baseCell, baseCell, item))
+            {
+                delivered = true;
+                outputCell = baseCell;
             }
             else if (!requireFreeHeadCell && BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
             {
-                spawned = true;
-                spawnedCell = baseCell;
+                delivered = true;
+                spawnedOnBelt = true;
+                outputCell = baseCell;
             }
         }
         else
         {
-            if (BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
+            if (TrySendToMachine(gs, baseCell, baseCell, item))
             {
-                spawned = true;
-                spawnedCell = baseCell;
+                delivered = true;
+                outputCell = baseCell;
+            }
+            else if (BeltSimulationService.Instance.TrySpawnItem(baseCell, item))
+            {
+                delivered = true;
+                spawnedOnBelt = true;
+                outputCell = baseCell;
+            }
+            else if (!requireFreeHeadCell && TrySendToMachine(gs, headCell, baseCell, item))
+            {
+                delivered = true;
+                outputCell = headCell;
             }
             else if (!requireFreeHeadCell && BeltSimulationService.Instance.TrySpawnItem(headCell, item))
             {
-                spawned = true;
-                spawnedCell = headCell;
+                delivered = true;
+                spawnedOnBelt = true;
+                outputCell = headCell;
             }
         }
 
-        if (!spawned)
+        if (!delivered)
         {
             if (debugLogging)
                 Debug.LogWarning($"[SugarMine] Unable to spawn item at {baseCell} or {headCell}");
             return;
         }
 
-        float z = itemPrefab != null ? itemPrefab.transform.position.z : 0f;
-        var world = gs.CellToWorld(spawnedCell, z);
-        if (itemPrefab != null)
+        if (spawnedOnBelt)
         {
-            var parent = ContainerLocator.GetItemContainer();
-            var t = ItemViewPool.Get(itemPrefab, world, Quaternion.identity, parent);
-            item.view = t;
+            item.view = CreateViewAt(gs, outputCell);
+            BeltSimulationService.Instance.TryAdvanceSpawnedItem(outputCell);
         }
 
-        if (item.view != null)
-            item.view.position = world;
-
-        BeltSimulationService.Instance.TryAdvanceSpawnedItem(spawnedCell);
-
-        if (debugLogging) Debug.Log($"[SugarMine] Produced item {nextItemId} ({item.type}) at {spawnedCell}");
+        if (debugLogging) Debug.Log($"[SugarMine] Produced item {nextItemId} ({item.type}) at {outputCell}");
         nextItemId++;
     }
 
@@ -167,6 +184,55 @@ public class SugarMine : MonoBehaviour
         if (dir == Vector2Int.down) return Direction.Down;
         if (dir == Vector2Int.left) return Direction.Left;
         return Direction.Right;
+    }
+
+    bool TrySendToMachine(GridService gs, Vector2Int outCell, Vector2Int sourceCell, Item item)
+    {
+        if (item == null || gs == null) return false;
+        if (!TryResolveOutputMachine(outCell, sourceCell, out var targetMachine))
+            return false;
+
+        var view = CreateViewAt(gs, outCell);
+        item.view = view;
+        bool ok = false;
+        try { ok = targetMachine.TryStartProcess(item); } catch { ok = false; }
+        if (!ok)
+        {
+            if (view != null) ItemViewPool.Return(view);
+            item.view = null;
+            return false;
+        }
+        return true;
+    }
+
+    bool TryResolveOutputMachine(Vector2Int outCell, Vector2Int sourceCell, out IMachine targetMachine)
+    {
+        targetMachine = null;
+        try
+        {
+            if (MachineRegistry.TryGet(outCell, out var machine) && machine is IMachineStorageWithCapacity)
+            {
+                var approachFromVec = sourceCell - outCell;
+                bool accepts = false;
+                try { accepts = machine.CanAcceptFrom(approachFromVec); } catch { return false; }
+                if (!accepts) return false;
+                targetMachine = machine;
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    Transform CreateViewAt(GridService gs, Vector2Int cellPos)
+    {
+        if (itemPrefab == null || gs == null) return null;
+        float z = itemPrefab.transform.position.z;
+        var world = gs.CellToWorld(cellPos, z);
+        var parent = ContainerLocator.GetItemContainer();
+        var t = ItemViewPool.Get(itemPrefab, world, Quaternion.identity, parent);
+        if (t != null) t.position = world;
+        return t;
     }
 
 #if UNITY_EDITOR

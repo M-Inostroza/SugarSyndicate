@@ -49,6 +49,7 @@ public class TimeManager : MonoBehaviour
     void Update()
     {
         if (!running) return;
+        if (BuildModeController.HasActiveTool) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
 
         float delta = Time.deltaTime;
