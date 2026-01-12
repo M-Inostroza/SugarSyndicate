@@ -37,6 +37,9 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     [Tooltip("Max items that can queue inside the press before belts block.")]
     [SerializeField, Min(1)] int maxBufferedInputs = 9;
 
+    [Header("Maintenance")]
+    [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
+
     [Header("Debug")]
     [Tooltip("Enable verbose debug logs for PressMachine.")]
     [SerializeField] bool enableDebugLogs = false;
@@ -46,6 +49,11 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
+    public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
+    public bool IsStopped => maintenance != null && maintenance.IsStopped;
+    public int InputsPerProcess => Mathf.Max(1, inputsPerProcess);
+    public string OutputItemType => ResolveOutputItemType();
+    public string[] AcceptedItemTypes => ResolveAcceptedTypes();
     public int StoredItemCount
     {
         get
@@ -172,6 +180,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     {
         DLog($"[PressMachine] CanAcceptFrom called for approach vector {approachFromVec} at cell {cell}");
 
+        if (IsStopped) return false;
+
         // Must approach from the input side
         if (approachFromVec != InputVec)
         {
@@ -222,6 +232,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     {
         DLog($"[PressMachine] TryStartProcess called for cell {cell}");
 
+        if (IsStopped) return false;
         if (item == null)
         {
             Debug.LogWarning($"[PressMachine] Rejecting input at {cell}: item was null");
@@ -242,6 +253,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             DWarn($"[PressMachine] TryStartProcess rejected: buffer full ({bufferedInputs}/{maxBuffer})");
             return false;
         }
+
+        if (maintenance != null && !maintenance.TryConsume(1)) return false;
 
         bufferedInputs++;
         DLog($"[PressMachine] Input buffered at {cell}: {bufferedInputs}/{inputsPerProcess}");
@@ -327,6 +340,15 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         return maxBufferedInputs;
     }
 
+    public string GetProcessSummary()
+    {
+        string inputLabel = FormatTypeList(ResolveAcceptedTypes());
+        if (string.IsNullOrWhiteSpace(inputLabel)) inputLabel = "Any";
+        string outputLabel = ResolveOutputItemType();
+        if (string.IsNullOrWhiteSpace(outputLabel)) outputLabel = "Output";
+        return $"{InputsPerProcess} {inputLabel} -> 1 {outputLabel}";
+    }
+
     string[] ResolveAcceptedTypes()
     {
         // Combine legacy single entry with the array for flexible configuration.
@@ -364,6 +386,13 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     {
         if (acceptedTypes == null || acceptedTypes.Length == 0) return "'Any'";
         return "'" + string.Join("', '", acceptedTypes) + "'";
+    }
+
+    static string FormatTypeList(string[] types)
+    {
+        if (types == null || types.Length == 0) return "Any";
+        if (types.Length == 1) return types[0];
+        return string.Join("/", types);
     }
 
     float GetTickDeltaSeconds()

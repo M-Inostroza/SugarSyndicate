@@ -28,6 +28,9 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     [Tooltip("If true, processing advances on GameTick; otherwise it uses frame time.")]
     [SerializeField] bool useGameTickForProcessing = true;
 
+    [Header("Maintenance")]
+    [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
+
     [Header("Debug")]
     [SerializeField] bool enableDebugLogs = false;
 
@@ -35,6 +38,9 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
     public bool IsProcessing => busy && hasInputThisCycle;
+    public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
+    public bool IsStopped => maintenance != null && maintenance.IsStopped;
+    public string[] AcceptedItemTypes => ResolveAcceptedTypes();
     public float Progress01
     {
         get
@@ -116,6 +122,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
 
     public bool CanAcceptFrom(Vector2Int approachFromVec)
     {
+        if (IsStopped) return false;
         if (approachFromVec != InputVec) return false;
         if (busy) return false;
         return true;
@@ -124,6 +131,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     public bool TryStartProcess(Item item)
     {
         if (busy) return false;
+        if (IsStopped) return false;
         if (item == null) return false;
 
         var accepted = ResolveAcceptedTypes();
@@ -132,6 +140,8 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
             Debug.LogWarning($"[ColorizerMachine] Rejecting input at {cell}: expected {FormatAcceptedTypes(accepted)}, got '{FormatItemType(item.type)}'");
             return false;
         }
+
+        if (maintenance != null && !maintenance.TryConsume(1)) return false;
 
         busy = true;
         hasInputThisCycle = true;
@@ -182,6 +192,13 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
         }
     }
 
+    public string GetProcessSummary()
+    {
+        string inputLabel = FormatTypeList(ResolveAcceptedTypes());
+        if (string.IsNullOrWhiteSpace(inputLabel)) inputLabel = "Any";
+        return $"1 {inputLabel} -> 1 {inputLabel} (tinted)";
+    }
+
     string[] ResolveAcceptedTypes()
     {
         if (acceptedItemTypes == null) return Array.Empty<string>();
@@ -205,6 +222,13 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     {
         if (acceptedTypes == null || acceptedTypes.Length == 0) return "'Any'";
         return "'" + string.Join("', '", acceptedTypes) + "'";
+    }
+
+    static string FormatTypeList(string[] types)
+    {
+        if (types == null || types.Length == 0) return "Any";
+        if (types.Length == 1) return types[0];
+        return string.Join("/", types);
     }
 
     static string FormatItemType(string raw) => string.IsNullOrWhiteSpace(raw) ? "Unknown" : raw;
