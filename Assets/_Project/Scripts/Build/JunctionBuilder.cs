@@ -18,6 +18,10 @@ public class JunctionBuilder : MonoBehaviour
     [Header("Ghost visuals")]
     [SerializeField] [Range(0f, 1f)] float ghostAlpha = 0.6f;
 
+    [Header("Build Times")]
+    [SerializeField, Min(0.1f)] float splitterBuildSeconds = 0.8f;
+    [SerializeField, Min(0.1f)] float mergerBuildSeconds = 0.8f;
+
     [Header("Economy")]
     [SerializeField, Min(0)] int splitterCost = 0;
     [SerializeField, Min(0)] int mergerCost = 0;
@@ -211,7 +215,12 @@ public class JunctionBuilder : MonoBehaviour
             {
                 var ct = cellObj.GetType();
                 var fiType = ct.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var fiBlueprint = ct.GetField("isBlueprint", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var fiBroken = ct.GetField("isBroken", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 string typeName = fiType != null ? fiType.GetValue(cellObj)?.ToString() : string.Empty;
+                bool isBlueprint = fiBlueprint != null && (bool)fiBlueprint.GetValue(cellObj);
+                bool isBroken = fiBroken != null && (bool)fiBroken.GetValue(cellObj);
+                if (isBlueprint || isBroken) return true;
                 // Block only if existing Machine occupies the cell; belts/junctions can be overwritten via delete tools
                 if (typeName == "Machine") return true;
             }
@@ -269,92 +278,42 @@ public class JunctionBuilder : MonoBehaviour
             return;
         }
 
-        // Destroy ghost
-        if (ghostGO != null) Destroy(ghostGO);
-
         // Compute junction IOs based on mode and forward orientation (Right=0,Up=90,Left=180,Down=270)
         var outForward = forward;
         var right = new Vector2Int(forward.y, -forward.x); // rotate cw
         var left = new Vector2Int(-forward.y, forward.x);  // rotate ccw
         var back = new Vector2Int(-forward.x, -forward.y);
 
-        object V2DirObj(Vector2Int v)
-        {
-            // Prefer parsing by enum name if available
-            EnsureDirectionType();
-            if (directionType == null) return null;
-            string name = VecToDirName(v);
-            try { return Enum.Parse(directionType, name); } catch { }
-            // Fallback by underlying int mapping like DirectionUtil (Up=0, Right=1, Down=2, Left=3, None=4)
-            int idx = name == "Up" ? 0 : name == "Right" ? 1 : name == "Down" ? 2 : name == "Left" ? 3 : 4;
-            try { return Enum.ToObject(directionType, idx); } catch { return null; }
-        }
-
-        object inA = null, inB = null, inC = null, outA = null, outB = null;
+        Direction inDirA = Direction.None, inDirB = Direction.None, inDirC = Direction.None, outDirA = Direction.None, outDirB = Direction.None;
         if (mode == Mode.Splitter)
         {
             // 1 input (from back) -> 2 outputs (left & right)
-            inA = V2DirObj(back);
-            outA = V2DirObj(left);
-            outB = V2DirObj(right);
-            inB = V2DirObj(new Vector2Int(0, 0)); // None
-            inC = V2DirObj(new Vector2Int(0, 0));
+            inDirA = VecToDirection(back);
+            outDirA = VecToDirection(left);
+            outDirB = VecToDirection(right);
         }
         else if (mode == Mode.Merger)
         {
             // 3 inputs (left, right, back) -> 1 output (forward)
-            inA = V2DirObj(left);
-            inB = V2DirObj(right);
-            inC = V2DirObj(back);
-            outA = V2DirObj(outForward);
-            outB = V2DirObj(new Vector2Int(0, 0)); // None
+            inDirA = VecToDirection(left);
+            inDirB = VecToDirection(right);
+            inDirC = VecToDirection(back);
+            outDirA = VecToDirection(outForward);
         }
 
-        // Set logical grid cell
-        try
-        {
-            if (grid == null || miSetJunctionCell == null || miCellToWorld == null)
-            {
-                CacheGrid();
-            }
-            if (miSetJunctionCell != null)
-            {
-                // Ensure non-null values: use None where missing
-                var noneObj = V2DirObj(new Vector2Int(0, 0));
-                inA = inA ?? noneObj; inB = inB ?? noneObj; inC = inC ?? noneObj; outA = outA ?? noneObj; outB = outB ?? noneObj;
-                var pars = miSetJunctionCell.GetParameters().Length;
-                if (pars >= 6)
-                    miSetJunctionCell.Invoke(grid, new object[] { cell, inA, inB, inC, outA, outB });
-                else
-                    miSetJunctionCell.Invoke(grid, new object[] { cell, inA, inB, outA, outB }); // fallback for legacy signature
-            }
-        }
-        catch { }
-
-        // Register with belt simulation and mark graph dirty
-        TryRegisterCellInBeltSim(cell);
-        MarkGraphDirtyIfPresent();
-
-        // Spawn real prefab for visuals if provided
         GameObject prefab = mode == Mode.Splitter ? splitterPrefab : mergerPrefab;
-        if (prefab != null && grid != null && miCellToWorld != null)
-        {
-            Vector3 pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
-            var parent = TryCallStatic("ContainerLocator", "GetBeltContainer", null) as Transform;
-            var go = parent != null ? Instantiate(prefab, pos, Quaternion.Euler(0, 0, DirToZ(forward)), parent)
-                                    : Instantiate(prefab, pos, Quaternion.Euler(0, 0, DirToZ(forward)));
-            go.name = mode == Mode.Splitter ? "SplitterJunction" : "MergerJunction";
-            try
-            {
-                var tag = go.GetComponent<BuildCostTag>();
-                if (tag == null) tag = go.AddComponent<BuildCostTag>();
-                tag.Cost = cost;
-            }
-            catch { }
-        }
+        float buildSeconds = mode == Mode.Splitter ? splitterBuildSeconds : mergerBuildSeconds;
+        bool keepVisual = prefab == null;
 
-        // Prevent immediate pulls next step to let graph settle
-        TrySuppressNextStepPulls();
+        if (ghostGO == null) SpawnGhost(cell);
+        if (ghostGO != null)
+        {
+            ghostGO.transform.position = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
+            ghostGO.transform.rotation = Quaternion.Euler(0, 0, DirToZ(forward));
+            var task = ghostGO.GetComponent<BlueprintTask>();
+            if (task == null) task = ghostGO.AddComponent<BlueprintTask>();
+            task.InitializeJunction(cell, inDirA, inDirB, inDirC, outDirA, outDirB, ghostGO.transform.rotation, prefab, cost, buildSeconds, keepVisual);
+        }
 
         ClearPreviewState();
     }
@@ -543,6 +502,15 @@ public class JunctionBuilder : MonoBehaviour
         if (v == new Vector2Int(0, 1)) return "Up";
         if (v == new Vector2Int(0, -1)) return "Down";
         return "None";
+    }
+
+    static Direction VecToDirection(Vector2Int v)
+    {
+        if (v == new Vector2Int(1, 0)) return Direction.Right;
+        if (v == new Vector2Int(-1, 0)) return Direction.Left;
+        if (v == new Vector2Int(0, 1)) return Direction.Up;
+        if (v == new Vector2Int(0, -1)) return Direction.Down;
+        return Direction.None;
     }
 
     static float DirToZ(Vector2Int d)

@@ -15,6 +15,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject waterPipePrefab;
     [SerializeField] GameObject minePrefab;
     [SerializeField] GameObject storageContainerPrefab;
+    [SerializeField] GameObject droneHqPrefab;
     [SerializeField] WaterAreaOverlay waterOverlay;
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
@@ -28,6 +29,17 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField, Min(0)] int waterPipeCost = 0;
     [SerializeField, Min(0)] int mineCost = 90;
     [SerializeField, Min(0)] int storageContainerCost = 0;
+    [SerializeField, Min(0)] int droneHqCost = 0;
+
+    [Header("Build Times")]
+    [SerializeField, Min(0.1f)] float beltBuildSeconds = 0.4f;
+    [SerializeField, Min(0.1f)] float pressBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float shrederBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float colorizerBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float waterPumpBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float waterPipeBuildSeconds = 0.6f;
+    [SerializeField, Min(0.1f)] float mineBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float storageContainerBuildSeconds = 2f;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -48,6 +60,8 @@ public class MachineBuilder : MonoBehaviour
     ColorizerMachine ghostColorizer;
     WaterPump ghostWaterPump;
     StorageContainerMachine ghostStorage;
+    SugarMine ghostMine;
+    DroneHQ ghostHq;
     GameObject activePrefab;
     string activeName = "PressMachine";
     bool placingPipePath;
@@ -58,7 +72,7 @@ public class MachineBuilder : MonoBehaviour
     {
         CacheGrid();
         TryEnsureWaterOverlay();
-        TryEnsureSugarOverlay();
+        HideSugarOverlay();
     }
 
     void Update()
@@ -76,6 +90,8 @@ public class MachineBuilder : MonoBehaviour
             HideSugarOverlay();
             return;
         }
+
+        if (activeName != "Mine") HideSugarOverlay();
 
         if (!awaitingWorldClick) return;
 
@@ -233,24 +249,24 @@ public class MachineBuilder : MonoBehaviour
         catch { }
     }
 
+    void TryCacheSugarOverlay()
+    {
+        if (sugarOverlay != null) return;
+        try
+        {
+            var gs = grid as GridService ?? GridService.Instance ?? FindAnyObjectByType<GridService>();
+            if (gs != null) sugarOverlay = gs.GetComponent<SugarZoneOverlay>();
+        }
+        catch { }
+    }
+
     void TryEnsureSugarOverlay()
     {
         if (sugarOverlay != null) return;
         try
         {
             var gs = grid as GridService ?? GridService.Instance ?? FindAnyObjectByType<GridService>();
-            if (gs != null)
-            {
-                sugarOverlay = SugarZoneOverlay.FindOrCreate(gs);
-                if (sugarOverlay == null)
-                {
-                    var go = new GameObject("SugarZoneOverlay");
-                    go.transform.SetParent(gs.transform, false);
-                    sugarOverlay = go.AddComponent<SugarZoneOverlay>();
-                    sugarOverlay.GetType().GetField("grid", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                        ?.SetValue(sugarOverlay, gs);
-                }
-            }
+            if (gs != null) sugarOverlay = SugarZoneOverlay.FindOrCreate(gs);
         }
         catch { }
     }
@@ -290,6 +306,7 @@ public class MachineBuilder : MonoBehaviour
 
     void HideSugarOverlay()
     {
+        TryCacheSugarOverlay();
         try { sugarOverlay?.Hide(); } catch { }
     }
 
@@ -316,7 +333,23 @@ public class MachineBuilder : MonoBehaviour
             "WaterPipe" => waterPipeCost,
             "Mine" => mineCost,
             "StorageContainer" => storageContainerCost,
+            "DroneHQ" => droneHqCost,
             _ => 0,
+        };
+    }
+
+    float GetBuildSecondsForActiveName(string name)
+    {
+        return name switch
+        {
+            "PressMachine" => pressBuildSeconds,
+            "Shreder" => shrederBuildSeconds,
+            "Colorizer" => colorizerBuildSeconds,
+            "WaterPump" => waterPumpBuildSeconds,
+            "WaterPipe" => waterPipeBuildSeconds,
+            "Mine" => mineBuildSeconds,
+            "StorageContainer" => storageContainerBuildSeconds,
+            _ => 1f,
         };
     }
 
@@ -408,8 +441,6 @@ public class MachineBuilder : MonoBehaviour
         if (go == null) return;
         var pipe = go.GetComponent<WaterPipe>();
         if (pipe != null) Destroy(pipe);
-        var coll2D = go.GetComponent<Collider2D>();
-        if (coll2D != null) Destroy(coll2D);
     }
 
     Quaternion RotationForPipeSegment(int index)
@@ -469,28 +500,37 @@ public class MachineBuilder : MonoBehaviour
             return;
         }
 
-        foreach (var cell in pipePath)
+        for (int i = 0; i < pipePath.Count; i++)
         {
+            var cell = pipePath[i];
             TryRemoveBeltAtCell(cell);
             var pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
-            var go = Instantiate(activePrefab, pos, Quaternion.identity);
-            try
+            var rot = RotationForPipeCell(cell);
+
+            var go = i < ghostPipes.Count ? ghostPipes[i] : null;
+            if (go == null)
             {
-                var tag = go.GetComponent<BuildCostTag>();
-                if (tag == null) tag = go.AddComponent<BuildCostTag>();
-                tag.Cost = waterPipeCost;
+                go = new GameObject("WaterPipeBlueprint");
             }
-            catch { }
-            go.transform.rotation = RotationForPipeCell(cell);
+            go.transform.position = pos;
+            go.transform.rotation = rot;
+            go.SetActive(true);
+
+            var task = go.GetComponent<BlueprintTask>();
+            if (task == null) task = go.AddComponent<BlueprintTask>();
+            task.InitializePipe(cell, rot, activePrefab, waterPipeCost, waterPipeBuildSeconds);
         }
-        ClearPipeGhosts();
+        ClearPipeGhosts(false);
         // Keep the tool armed so the player can place another path without re-selecting.
         ClearPreviewState(clearActiveSelection: false);
     }
 
-    void ClearPipeGhosts()
+    void ClearPipeGhosts(bool destroy = true)
     {
-        foreach (var go in ghostPipes) { if (go != null) Destroy(go); }
+        if (destroy)
+        {
+            foreach (var go in ghostPipes) { if (go != null) Destroy(go); }
+        }
         ghostPipes.Clear();
         pipePath.Clear();
     }
@@ -560,6 +600,22 @@ public class MachineBuilder : MonoBehaviour
     {
         activePrefab = storageContainerPrefab;
         activeName = "StorageContainer";
+        ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
+        HideSugarOverlay();
+    }
+
+    public void BuildDroneHQ()
+    {
+        if (DroneHQ.Instance != null || BlueprintTask.HasHqBlueprint)
+        {
+            Debug.LogWarning("[MachineBuilder] Only one Drone HQ is allowed.");
+            return;
+        }
+
+        activePrefab = droneHqPrefab;
+        activeName = "DroneHQ";
         ArmPlacement();
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
@@ -655,8 +711,13 @@ public class MachineBuilder : MonoBehaviour
                 var ct = cellObj.GetType();
                 var fiHasConv = ct.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 var fiType = ct.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var fiBlueprint = ct.GetField("isBlueprint", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var fiBroken = ct.GetField("isBroken", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 bool hasConv = fiHasConv != null && (bool)fiHasConv.GetValue(cellObj);
                 string typeName = fiType != null ? fiType.GetValue(cellObj)?.ToString() : string.Empty;
+                bool isBlueprint = fiBlueprint != null && (bool)fiBlueprint.GetValue(cellObj);
+                bool isBroken = fiBroken != null && (bool)fiBroken.GetValue(cellObj);
+                if (isBlueprint || isBroken) return true;
                 if (hasConv || typeName == "Machine") return true;
             }
         }
@@ -674,6 +735,8 @@ public class MachineBuilder : MonoBehaviour
         ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
         ghostWaterPump = ghostGO.GetComponent<WaterPump>();
         ghostStorage = ghostGO.GetComponent<StorageContainerMachine>();
+        ghostMine = ghostGO.GetComponent<SugarMine>();
+        ghostHq = ghostGO.GetComponent<DroneHQ>();
         if (ghostPress != null)
         {
             ghostPress.isGhost = true;
@@ -681,6 +744,10 @@ public class MachineBuilder : MonoBehaviour
             var srs = ghostGO.GetComponentsInChildren<SpriteRenderer>(true);
             foreach (var sr in srs) { var c = sr.color; c.a = 0.6f; sr.color = c; }
         }
+        if (ghostColorizer != null) ghostColorizer.isGhost = true;
+        if (ghostWaterPump != null) ghostWaterPump.isGhost = true;
+        if (ghostMine != null) ghostMine.isGhost = true;
+        if (ghostHq != null) ghostHq.isGhost = true;
         if (ghostStorage != null)
         {
             ghostStorage.isGhost = true;
@@ -704,6 +771,7 @@ public class MachineBuilder : MonoBehaviour
         if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
         if (ghostWaterPump != null) ghostWaterPump.facingVec = outputDir;
         if (ghostStorage != null) ghostStorage.facingVec = outputDir;
+        if (ghostMine != null) ghostMine.SetFacing(outputDir);
     }
 
     void ApplyGhostSorting(GameObject go)
@@ -742,6 +810,13 @@ public class MachineBuilder : MonoBehaviour
             ClearPreviewState(clearActiveSelection: false);
             return;
         }
+        if (activeName == "DroneHQ" && (DroneHQ.Instance != null || BlueprintTask.HasHqBlueprint))
+        {
+            Debug.LogWarning("[MachineBuilder] Only one Drone HQ is allowed.");
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState(clearActiveSelection: false);
+            return;
+        }
 
         var footprint = GetFootprintCells(cell, outputDir);
         if (IsAnyBlocked(footprint))
@@ -760,57 +835,50 @@ public class MachineBuilder : MonoBehaviour
             return;
         }
 
-        // Destroy ghost and place real prefab with same orientation at footprint center
-        Vector3 pos = GetFootprintCenterWorld(cell, outputDir);
-        if (ghostGO != null) Destroy(ghostGO);
-
         // Ensure the target footprint cells are not belts anymore
         foreach (var fp in footprint) TryRemoveBeltAtCell(fp);
 
-        var go = Instantiate(activePrefab, pos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
-        try
+        if (activeName == "DroneHQ")
         {
-            var tag = go.GetComponent<BuildCostTag>();
-            if (tag == null) tag = go.AddComponent<BuildCostTag>();
-            tag.Cost = cost;
-        }
-        catch { }
-        if (RequiresSugarCell()) ApplyPlacedSorting(go, mineSortingOrder);
-        Debug.Log($"[MachineBuilder] Instantiated {activeName} at position {pos}");
+            Vector3 hqPos = GetFootprintCenterWorld(cell, outputDir);
+            if (ghostGO != null) Destroy(ghostGO);
 
-        var press = go.GetComponent<PressMachine>();
-        if (press != null)
-        {
-            press.facingVec = outputDir; // Awake will register
-            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
-        }
-        var colorizer = go.GetComponent<ColorizerMachine>();
-        if (colorizer != null)
-        {
-            colorizer.facingVec = outputDir;
-            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
-        }
-        var pump = go.GetComponent<WaterPump>();
-        if (pump != null)
-        {
-            pump.facingVec = outputDir;
-            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
-        }
-        var mine = go.GetComponent<SugarMine>();
-        if (mine != null)
-        {
-            mine.SetFacing(outputDir);
-            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
-        }
-        var storage = go.GetComponent<StorageContainerMachine>();
-        if (storage != null)
-        {
-            storage.facingVec = outputDir;
-            Debug.Log($"[MachineBuilder] {activeName} facing set to {outputDir}");
+            var hqGo = Instantiate(activePrefab, hqPos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
+            var hq = hqGo.GetComponent<DroneHQ>();
+            if (hq != null) hq.isGhost = false;
+            try
+            {
+                var tag = hqGo.GetComponent<BuildCostTag>();
+                if (tag == null) tag = hqGo.AddComponent<BuildCostTag>();
+                tag.Cost = cost;
+            }
+            catch { }
+
+            TryMarkMachineFootprint(footprint);
+
+            var repairable = hqGo.GetComponent<Repairable>();
+            if (repairable == null) repairable = hqGo.AddComponent<Repairable>();
+            repairable.Initialize(footprint.ToArray());
+
+            ClearPreviewState(clearActiveSelection: false);
+            return;
         }
 
-        // Mark footprint cells as machine in grid
-        TryMarkMachineFootprint(footprint);
+        if (ghostGO == null)
+        {
+            SpawnGhost(cell);
+        }
+
+        if (ghostGO != null)
+        {
+            ghostGO.transform.position = GetFootprintCenterWorld(cell, outputDir);
+            ghostGO.transform.rotation = Quaternion.Euler(0, 0, DirToZ(outputDir));
+            var task = ghostGO.GetComponent<BlueprintTask>();
+            if (task == null) task = ghostGO.AddComponent<BlueprintTask>();
+            bool isHq = activeName == "DroneHQ";
+            int sortingOverride = RequiresSugarCell() ? mineSortingOrder : int.MinValue;
+            task.InitializeMachine(footprint.ToArray(), outputDir, ghostGO.transform.rotation, activePrefab, cost, GetBuildSecondsForActiveName(activeName), isHq, sortingOverride);
+        }
 
         // Successful placement: clear only temporary preview state, keep tool selection armed.
         ClearPreviewState(clearActiveSelection: false);
@@ -877,6 +945,8 @@ public class MachineBuilder : MonoBehaviour
         ghostColorizer = null;
         ghostWaterPump = null;
         ghostStorage = null;
+        ghostMine = null;
+        ghostHq = null;
         if (clearActiveSelection) activePrefab = null;
         ClearPipeGhosts();
         if (clearActiveSelection) TrySetBuildToolActive(false);

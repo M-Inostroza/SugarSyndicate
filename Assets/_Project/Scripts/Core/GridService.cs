@@ -70,6 +70,8 @@ public class GridService : MonoBehaviour, IGridService
         public bool isWater;
         public bool isSugar;
         public float sugarEfficiency;
+        public bool isBlueprint;
+        public bool isBroken;
 
         // legacy support
         public bool hasFloor;
@@ -227,6 +229,8 @@ public class GridService : MonoBehaviour, IGridService
         var cell = GetCell(c);
         cell.type = CellType.Belt;
         cell.inA = inA; cell.outA = outA; cell.inB = Direction.None; cell.outB = Direction.None;
+        cell.isBlueprint = false;
+        cell.isBroken = false;
         // legacy bridge
         cell.hasConveyor = true;
         if (cell.conveyor == null)
@@ -242,6 +246,8 @@ public class GridService : MonoBehaviour, IGridService
         var cell = GetCell(c);
         cell.type = CellType.Junction;
         cell.inA = inA; cell.inB = inB; cell.inC = inC; cell.outA = outA; cell.outB = outB; cell.junctionToggle = 0;
+        cell.isBlueprint = false;
+        cell.isBroken = false;
         // legacy bridge
         cell.hasConveyor = true;
     }
@@ -252,9 +258,26 @@ public class GridService : MonoBehaviour, IGridService
         cell.type = CellType.Machine;
         cell.inA = cell.inB = cell.inC = cell.outA = cell.outB = Direction.None;
         cell.junctionToggle = 0;
+        cell.isBlueprint = false;
+        cell.isBroken = false;
         cell.hasConveyor = false;
         cell.conveyor = null;
         cell.hasMachine = true;
+    }
+
+    public void SetBlueprintCell(Vector2Int c)
+    {
+        if (!InBounds(c)) return;
+        var cell = GetCell(c);
+        if (cell == null) return;
+        cell.type = CellType.Empty;
+        cell.inA = cell.inB = cell.inC = cell.outA = cell.outB = Direction.None;
+        cell.junctionToggle = 0;
+        cell.hasConveyor = false;
+        cell.conveyor = null;
+        cell.hasMachine = false;
+        cell.isBlueprint = true;
+        cell.isBroken = false;
     }
 
     public void ClearCell(Vector2Int c)
@@ -267,6 +290,8 @@ public class GridService : MonoBehaviour, IGridService
         cell.junctionToggle = 0;
         cell.hasConveyor = false;
         cell.conveyor = null;
+        cell.isBlueprint = false;
+        cell.isBroken = false;
     }
 
     // Legacy API used by Conveyor
@@ -283,6 +308,8 @@ public class GridService : MonoBehaviour, IGridService
             cell.outA = conveyor.direction;
             cell.inB = cell.inC = Direction.None;
             cell.outB = Direction.None;
+            cell.isBlueprint = false;
+            cell.isBroken = false;
         }
     }
 
@@ -307,6 +334,7 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] Color beltColor = new Color(1f, 0.85f, 0.2f, 0.35f);
     [SerializeField] Color junctionColor = new Color(1f, 0.5f, 0.1f, 0.4f);
     [SerializeField] Color machineColor = new Color(0.2f, 0.7f, 1f, 0.35f);
+    [SerializeField] Color blueprintColor = new Color(0.35f, 0.75f, 1f, 0.35f);
     [SerializeField] Color itemColor = new Color(0.2f, 1f, 0.4f, 1f);
     [SerializeField] Color sugarColor = new Color(1f, 1f, 1f, 0.35f);
     [SerializeField] Color sugarCenterColor = new Color(1f, 1f, 1f, 0.7f);
@@ -382,6 +410,12 @@ public class GridService : MonoBehaviour, IGridService
 
                 if (showCellTypes && cell != null)
                 {
+                    if (cell.isBlueprint)
+                    {
+                        Gizmos.color = blueprintColor;
+                        Gizmos.DrawCube(center, size);
+                    }
+
                     switch (cell.type)
                     {
                         case CellType.Belt:
@@ -425,7 +459,8 @@ public class GridService : MonoBehaviour, IGridService
     }
 
     static bool IsBeltLike(Cell c)
-        => c != null && (c.type == CellType.Belt || c.type == CellType.Junction || c.hasConveyor || c.conveyor != null);
+        => c != null && !c.isBlueprint && !c.isBroken
+           && (c.type == CellType.Belt || c.type == CellType.Junction || c.hasConveyor || c.conveyor != null);
 
     bool NeighborHasOutputTowards(Cell neighbor, Direction toward)
     {

@@ -1,0 +1,140 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public class DroneTaskService : MonoBehaviour
+{
+    public static DroneTaskService Instance { get; private set; }
+
+    [Header("Drones")]
+    [SerializeField] DroneWorker dronePrefab;
+    [SerializeField, Min(0)] int startingDrones = 1;
+    [SerializeField, Min(1)] int maxDrones = 10;
+    [SerializeField] Transform droneParent;
+
+    readonly List<DroneWorker> drones = new();
+    readonly List<DroneTaskTarget> tasks = new();
+
+    DroneHQ hq;
+
+    public bool HasHq => hq != null;
+
+    void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+    }
+
+    void Start()
+    {
+        TryFindHq();
+        if (hq != null)
+            EnsureStartingDrones();
+    }
+
+    public void RegisterHQ(DroneHQ newHq)
+    {
+        if (newHq == null) return;
+        hq = newHq;
+        EnsureStartingDrones();
+    }
+
+    public void UnregisterHQ(DroneHQ oldHq)
+    {
+        if (hq == oldHq) hq = null;
+    }
+
+    public Vector3 GetHqPosition()
+    {
+        if (hq != null) return hq.DockPosition;
+        return transform.position;
+    }
+
+    public void RegisterTask(DroneTaskTarget task)
+    {
+        if (task == null) return;
+        if (!tasks.Contains(task)) tasks.Add(task);
+    }
+
+    public void UnregisterTask(DroneTaskTarget task)
+    {
+        if (task == null) return;
+        tasks.Remove(task);
+    }
+
+    public bool TryAssignTask(DroneWorker drone, out DroneTaskTarget task)
+    {
+        task = null;
+        if (drone == null || tasks.Count == 0) return false;
+
+        DroneTaskTarget bestNormal = null;
+        for (int i = tasks.Count - 1; i >= 0; i--)
+        {
+            var t = tasks[i];
+            if (t == null)
+            {
+                tasks.RemoveAt(i);
+                continue;
+            }
+            if (t.IsComplete || t.IsAssigned) continue;
+            if (t.Priority == DroneTaskPriority.Priority)
+            {
+                if (t.TryAssign(drone))
+                {
+                    task = t;
+                    return true;
+                }
+            }
+            else if (bestNormal == null)
+            {
+                bestNormal = t;
+            }
+        }
+
+        if (bestNormal != null && bestNormal.TryAssign(drone))
+        {
+            task = bestNormal;
+            return true;
+        }
+
+        return false;
+    }
+
+    void EnsureStartingDrones()
+    {
+        int target = Mathf.Clamp(startingDrones, 0, Mathf.Max(0, maxDrones));
+        while (drones.Count < target)
+        {
+            if (drones.Count >= maxDrones) break;
+            SpawnDrone();
+        }
+    }
+
+    void SpawnDrone()
+    {
+        var pos = GetHqPosition();
+        DroneWorker drone = null;
+        if (dronePrefab != null)
+        {
+            var parent = droneParent != null ? droneParent : null;
+            drone = parent != null ? Instantiate(dronePrefab, pos, Quaternion.identity, parent)
+                                   : Instantiate(dronePrefab, pos, Quaternion.identity);
+        }
+        else
+        {
+            var go = new GameObject("Drone");
+            go.transform.position = pos;
+            drone = go.AddComponent<DroneWorker>();
+        }
+        if (drone != null) drones.Add(drone);
+    }
+
+    void TryFindHq()
+    {
+        if (hq != null) return;
+        hq = FindAnyObjectByType<DroneHQ>();
+    }
+}

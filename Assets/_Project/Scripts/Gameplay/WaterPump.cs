@@ -18,6 +18,8 @@ public class WaterPump : MonoBehaviour, IMachine
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
+    [System.NonSerialized] public bool isGhost = false;
+
     public Vector2Int InputVec => Vector2Int.zero; // does not accept input
     public Vector2Int Cell => cell;
 
@@ -35,6 +37,7 @@ public class WaterPump : MonoBehaviour, IMachine
 
     void Start()
     {
+        if (isGhost) return;
         if (grid == null) return;
 
         TryRegisterAsMachineAndSnap();
@@ -52,6 +55,7 @@ public class WaterPump : MonoBehaviour, IMachine
 
     void OnDestroy()
     {
+        if (isGhost) return;
         if (registered)
         {
             MachineRegistry.Unregister(this);

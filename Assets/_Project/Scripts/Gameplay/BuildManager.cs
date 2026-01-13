@@ -14,6 +14,7 @@ public class BuildManager : MonoBehaviour
     [Header("Prefabs & Parents")]
     [SerializeField] GameObject conveyorPrefab;
     [SerializeField] Transform placeParent; // parent for spawned conveyors
+    [SerializeField, Min(0.1f)] float beltBuildSeconds = 0.4f;
 
     bool isPlacingConveyor = false;
     Camera cam;
@@ -121,6 +122,9 @@ public class BuildManager : MonoBehaviour
                         lastPlacedConveyor.direction = dir;
                         // rotate visual to match
                         RotateTransformToDirection(lastPlacedConveyor.transform, dir);
+                        var task = lastPlacedConveyor.GetComponent<BlueprintTask>();
+                        if (task != null)
+                            task.UpdateBeltDirection(dir, lastPlacedConveyor.transform.rotation);
                         // ensure belt graph sees the updated direction immediately
                         BeltSimulationService.Instance?.RegisterConveyor(lastPlacedConveyor);
                     }
@@ -205,11 +209,11 @@ public class BuildManager : MonoBehaviour
                 RotateTransformToDirection(conv.transform, setDirection.Value);
             }
 
-            gs.SetConveyor(cell, conv);
+            conv.isGhost = true;
+            var task = conv.GetComponent<BlueprintTask>();
+            if (task == null) task = conv.gameObject.AddComponent<BlueprintTask>();
+            task.InitializeBelt(cell, conv.direction, conv.transform.rotation, conveyorPrefab, 0, beltBuildSeconds);
             lastPlacedConveyor = conv;
-
-            // register immediately so graph updates this frame
-            BeltSimulationService.Instance?.RegisterConveyor(conv);
         }
     }
 

@@ -37,6 +37,8 @@ public class SugarMine : MonoBehaviour
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
+    [System.NonSerialized] public bool isGhost = false;
+
     bool running;
     int nextItemId = 1;
     float spawnProgress;
@@ -44,6 +46,7 @@ public class SugarMine : MonoBehaviour
 
     void OnEnable()
     {
+        if (isGhost) return;
         running = autoStart;
         GameTick.OnTickStart += OnTick;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
@@ -56,11 +59,13 @@ public class SugarMine : MonoBehaviour
 
     void OnDisable()
     {
+        if (isGhost) return;
         GameTick.OnTickStart -= OnTick;
     }
 
     void OnTick()
     {
+        if (isGhost) return;
         if (!running) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();

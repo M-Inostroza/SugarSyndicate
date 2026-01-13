@@ -289,7 +289,8 @@ public class BeltSimulationService : MonoBehaviour
     }
 
     bool IsBeltLike(GridService.Cell c)
-        => c != null && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor);
+        => c != null && !c.isBlueprint && !c.isBroken
+           && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor);
 
     bool HasOutputTowards(GridService.Cell from, Direction dir)
     {
@@ -312,6 +313,7 @@ public class BeltSimulationService : MonoBehaviour
     {
         var cell = grid.GetCell(cellPos);
         if (cell == null) return null;
+        if (cell.isBlueprint || cell.isBroken) return null;
 
         // Empty junction/belt tries to pull from inputs
         if (!cell.hasItem)
@@ -432,6 +434,11 @@ public class BeltSimulationService : MonoBehaviour
         {
             return cellPos; // out of bounds; retry later
         }
+
+        if (dest.isBlueprint || dest.isBroken)
+        {
+            return cellPos;
+        }
         
         // Machines handle intake before entering the cell
         if (dest.type == GridService.CellType.Machine)
@@ -539,6 +546,7 @@ public class BeltSimulationService : MonoBehaviour
         var from = grid.GetCell(fromPos);
         var dest = grid.GetCell(target);
         if (from == null || dest == null) return false;
+        if (from.isBlueprint || from.isBroken) return false;
         if (!from.hasItem) return false;
         var requiredOut = DirectionUtil.Opposite(dir);
         if (!HasOutputTowards(from, requiredOut)) return false;

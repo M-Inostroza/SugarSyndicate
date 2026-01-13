@@ -280,10 +280,11 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         if (cellData == null) return;
         if (cellData.type == GridService.CellType.Machine) return;
         if (cellData.hasItem) return;
-        bool beltLike = cellData.type == GridService.CellType.Belt
-                        || cellData.type == GridService.CellType.Junction
-                        || cellData.hasConveyor
-                        || cellData.conveyor != null;
+        bool beltLike = !cellData.isBlueprint && !cellData.isBroken
+                        && (cellData.type == GridService.CellType.Belt
+                            || cellData.type == GridService.CellType.Junction
+                            || cellData.hasConveyor
+                            || cellData.conveyor != null);
         if (!beltLike) return;
         if (belt.IsVisualNearCell(outCell)) return;
 

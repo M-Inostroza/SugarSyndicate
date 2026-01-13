@@ -28,6 +28,8 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     [Tooltip("If true, processing advances on GameTick; otherwise it uses frame time.")]
     [SerializeField] bool useGameTickForProcessing = true;
 
+    [System.NonSerialized] public bool isGhost = false;
+
     [Header("Maintenance")]
     [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
 
@@ -75,6 +77,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
 
     void Start()
     {
+        if (isGhost) return;
         if (grid == null) return;
 
         EnsureProgressDisplay();
@@ -85,6 +88,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
 
     void OnEnable()
     {
+        if (isGhost) return;
         if (useGameTickForProcessing)
         {
             try { GameTick.OnTickStart += OnTick; } catch { }
@@ -93,6 +97,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
 
     void OnDisable()
     {
+        if (isGhost) return;
         if (useGameTickForProcessing)
         {
             try { GameTick.OnTickStart -= OnTick; } catch { }
@@ -330,7 +335,8 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     }
 
     static bool IsBeltLike(GridService.Cell c)
-        => c != null && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
+        => c != null && !c.isBlueprint && !c.isBroken
+           && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
 
     void TryRegisterAsMachineAndSnap()
     {

@@ -499,5 +499,6 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     }
 
     static bool IsBeltLike(GridService.Cell c)
-        => c != null && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
+        => c != null && !c.isBlueprint && !c.isBroken
+           && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
 }

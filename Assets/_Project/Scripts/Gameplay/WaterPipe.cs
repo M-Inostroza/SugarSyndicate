@@ -9,6 +9,8 @@ public class WaterPipe : MonoBehaviour
     [SerializeField] GridService grid;
     [SerializeField] WaterNetworkService waterNetwork;
 
+    [System.NonSerialized] public bool isGhost = false;
+
     Vector2Int cell;
     bool registered;
 
@@ -20,11 +22,13 @@ public class WaterPipe : MonoBehaviour
 
     void Start()
     {
+        if (isGhost) return;
         TryRegister();
     }
 
     void OnDestroy()
     {
+        if (isGhost) return;
         if (waterNetwork == null) waterNetwork = WaterNetworkService.Instance;
         if (registered) waterNetwork?.UnregisterPipe(cell);
         registered = false;
@@ -44,6 +48,7 @@ public class WaterPipe : MonoBehaviour
 
     void TryRegister()
     {
+        if (isGhost) return;
         if (grid == null) return;
         if (waterNetwork == null) waterNetwork = WaterNetworkService.Instance;
         cell = grid.WorldToCell(transform.position);
