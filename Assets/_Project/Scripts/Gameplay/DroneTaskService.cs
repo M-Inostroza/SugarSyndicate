@@ -17,6 +17,33 @@ public class DroneTaskService : MonoBehaviour
     DroneHQ hq;
 
     public bool HasHq => hq != null;
+    public int TotalDrones => drones.Count;
+    public int MaxDrones => Mathf.Max(0, maxDrones);
+    public int IdleDrones
+    {
+        get
+        {
+            int idle = 0;
+            for (int i = 0; i < drones.Count; i++)
+            {
+                var drone = drones[i];
+                if (drone != null && !drone.IsBusy) idle++;
+            }
+            return idle;
+        }
+    }
+    public float DroneSpeed
+    {
+        get
+        {
+            for (int i = 0; i < drones.Count; i++)
+            {
+                var drone = drones[i];
+                if (drone != null) return drone.MoveSpeed;
+            }
+            return dronePrefab != null ? dronePrefab.MoveSpeed : 0f;
+        }
+    }
 
     void Awake()
     {
@@ -71,12 +98,13 @@ public class DroneTaskService : MonoBehaviour
         if (drone == null || tasks.Count == 0) return false;
 
         DroneTaskTarget bestNormal = null;
-        for (int i = tasks.Count - 1; i >= 0; i--)
+        for (int i = 0; i < tasks.Count; i++)
         {
             var t = tasks[i];
             if (t == null)
             {
                 tasks.RemoveAt(i);
+                i--;
                 continue;
             }
             if (t.IsComplete || t.IsAssigned) continue;

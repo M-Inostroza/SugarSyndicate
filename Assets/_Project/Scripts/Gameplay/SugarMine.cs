@@ -34,6 +34,9 @@ public class SugarMine : MonoBehaviour
     [Tooltip("If true, production rate scales with the sugar amount in the cell.")]
     [SerializeField] bool scaleBySugarEfficiency = true;
 
+    [Header("Maintenance")]
+    [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
+
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
@@ -43,6 +46,9 @@ public class SugarMine : MonoBehaviour
     int nextItemId = 1;
     float spawnProgress;
     GameTick tickSource;
+
+    public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
+    public bool IsStopped => maintenance != null && maintenance.IsStopped;
 
     void OnEnable()
     {
@@ -67,6 +73,7 @@ public class SugarMine : MonoBehaviour
     {
         if (isGhost) return;
         if (!running) return;
+        if (IsStopped) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
         float tps = tickSource != null ? tickSource.ticksPerSecond : 15f;
@@ -82,6 +89,7 @@ public class SugarMine : MonoBehaviour
         {
             spawnProgress -= 1f;
             Spawn();
+            if (IsStopped) break;
         }
     }
 
@@ -173,6 +181,11 @@ public class SugarMine : MonoBehaviour
 
         if (debugLogging) Debug.Log($"[SugarMine] Produced item {nextItemId} ({item.type}) at {outputCell}");
         nextItemId++;
+
+        if (maintenance != null && !maintenance.TryConsume(1))
+        {
+            if (debugLogging) Debug.LogWarning("[SugarMine] Maintenance stopped production.");
+        }
     }
 
     string ResolveItemType()
@@ -180,6 +193,14 @@ public class SugarMine : MonoBehaviour
         if (!string.IsNullOrWhiteSpace(itemType)) return itemType.Trim();
         if (itemPrefab != null) return itemPrefab.name;
         return string.Empty;
+    }
+
+    public string GetProcessSummary()
+    {
+        var type = ResolveItemType();
+        if (string.IsNullOrWhiteSpace(type)) type = "Sugar";
+        string scaleNote = scaleBySugarEfficiency ? " (scaled by sugar)" : string.Empty;
+        return $"Spawns {type} @ {spawnsPerSecond:0.##}/s{scaleNote}";
     }
 
     static Direction DirFromVec(Vector2Int dir)

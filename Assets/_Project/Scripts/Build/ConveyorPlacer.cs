@@ -654,6 +654,16 @@ public class ConveyorPlacer : MonoBehaviour
             // If already marked, skip
             if (deleteMarkedCells.Contains(cell)) return;
 
+            if (TryGetBlueprintAtCell(cell, out var blueprint))
+            {
+                deleteMarkedCells.Add(cell);
+                if (blueprint != null && !genericGhostOriginalColors.ContainsKey(blueprint.gameObject))
+                {
+                    ApplyDeleteGhostToGameObject(blueprint.gameObject);
+                }
+                return;
+            }
+
             Conveyor conv = null;
             try
             {
@@ -757,85 +767,93 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 bool refundBelt = ShouldRefundBeltAtCell(cell);
                 bool removedSomething = false;
-                Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
-                if (conv == null)
+                if (TryCancelBlueprintAtCell(cell))
                 {
-                    try
-                    {
-                        var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) }); if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-                    }
-                    catch { }
-                }
-                if (conv == null)
-                {
-                    try
-                    {
-                        var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                        var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                        foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
-                    }
-                    catch { }
-                }
-                if (conv != null)
-                {
-                    try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
-                    try { Destroy(conv.gameObject); } catch { }
-                    try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
                     removedSomething = true;
-                    ClearLogicalCell(cell); // ensure logical grid data is wiped so simulation stops using this belt
+                    refundBelt = false;
                 }
-                else
+                if (!removedSomething)
                 {
-                    // Try machine visual first
-                    var mg = FindMachineAtCell(cell);
-                    if (mg != null)
+                    Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
+                    if (conv == null)
                     {
-                        RefundFullBuildCost(mg);
-                        try { Destroy(mg); } catch { }
-                        removedSomething = true;
-                        // Clear machine flag in grid
                         try
                         {
-                            var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
-                            if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
+                            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) }); if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
                         }
                         catch { }
-                        ClearLogicalCell(cell);
+                    }
+                    if (conv == null)
+                    {
+                        try
+                        {
+                            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                            var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                            foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
+                        }
+                        catch { }
+                    }
+                    if (conv != null)
+                    {
+                        try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
+                        try { Destroy(conv.gameObject); } catch { }
+                        try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
+                        removedSomething = true;
+                        ClearLogicalCell(cell); // ensure logical grid data is wiped so simulation stops using this belt
                     }
                     else
                     {
-                        // Try water pipe visual
-                        var pipe = FindPipeAtCell(cell);
-                        if (pipe != null)
+                        // Try machine visual first
+                        var mg = FindMachineAtCell(cell);
+                        if (mg != null)
                         {
-                            RefundFullBuildCost(pipe);
-                            try { Destroy(pipe); } catch { }
+                            RefundFullBuildCost(mg);
+                            try { Destroy(mg); } catch { }
                             removedSomething = true;
-                            ClearLogicalCell(cell);
-                        }
-                    }
-
-                    if (!removedSomething)
-                    {
-                        // Try junction visual/object
-                        var jg = FindJunctionAtCell(cell);
-                        if (jg != null)
-                        {
-                            RefundFullBuildCost(jg);
-                            try { Destroy(jg); } catch { }
-                            removedSomething = true;
+                            // Clear machine flag in grid
+                            try
+                            {
+                                var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+                                if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
+                            }
+                            catch { }
                             ClearLogicalCell(cell);
                         }
                         else
                         {
-                            // Try belt visual next
-                            var go = FindBeltVisualAtCell(cell);
-                            if (go != null)
+                            // Try water pipe visual
+                            var pipe = FindPipeAtCell(cell);
+                            if (pipe != null)
                             {
-                                try { genericGhostOriginalColors.Remove(go); } catch { }
-                                try { Destroy(go); } catch { }
+                                RefundFullBuildCost(pipe);
+                                try { Destroy(pipe); } catch { }
                                 removedSomething = true;
                                 ClearLogicalCell(cell);
+                            }
+                        }
+
+                        if (!removedSomething)
+                        {
+                            // Try junction visual/object
+                            var jg = FindJunctionAtCell(cell);
+                            if (jg != null)
+                            {
+                                RefundFullBuildCost(jg);
+                                try { Destroy(jg); } catch { }
+                                removedSomething = true;
+                                ClearLogicalCell(cell);
+                            }
+                            else
+                            {
+                                // Try belt visual next
+                                var go = FindBeltVisualAtCell(cell);
+                                if (go != null)
+                                {
+                                    try { genericGhostOriginalColors.Remove(go); } catch { }
+                                    try { Destroy(go); } catch { }
+                                    removedSomething = true;
+                                    ClearLogicalCell(cell);
+                                }
                             }
                         }
                     }
@@ -921,52 +939,60 @@ public class ConveyorPlacer : MonoBehaviour
         {
             bool refundBelt = ShouldRefundBeltAtCell(cell);
             bool removedSomething = false;
-            Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
-            if (conv == null)
+            if (TryCancelBlueprintAtCell(cell))
             {
-                var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-                if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-            }
-            if (conv == null)
-            {
-                var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
-            }
-            if (conv != null)
-            {
-                try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
-                try { Destroy(conv.gameObject); } catch { }
-                try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
                 removedSomething = true;
-                ClearLogicalCell(cell);
+                refundBelt = false;
             }
-            else
+            if (!removedSomething)
             {
-                // Machine visual first
-                var mg = FindMachineAtCell(cell);
-                if (mg != null) { RefundFullBuildCost(mg); try { Destroy(mg); } catch { } removedSomething = true; }
-                // Water pipe
-                if (!removedSomething)
+                Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
+                if (conv == null)
                 {
-                    var pipe = FindPipeAtCell(cell);
-                    if (pipe != null)
+                    var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+                    if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
+                }
+                if (conv == null)
+                {
+                    var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                    var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                    foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
+                }
+                if (conv != null)
+                {
+                    try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
+                    try { Destroy(conv.gameObject); } catch { }
+                    try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
+                    removedSomething = true;
+                    ClearLogicalCell(cell);
+                }
+                else
+                {
+                    // Machine visual first
+                    var mg = FindMachineAtCell(cell);
+                    if (mg != null) { RefundFullBuildCost(mg); try { Destroy(mg); } catch { } removedSomething = true; }
+                    // Water pipe
+                    if (!removedSomething)
                     {
-                        RefundFullBuildCost(pipe);
-                        try { Destroy(pipe); } catch { }
-                        removedSomething = true;
+                        var pipe = FindPipeAtCell(cell);
+                        if (pipe != null)
+                        {
+                            RefundFullBuildCost(pipe);
+                            try { Destroy(pipe); } catch { }
+                            removedSomething = true;
+                        }
                     }
-                }
-                if (!removedSomething)
-                {
-                    // Junction visual
-                    var jg = FindJunctionAtCell(cell);
-                    if (jg != null) { RefundFullBuildCost(jg); try { Destroy(jg); } catch { } removedSomething = true; }
-                }
-                if (!removedSomething)
-                {
-                    // Belt visual
-                    var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedSomething = true; }
+                    if (!removedSomething)
+                    {
+                        // Junction visual
+                        var jg = FindJunctionAtCell(cell);
+                        if (jg != null) { RefundFullBuildCost(jg); try { Destroy(jg); } catch { } removedSomething = true; }
+                    }
+                    if (!removedSomething)
+                    {
+                        // Belt visual
+                        var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedSomething = true; }
+                    }
                 }
             }
 
@@ -1646,6 +1672,34 @@ public class ConveyorPlacer : MonoBehaviour
             return true;
         }
         catch { return false; }
+    }
+
+    bool TryGetBlueprintAtCell(Vector2Int cell, out BlueprintTask task)
+    {
+        task = null;
+        try
+        {
+            var tasks = UnityEngine.Object.FindObjectsByType<BlueprintTask>(FindObjectsSortMode.None);
+            foreach (var t in tasks)
+            {
+                if (t == null) continue;
+                if (t.ContainsCell(cell))
+                {
+                    task = t;
+                    return true;
+                }
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    bool TryCancelBlueprintAtCell(Vector2Int cell)
+    {
+        if (!TryGetBlueprintAtCell(cell, out var task)) return false;
+        if (task == null) return false;
+        task.CancelFromDelete();
+        return true;
     }
 
     int DirectionIndexFromName(string name)

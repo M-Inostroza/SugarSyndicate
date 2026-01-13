@@ -85,6 +85,21 @@ public class BlueprintTask : DroneTaskTarget
         RegisterBlueprint(buildSeconds);
     }
 
+    public bool ContainsCell(Vector2Int cell)
+    {
+        if (footprintCells == null) return false;
+        for (int i = 0; i < footprintCells.Length; i++)
+        {
+            if (footprintCells[i] == cell) return true;
+        }
+        return false;
+    }
+
+    public void CancelFromDelete()
+    {
+        CancelBlueprint();
+    }
+
     void RegisterBlueprint(float buildSeconds)
     {
         if (blueprintType == BlueprintType.DroneHQ && !countedAsHq)

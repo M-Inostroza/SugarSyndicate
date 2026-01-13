@@ -52,6 +52,9 @@ public class DroneWorker : MonoBehaviour
 
     static Sprite barSprite;
 
+    public float MoveSpeed => moveSpeed;
+    public bool IsBusy => currentTask != null;
+
     void Awake()
     {
         CacheRenderers();

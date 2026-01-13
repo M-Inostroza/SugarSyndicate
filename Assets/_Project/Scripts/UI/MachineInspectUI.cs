@@ -243,6 +243,20 @@ public class MachineInspectUI : MonoBehaviour
         var cell = grid.WorldToCell(world);
         if (MachineRegistry.TryGet(cell, out var machine) && machine is MonoBehaviour mb)
             return mb;
+        var mines = FindObjectsByType<SugarMine>(FindObjectsSortMode.None);
+        foreach (var mine in mines)
+        {
+            if (mine == null) continue;
+            if (grid.WorldToCell(mine.transform.position) == cell)
+                return mine;
+        }
+        var hqs = FindObjectsByType<DroneHQ>(FindObjectsSortMode.None);
+        foreach (var hq in hqs)
+        {
+            if (hq == null) continue;
+            if (grid.WorldToCell(hq.transform.position) == cell)
+                return hq;
+        }
 
         return null;
     }
@@ -255,6 +269,8 @@ public class MachineInspectUI : MonoBehaviour
         {
             var mb = mbs[i];
             if (mb is IMachine) return mb;
+            if (mb is SugarMine) return mb;
+            if (mb is DroneHQ) return mb;
         }
         return null;
     }
@@ -277,6 +293,20 @@ public class MachineInspectUI : MonoBehaviour
             title = "Colorizer";
             process = colorizer.GetProcessSummary();
             hasMaintenanceInfo = true;
+            return;
+        }
+        if (machine is SugarMine mine)
+        {
+            title = "Mine";
+            process = mine.GetProcessSummary();
+            hasMaintenanceInfo = true;
+            return;
+        }
+        if (machine is DroneHQ)
+        {
+            title = "Drone HQ";
+            process = BuildDroneHqSummary();
+            hasMaintenanceInfo = false;
             return;
         }
         if (machine is StorageContainerMachine storage)
@@ -315,7 +345,26 @@ public class MachineInspectUI : MonoBehaviour
             value = colorizer.Maintenance01;
             return true;
         }
+        if (machine is SugarMine mine)
+        {
+            value = mine.Maintenance01;
+            return true;
+        }
         return false;
+    }
+
+    string BuildDroneHqSummary()
+    {
+        var service = DroneTaskService.Instance;
+        if (service == null)
+            return "Drones: 0/0\nSpeed: 0";
+
+        int total = service.TotalDrones;
+        int idle = service.IdleDrones;
+        int max = service.MaxDrones;
+        float speed = service.DroneSpeed;
+        string maxPart = max > 0 ? $" (max {max})" : string.Empty;
+        return $"Available drones: {idle}/{total}{maxPart}\nSpeed: {speed:0.##}";
     }
 
     void CacheUiReferences()
