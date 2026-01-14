@@ -312,6 +312,8 @@ public class BlueprintTask : DroneTaskTarget
         if (mine != null) mine.SetFacing(facingVec);
         var storage = go.GetComponent<StorageContainerMachine>();
         if (storage != null) storage.facingVec = facingVec;
+        var solar = go.GetComponent<SolarPanelMachine>();
+        if (solar != null) solar.facingVec = facingVec;
 
         var repairable = go.GetComponent<Repairable>();
         if (repairable == null) repairable = go.AddComponent<Repairable>();

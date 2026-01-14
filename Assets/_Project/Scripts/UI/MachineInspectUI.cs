@@ -315,6 +315,13 @@ public class MachineInspectUI : MonoBehaviour
             process = $"Stores items ({storage.StoredItemCount}/{storage.Capacity})";
             return;
         }
+        if (machine is SolarPanelMachine solar)
+        {
+            title = "Solar Panel";
+            process = solar.GetProcessSummary();
+            hasMaintenanceInfo = false;
+            return;
+        }
         if (machine is Truck truck)
         {
             title = "Truck";

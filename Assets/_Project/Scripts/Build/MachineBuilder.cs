@@ -15,6 +15,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] GameObject waterPipePrefab;
     [SerializeField] GameObject minePrefab;
     [SerializeField] GameObject storageContainerPrefab;
+    [SerializeField] GameObject solarPanelPrefab;
     [SerializeField] GameObject droneHqPrefab;
     [SerializeField] WaterAreaOverlay waterOverlay;
     [SerializeField] SugarZoneOverlay sugarOverlay;
@@ -29,6 +30,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField, Min(0)] int waterPipeCost = 0;
     [SerializeField, Min(0)] int mineCost = 90;
     [SerializeField, Min(0)] int storageContainerCost = 0;
+    [SerializeField, Min(0)] int solarPanelCost = 0;
     [SerializeField, Min(0)] int droneHqCost = 0;
 
     [Header("Build Times")]
@@ -40,6 +42,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField, Min(0.1f)] float waterPipeBuildSeconds = 0.6f;
     [SerializeField, Min(0.1f)] float mineBuildSeconds = 2f;
     [SerializeField, Min(0.1f)] float storageContainerBuildSeconds = 2f;
+    [SerializeField, Min(0.1f)] float solarPanelBuildSeconds = 2f;
 
     object grid;
     MethodInfo miWorldToCell;
@@ -60,6 +63,7 @@ public class MachineBuilder : MonoBehaviour
     ColorizerMachine ghostColorizer;
     WaterPump ghostWaterPump;
     StorageContainerMachine ghostStorage;
+    SolarPanelMachine ghostSolarPanel;
     SugarMine ghostMine;
     DroneHQ ghostHq;
     GameObject activePrefab;
@@ -333,6 +337,7 @@ public class MachineBuilder : MonoBehaviour
             "WaterPipe" => waterPipeCost,
             "Mine" => mineCost,
             "StorageContainer" => storageContainerCost,
+            "SolarPanel" => solarPanelCost,
             "DroneHQ" => droneHqCost,
             _ => 0,
         };
@@ -349,6 +354,7 @@ public class MachineBuilder : MonoBehaviour
             "WaterPipe" => waterPipeBuildSeconds,
             "Mine" => mineBuildSeconds,
             "StorageContainer" => storageContainerBuildSeconds,
+            "SolarPanel" => solarPanelBuildSeconds,
             _ => 1f,
         };
     }
@@ -606,6 +612,16 @@ public class MachineBuilder : MonoBehaviour
         HideSugarOverlay();
     }
 
+    public void BuildSolarPanel()
+    {
+        activePrefab = solarPanelPrefab;
+        activeName = "SolarPanel";
+        ArmPlacement();
+        NotifySelectionChanged(activeName);
+        HideWaterOverlay();
+        HideSugarOverlay();
+    }
+
     public void BuildDroneHQ()
     {
         if (DroneHQ.Instance != null || BlueprintTask.HasHqBlueprint)
@@ -735,6 +751,7 @@ public class MachineBuilder : MonoBehaviour
         ghostColorizer = ghostGO.GetComponent<ColorizerMachine>();
         ghostWaterPump = ghostGO.GetComponent<WaterPump>();
         ghostStorage = ghostGO.GetComponent<StorageContainerMachine>();
+        ghostSolarPanel = ghostGO.GetComponent<SolarPanelMachine>();
         ghostMine = ghostGO.GetComponent<SugarMine>();
         ghostHq = ghostGO.GetComponent<DroneHQ>();
         if (ghostPress != null)
@@ -751,6 +768,11 @@ public class MachineBuilder : MonoBehaviour
         if (ghostStorage != null)
         {
             ghostStorage.isGhost = true;
+            TintGhost(ghostGO);
+        }
+        if (ghostSolarPanel != null)
+        {
+            ghostSolarPanel.isGhost = true;
             TintGhost(ghostGO);
         }
     }
@@ -771,6 +793,7 @@ public class MachineBuilder : MonoBehaviour
         if (ghostColorizer != null) ghostColorizer.facingVec = outputDir;
         if (ghostWaterPump != null) ghostWaterPump.facingVec = outputDir;
         if (ghostStorage != null) ghostStorage.facingVec = outputDir;
+        if (ghostSolarPanel != null) ghostSolarPanel.facingVec = outputDir;
         if (ghostMine != null) ghostMine.SetFacing(outputDir);
     }
 
@@ -945,6 +968,7 @@ public class MachineBuilder : MonoBehaviour
         ghostColorizer = null;
         ghostWaterPump = null;
         ghostStorage = null;
+        ghostSolarPanel = null;
         ghostMine = null;
         ghostHq = null;
         if (clearActiveSelection) activePrefab = null;
@@ -1004,7 +1028,7 @@ public class MachineBuilder : MonoBehaviour
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)
     {
-        if (activeName == "StorageContainer")
+        if (activeName == "StorageContainer" || activeName == "SolarPanel")
         {
             var dir = facing == Vector2Int.zero ? Vector2Int.right : facing;
             return new List<Vector2Int> { origin, origin + dir };
