@@ -2,10 +2,11 @@ using System;
 using UnityEngine;
 
 // Simple sink that consumes any item. Counts SugarBlock deliveries.
-public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
+public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer
 {
     [Header("Services")]
     [SerializeField] GridService grid;
+    [SerializeField] PowerService powerService;
 
     [Header("State")]
     [SerializeField] bool activeOnStart = false;
@@ -13,6 +14,9 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
     [Header("Capacity")]
     [SerializeField, Min(0)] int capacity = 30;
     [SerializeField] int currentLoad;
+
+    [Header("Power")]
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     public int StoredItemCount => Mathf.Max(0, currentLoad);
     public int Capacity => Mathf.Max(0, capacity);
@@ -36,6 +40,7 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
     void Awake()
     {
         if (grid == null) grid = GridService.Instance;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
         isActive = trucksCalled || activeOnStart;
     }
 
@@ -56,6 +61,9 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
 
         EnsureStorageDisplay();
 
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
+
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
@@ -65,6 +73,8 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
     {
         try
         {
+            if (powerService == null) powerService = PowerService.Instance;
+            powerService?.UnregisterConsumer(this);
             if (!registered) return;
             MachineRegistry.Unregister(this);
             if (grid == null) grid = GridService.Instance;
@@ -102,6 +112,7 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
     public bool TryStartProcess(Item item)
     {
         if (!isActive) return false;
+        if (!HasPower()) return false;
         if (item == null) return false;
 
         if (currentLoad >= capacity)
@@ -151,5 +162,17 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity
     {
         if (string.IsNullOrWhiteSpace(type)) return false;
         return string.Equals(type.Trim(), SugarBlockType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public float GetConsumptionWatts()
+    {
+        return Mathf.Max(0f, powerUsageWatts);
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
     }
 }

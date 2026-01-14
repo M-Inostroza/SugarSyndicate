@@ -5,10 +5,12 @@ public class DroneTaskService : MonoBehaviour
 {
     public static DroneTaskService Instance { get; private set; }
 
+    const int MaxDronesAllowed = 10;
+
     [Header("Drones")]
     [SerializeField] DroneWorker dronePrefab;
-    [SerializeField, Min(0)] int startingDrones = 1;
-    [SerializeField, Min(1)] int maxDrones = 10;
+    [SerializeField, Range(0, MaxDronesAllowed)] int startingDrones = 1;
+    [SerializeField, Range(1, MaxDronesAllowed)] int maxDrones = 10;
     [SerializeField] Transform droneParent;
 
     readonly List<DroneWorker> drones = new();
@@ -17,6 +19,7 @@ public class DroneTaskService : MonoBehaviour
     DroneHQ hq;
 
     public bool HasHq => hq != null;
+    public bool IsPowered => hq != null && hq.HasPower;
     public int TotalDrones => drones.Count;
     public int MaxDrones => Mathf.Max(0, maxDrones);
     public int IdleDrones
@@ -133,7 +136,9 @@ public class DroneTaskService : MonoBehaviour
 
     void EnsureStartingDrones()
     {
-        int target = Mathf.Clamp(startingDrones, 0, Mathf.Max(0, maxDrones));
+        maxDrones = Mathf.Clamp(maxDrones, 1, MaxDronesAllowed);
+        startingDrones = Mathf.Clamp(startingDrones, 0, maxDrones);
+        int target = startingDrones;
         while (drones.Count < target)
         {
             if (drones.Count >= maxDrones) break;
@@ -164,5 +169,11 @@ public class DroneTaskService : MonoBehaviour
     {
         if (hq != null) return;
         hq = FindAnyObjectByType<DroneHQ>();
+    }
+
+    void OnValidate()
+    {
+        maxDrones = Mathf.Clamp(maxDrones, 1, MaxDronesAllowed);
+        startingDrones = Mathf.Clamp(startingDrones, 0, maxDrones);
     }
 }

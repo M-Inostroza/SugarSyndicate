@@ -108,4 +108,14 @@ MonoBehaviour:
   poolPrewarm: 32
   preferHeadCell: 1
   requireFreeHeadCell: 1
+  scaleBySugarEfficiency: 1
+  powerService: {fileID: 0}
+  powerUsageWatts: 4
+  maintenance:
+    level01: 1
+    itemsPerDrop: 50
+    dropPerBatch: 0.05
+    breakdownThreshold01: 0.4
+    breakdownChance: 0.1
+    enabled: 1
   debugLogging: 0

@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageWithCapacity
+public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer
 {
     [Header("Services")]
     [SerializeField] GridService grid;
     [SerializeField] BeltSimulationService belt;
+    [SerializeField] PowerService powerService;
 
     [Header("Orientation")]
     [Tooltip("Output/facing vector. Input is the opposite side. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
@@ -18,6 +19,9 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
     [Header("Output")]
     [Tooltip("If true, releases items on GameTick; otherwise it uses frame time.")]
     [SerializeField] bool useGameTickForOutput = true;
+
+    [Header("Power")]
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     [Header("Debug")]
     [SerializeField] bool enableDebugLogs = false;
@@ -62,6 +66,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
     {
         if (grid == null) grid = GridService.Instance;
         if (belt == null) belt = BeltSimulationService.Instance;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
     }
 
     void Start()
@@ -69,6 +74,8 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         if (isGhost) return;
         EnsureStorageDisplay();
         TryRegisterAsMachineAndSnap();
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
     }
 
     void OnEnable()
@@ -92,6 +99,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         if (useGameTickForOutput) return;
         if (isGhost) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        if (!HasPower()) return;
         TryOutputOnce();
     }
 
@@ -100,6 +108,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         if (!useGameTickForOutput) return;
         if (isGhost) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        if (!HasPower()) return;
         TryOutputOnce();
     }
 
@@ -112,6 +121,11 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
                 try { GameTick.OnTickStart -= OnTick; } catch { }
             }
 
+            if (!isGhost)
+            {
+                if (powerService == null) powerService = PowerService.Instance;
+                powerService?.UnregisterConsumer(this);
+            }
             if (registered)
                 MachineRegistry.Unregister(this);
             if (outputBlocker != null)
@@ -344,5 +358,18 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
     void DLog(string msg)
     {
         if (enableDebugLogs) Debug.Log(msg);
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+    }
+
+    public float GetConsumptionWatts()
+    {
+        if (isGhost) return 0f;
+        return Mathf.Max(0f, powerUsageWatts);
     }
 }

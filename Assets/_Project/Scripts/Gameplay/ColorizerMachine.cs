@@ -5,11 +5,12 @@ using UnityEngine;
 /// Machine that takes an input item, applies a tint, and outputs the same item type.
 /// Uses the shared IMachine contract so belt logic remains generic.
 /// </summary>
-public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
+public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowerConsumer
 {
     [Header("Services")]
     [SerializeField] GridService grid;
     [SerializeField] BeltSimulationService belt;
+    [SerializeField] PowerService powerService;
 
     [Header("Orientation")]
     [Tooltip("Output/facing vector. Input is the opposite side. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
@@ -27,6 +28,9 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     [SerializeField, Min(0f)] float processingSeconds = 0.5f;
     [Tooltip("If true, processing advances on GameTick; otherwise it uses frame time.")]
     [SerializeField] bool useGameTickForProcessing = true;
+
+    [Header("Power")]
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     [System.NonSerialized] public bool isGhost = false;
 
@@ -73,11 +77,14 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
     {
         if (grid == null) grid = GridService.Instance;
         if (belt == null) belt = BeltSimulationService.Instance;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
     }
 
     void Start()
     {
         if (isGhost) return;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
         if (grid == null) return;
 
         EnsureProgressDisplay();
@@ -111,6 +118,11 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
             if (useGameTickForProcessing)
             {
                 try { GameTick.OnTickStart -= OnTick; } catch { }
+            }
+            if (!isGhost)
+            {
+                if (powerService == null) powerService = PowerService.Instance;
+                powerService?.UnregisterConsumer(this);
             }
             if (!registered) return;
             MachineRegistry.Unregister(this);
@@ -164,6 +176,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
         if (!useGameTickForProcessing) return;
         if (!busy) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        if (!HasPower()) return;
         StepProcessing(GetTickDeltaSeconds());
     }
 
@@ -173,6 +186,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
         if (GameManager.Instance == null || GameManager.Instance.State != GameState.Play)
             return;
         if (!busy) return;
+        if (!HasPower()) return;
         StepProcessing(Time.deltaTime);
     }
 
@@ -202,6 +216,19 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
         string inputLabel = FormatTypeList(ResolveAcceptedTypes());
         if (string.IsNullOrWhiteSpace(inputLabel)) inputLabel = "Any";
         return $"1 {inputLabel} -> 1 {inputLabel} (tinted)";
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+    }
+
+    public float GetConsumptionWatts()
+    {
+        if (isGhost) return 0f;
+        return Mathf.Max(0f, powerUsageWatts);
     }
 
     string[] ResolveAcceptedTypes()

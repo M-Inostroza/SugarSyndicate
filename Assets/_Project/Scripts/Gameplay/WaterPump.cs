@@ -5,15 +5,19 @@ using UnityEngine;
 /// Simple emitter that draws from a water tile and outputs water items on a cadence.
 /// Registers as an IMachine so belt sim can treat the cell as occupied (but it never accepts input).
 /// </summary>
-public class WaterPump : MonoBehaviour, IMachine
+public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer
 {
     [Header("Services")]
     [SerializeField] GridService grid;
     [SerializeField] WaterNetworkService waterNetwork;
+    [SerializeField] PowerService powerService;
 
     [Header("Orientation (legacy, unused for output)")]
     [Tooltip("Output/facing vector. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
     public Vector2Int facingVec = new Vector2Int(1, 0);
+
+    [Header("Power")]
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
@@ -25,6 +29,7 @@ public class WaterPump : MonoBehaviour, IMachine
 
     Vector2Int cell;
     bool registered;
+    bool pumpRegistered;
 
     void DLog(string msg) { if (debugLogging) Debug.Log(msg); }
     void DWarn(string msg) { if (debugLogging) Debug.LogWarning(msg); }
@@ -33,6 +38,7 @@ public class WaterPump : MonoBehaviour, IMachine
     {
         if (grid == null) grid = GridService.Instance;
         if (waterNetwork == null) waterNetwork = WaterNetworkService.EnsureInstance();
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
     }
 
     void Start()
@@ -40,12 +46,14 @@ public class WaterPump : MonoBehaviour, IMachine
         if (isGhost) return;
         if (grid == null) return;
 
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
+
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
 
-        if (waterNetwork == null) waterNetwork = WaterNetworkService.Instance;
-        waterNetwork?.RegisterPump(cell);
+        UpdatePowerRegistration(true);
 
         if (!grid.IsWater(cell))
         {
@@ -53,9 +61,17 @@ public class WaterPump : MonoBehaviour, IMachine
         }
     }
 
+    void Update()
+    {
+        if (isGhost) return;
+        UpdatePowerRegistration(false);
+    }
+
     void OnDestroy()
     {
         if (isGhost) return;
+        if (powerService == null) powerService = PowerService.Instance;
+        powerService?.UnregisterConsumer(this);
         if (registered)
         {
             MachineRegistry.Unregister(this);
@@ -75,6 +91,29 @@ public class WaterPump : MonoBehaviour, IMachine
     public bool CanAcceptFrom(Vector2Int approachFromVec) => false; // never accepts input
 
     public bool TryStartProcess(Item item) => false; // cannot process intake
+
+    public float GetConsumptionWatts()
+    {
+        if (isGhost) return 0f;
+        return Mathf.Max(0f, powerUsageWatts);
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+    }
+
+    void UpdatePowerRegistration(bool force)
+    {
+        bool hasPower = HasPower();
+        if (!force && hasPower == pumpRegistered) return;
+        pumpRegistered = hasPower;
+        if (waterNetwork == null) waterNetwork = WaterNetworkService.Instance;
+        if (pumpRegistered) waterNetwork?.RegisterPump(cell);
+        else waterNetwork?.UnregisterPump(cell);
+    }
 
     void TryRegisterAsMachineAndSnap()
     {

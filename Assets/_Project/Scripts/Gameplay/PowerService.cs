@@ -7,6 +7,11 @@ public interface IPowerSource
     float GetOutputWatts(TimePhase phase);
 }
 
+public interface IPowerConsumer
+{
+    float GetConsumptionWatts();
+}
+
 public class PowerService : MonoBehaviour
 {
     public static PowerService Instance { get; private set; }
@@ -15,12 +20,17 @@ public class PowerService : MonoBehaviour
     [SerializeField] bool logPowerChanges = false;
 
     readonly HashSet<IPowerSource> sources = new();
+    readonly HashSet<IPowerConsumer> consumers = new();
     TimeManager timeManager;
     TimePhase cachedPhase = TimePhase.Day;
     bool hasPhase;
 
     float totalWatts;
+    float totalGeneratedWatts;
+    float totalConsumedWatts;
     public float TotalWatts => totalWatts;
+    public float TotalGeneratedWatts => totalGeneratedWatts;
+    public float TotalConsumedWatts => totalConsumedWatts;
     public event Action<float> OnPowerChanged;
 
     void Awake()
@@ -72,6 +82,31 @@ public class PowerService : MonoBehaviour
             Recalculate();
     }
 
+    public void RegisterConsumer(IPowerConsumer consumer)
+    {
+        if (consumer == null) return;
+        if (consumers.Add(consumer))
+            Recalculate();
+    }
+
+    public void UnregisterConsumer(IPowerConsumer consumer)
+    {
+        if (consumer == null) return;
+        if (consumers.Remove(consumer))
+            Recalculate();
+    }
+
+    public void RequestRecalculate()
+    {
+        Recalculate();
+    }
+
+    public bool HasPowerFor(float watts)
+    {
+        if (watts <= 0f) return true;
+        return totalGeneratedWatts > 0f && totalWatts >= 0f;
+    }
+
     void TryHookTimeManager()
     {
         timeManager = TimeManager.Instance;
@@ -93,14 +128,23 @@ public class PowerService : MonoBehaviour
     void Recalculate()
     {
         var phase = hasPhase ? cachedPhase : (TimeManager.Instance != null ? TimeManager.Instance.CurrentPhase : TimePhase.Day);
-        float sum = 0f;
+        float generated = 0f;
         foreach (var source in sources)
         {
             if (source == null) continue;
-            sum += Mathf.Max(0f, source.GetOutputWatts(phase));
+            generated += Mathf.Max(0f, source.GetOutputWatts(phase));
         }
-        if (Mathf.Abs(sum - totalWatts) < 0.001f) return;
-        totalWatts = sum;
+        float consumed = 0f;
+        foreach (var consumer in consumers)
+        {
+            if (consumer == null) continue;
+            consumed += Mathf.Max(0f, consumer.GetConsumptionWatts());
+        }
+        totalGeneratedWatts = generated;
+        totalConsumedWatts = consumed;
+        float net = generated - consumed;
+        if (Mathf.Abs(net - totalWatts) < 0.001f) return;
+        totalWatts = net;
         if (logPowerChanges) Debug.Log($"[PowerService] Power = {totalWatts:0.##} W");
         OnPowerChanged?.Invoke(totalWatts);
     }
