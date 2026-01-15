@@ -9,6 +9,7 @@ public class PowerPole : MonoBehaviour
 
     Vector2Int cell;
     bool registered;
+    bool registeredAsBlueprint;
 
     void Awake()
     {
@@ -18,7 +19,6 @@ public class PowerPole : MonoBehaviour
 
     void OnEnable()
     {
-        if (isGhost) return;
         Register();
     }
 
@@ -36,20 +36,50 @@ public class PowerPole : MonoBehaviour
         if (powerService == null) powerService = PowerService.EnsureInstance();
         if (powerService != null)
         {
-            if (!powerService.RegisterPole(cell))
+            bool ok = isGhost ? powerService.RegisterPoleBlueprint(cell) : powerService.RegisterPole(cell);
+            if (!ok)
             {
                 Debug.LogWarning($"[PowerPole] Cell {cell} already occupied by a cable/pole.");
                 return;
             }
         }
         registered = true;
+        registeredAsBlueprint = isGhost;
     }
 
     void Unregister()
     {
         if (!registered) return;
         if (powerService == null) powerService = PowerService.Instance;
-        powerService?.UnregisterPole(cell);
+        if (registeredAsBlueprint) powerService?.UnregisterPoleBlueprint(cell);
+        else powerService?.UnregisterPole(cell);
         registered = false;
+        registeredAsBlueprint = false;
+    }
+
+    public void SetGhost(bool ghost)
+    {
+        if (isGhost == ghost) return;
+        isGhost = ghost;
+        if (!registered) return;
+        Unregister();
+        Register();
+    }
+
+    public void ActivateFromBlueprint()
+    {
+        isGhost = false;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        if (grid == null) grid = GridService.Instance;
+        if (grid != null)
+            cell = grid.WorldToCell(transform.position);
+        if (powerService != null)
+        {
+            if (powerService.PromotePoleBlueprint(cell))
+            {
+                registered = true;
+                registeredAsBlueprint = false;
+            }
+        }
     }
 }

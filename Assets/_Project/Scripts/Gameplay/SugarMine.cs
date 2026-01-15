@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class SugarMine : MonoBehaviour
+public class SugarMine : MonoBehaviour, IPowerConsumer
 {
     public Direction outputDirection = Direction.Right;
 
@@ -34,6 +34,10 @@ public class SugarMine : MonoBehaviour
     [Tooltip("If true, production rate scales with the sugar amount in the cell.")]
     [SerializeField] bool scaleBySugarEfficiency = true;
 
+    [Header("Power")]
+    [SerializeField] PowerService powerService;
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
+
     [Header("Maintenance")]
     [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
 
@@ -63,10 +67,19 @@ public class SugarMine : MonoBehaviour
         if (debugLogging) Debug.Log($"[SugarMine] Enabled at world {transform.position}");
     }
 
+    void Start()
+    {
+        if (isGhost) return;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
+    }
+
     void OnDisable()
     {
         if (isGhost) return;
         GameTick.OnTickStart -= OnTick;
+        if (powerService == null) powerService = PowerService.Instance;
+        powerService?.UnregisterConsumer(this);
     }
 
     void OnTick()
@@ -75,6 +88,7 @@ public class SugarMine : MonoBehaviour
         if (!running) return;
         if (IsStopped) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        if (!HasPower()) return;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
         float tps = tickSource != null ? tickSource.ticksPerSecond : 15f;
         float rate = spawnsPerSecond;
@@ -201,6 +215,20 @@ public class SugarMine : MonoBehaviour
         if (string.IsNullOrWhiteSpace(type)) type = "Sugar";
         string scaleNote = scaleBySugarEfficiency ? " (scaled by sugar)" : string.Empty;
         return $"Spawns {type} @ {spawnsPerSecond:0.##}/s{scaleNote}";
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (!PowerConsumerUtil.IsConsumerPowered(this)) return false;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+    }
+
+    public float GetConsumptionWatts()
+    {
+        if (isGhost) return 0f;
+        return Mathf.Max(0f, powerUsageWatts);
     }
 
     static Direction DirFromVec(Vector2Int dir)

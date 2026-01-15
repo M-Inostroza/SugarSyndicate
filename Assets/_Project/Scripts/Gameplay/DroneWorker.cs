@@ -77,6 +77,14 @@ public class DroneWorker : MonoBehaviour
             return;
         }
 
+        if (!service.IsPowered)
+        {
+            isPaused = true;
+            StopMovement();
+            UpdateProgressBar(false);
+            return;
+        }
+
         isPaused = false;
         RefreshMovementSettings();
 

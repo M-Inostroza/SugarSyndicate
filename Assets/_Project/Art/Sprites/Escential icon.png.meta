@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: da07a8e8d621cb147ba424548415278b
+guid: 8d51933ae4bf1f344a92ed139a629c7d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 8295197601343583261
-    second: Solar Panel Icon_0
+      213: -4555435246908645576
+    second: Escential icon_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -122,24 +122,11 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
-    buildTarget: Android
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Solar Panel Icon_0
+      name: Escential icon_0
       rect:
         serializedVersion: 2
         x: 0
@@ -154,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: d14b1c1c4467e1370800000000000000
-      internalID: 8295197601343583261
+      spriteID: 83f57b657c7d7c0c0800000000000000
+      internalID: -4555435246908645576
       vertices: []
       indices: 
       edges: []
@@ -173,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Solar Panel Icon_0: 8295197601343583261
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

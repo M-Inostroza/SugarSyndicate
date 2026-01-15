@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 0447df77d4c5fc34cbbea8d0d2af9f79
+guid: 36741f5ac4f92fb41afdc9e23a07479a
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 475990856446980580
-    second: Power cable_0
+      213: 3273141547805506138
+    second: Power cable curve_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -126,7 +126,7 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Power cable_0
+      name: Power cable curve_0
       rect:
         serializedVersion: 2
         x: 0
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 4e13bda792f0b9600800000000000000
-      internalID: 475990856446980580
+      spriteID: a5af48855e88c6d20800000000000000
+      internalID: 3273141547805506138
       vertices: []
       indices: 
       edges: []

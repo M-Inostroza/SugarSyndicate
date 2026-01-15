@@ -34,7 +34,6 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField, Min(0)] int droneHqCost = 0;
 
     [Header("Build Times")]
-    [SerializeField, Min(0.1f)] float beltBuildSeconds = 0.4f;
     [SerializeField, Min(0.1f)] float pressBuildSeconds = 2f;
     [SerializeField, Min(0.1f)] float shrederBuildSeconds = 2f;
     [SerializeField, Min(0.1f)] float colorizerBuildSeconds = 2f;
@@ -158,7 +157,7 @@ public class MachineBuilder : MonoBehaviour
                     if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
 
                 if (!TryCellFromWorld(world, out baseCell)) return;
-                var footprint = GetFootprintCells(baseCell, new Vector2Int(1, 0));
+                var footprint = GetFootprintCells(baseCell, GetDefaultFacing());
                 if (IsAnyBlocked(footprint)) return;
                 if (RequiresWaterCell() && !IsWaterCell(baseCell))
                 {
@@ -181,7 +180,7 @@ public class MachineBuilder : MonoBehaviour
                 if (!TryCellFromWorld(world, out var curCell)) return;
             var dir = curCell - baseCell;
             dir = Mathf.Abs(dir.x) >= Mathf.Abs(dir.y) ? new Vector2Int(Mathf.Clamp(dir.x, -1, 1), 0) : new Vector2Int(0, Mathf.Clamp(dir.y, -1, 1));
-            if (dir == Vector2Int.zero) dir = new Vector2Int(1, 0); // default facing right
+            if (dir == Vector2Int.zero) dir = GetDefaultFacing();
             UpdateGhost(baseCell, dir);
 
             if (Input.GetMouseButtonUp(0))
@@ -744,7 +743,7 @@ public class MachineBuilder : MonoBehaviour
     void SpawnGhost(Vector2Int cell)
     {
         if (activePrefab == null || grid == null || miCellToWorld == null) return;
-        var pos = GetFootprintCenterWorld(cell, new Vector2Int(1, 0));
+        var pos = GetFootprintCenterWorld(cell, GetDefaultFacing());
         ghostGO = Instantiate(activePrefab, pos, Quaternion.identity);
         ApplyGhostSorting(ghostGO);
         ghostPress = ghostGO.GetComponent<PressMachine>();
@@ -775,6 +774,7 @@ public class MachineBuilder : MonoBehaviour
             ghostSolarPanel.isGhost = true;
             TintGhost(ghostGO);
         }
+        UpdateGhost(cell, GetDefaultFacing());
     }
 
     void UpdateGhost(Vector2Int cell, Vector2Int outputDir)
@@ -1030,7 +1030,7 @@ public class MachineBuilder : MonoBehaviour
     {
         if (activeName == "StorageContainer" || activeName == "SolarPanel")
         {
-            var dir = facing == Vector2Int.zero ? Vector2Int.right : facing;
+            var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
             return new List<Vector2Int> { origin, origin + dir };
         }
         return new List<Vector2Int> { origin };
@@ -1046,5 +1046,10 @@ public class MachineBuilder : MonoBehaviour
             sum2 += (Vector3)miCellToWorld.Invoke(grid, new object[] { c, 0f });
         }
         return sum2 / cells.Count;
+    }
+
+    Vector2Int GetDefaultFacing()
+    {
+        return activeName == "SolarPanel" ? Vector2Int.up : Vector2Int.right;
     }
 }

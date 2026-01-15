@@ -4,7 +4,7 @@ using UnityEngine.EventSystems;
 
 public class BlueprintTask : DroneTaskTarget
 {
-    public enum BlueprintType { Belt, Machine, Junction, Pipe, DroneHQ }
+    public enum BlueprintType { Belt, Machine, Junction, Pipe, DroneHQ, Cable, Pole }
 
     static int hqBlueprintCount;
 
@@ -13,6 +13,10 @@ public class BlueprintTask : DroneTaskTarget
     [SerializeField] GameObject buildPrefab;
     [SerializeField] Vector2Int[] footprintCells = new Vector2Int[0];
     [SerializeField] Direction beltDirection = Direction.Right;
+    [SerializeField] Direction cableDirection = Direction.Right;
+    [SerializeField] bool cableIsCurve = false;
+    [SerializeField] Direction cableCurveFrom = Direction.Right;
+    [SerializeField] Direction cableCurveTo = Direction.Right;
     [SerializeField] Direction inA = Direction.None;
     [SerializeField] Direction inB = Direction.None;
     [SerializeField] Direction inC = Direction.None;
@@ -42,6 +46,30 @@ public class BlueprintTask : DroneTaskTarget
         buildPrefab = prefab;
         buildCost = cost;
         keepVisualOnComplete = false;
+        RegisterBlueprint(buildSeconds);
+    }
+
+    public void InitializeCable(Vector2Int cell, Direction dir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
+    {
+        blueprintType = BlueprintType.Cable;
+        footprintCells = new[] { cell };
+        cableDirection = dir;
+        cableIsCurve = false;
+        buildRotation = rotation;
+        buildPrefab = prefab;
+        buildCost = cost;
+        keepVisualOnComplete = true;
+        RegisterBlueprint(buildSeconds);
+    }
+
+    public void InitializePole(Vector2Int cell, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
+    {
+        blueprintType = BlueprintType.Pole;
+        footprintCells = new[] { cell };
+        buildRotation = rotation;
+        buildPrefab = prefab;
+        buildCost = cost;
+        keepVisualOnComplete = true;
         RegisterBlueprint(buildSeconds);
     }
 
@@ -123,8 +151,28 @@ public class BlueprintTask : DroneTaskTarget
         buildRotation = rotation;
     }
 
+    public void UpdateCableDirection(Direction newDirection, Quaternion rotation)
+    {
+        if (blueprintType != BlueprintType.Cable) return;
+        cableDirection = newDirection;
+        cableIsCurve = false;
+        buildRotation = rotation;
+    }
+
+    public void UpdateCableCurve(Direction fromDirection, Direction toDirection, Quaternion rotation)
+    {
+        if (blueprintType != BlueprintType.Cable) return;
+        cableIsCurve = true;
+        cableCurveFrom = fromDirection;
+        cableCurveTo = toDirection;
+        cableDirection = toDirection;
+        buildRotation = rotation;
+    }
+
     void MarkBlueprintCells(bool enabled)
     {
+        if (blueprintType == BlueprintType.Cable || blueprintType == BlueprintType.Pole)
+            return;
         var grid = GridService.Instance;
         if (grid == null || footprintCells == null) return;
         foreach (var c in footprintCells)
@@ -229,6 +277,12 @@ public class BlueprintTask : DroneTaskTarget
             case BlueprintType.Pipe:
                 CompletePipe();
                 break;
+            case BlueprintType.Cable:
+                CompleteCable();
+                break;
+            case BlueprintType.Pole:
+                CompletePole();
+                break;
         }
 
         if (keepVisualOnComplete)
@@ -272,6 +326,66 @@ public class BlueprintTask : DroneTaskTarget
         var repairable = go.GetComponent<Repairable>();
         if (repairable == null) repairable = go.AddComponent<Repairable>();
         repairable.Initialize(new[] { cell });
+    }
+
+    void CompleteCable()
+    {
+        if (footprintCells == null || footprintCells.Length == 0)
+            return;
+
+        var cable = GetComponent<PowerCable>();
+        if (cable != null)
+        {
+            if (cableIsCurve)
+                cable.SetCurve(cableCurveFrom, cableCurveTo);
+            else
+                cable.SetDirection(cableDirection);
+            cable.ActivateFromBlueprint();
+            return;
+        }
+
+        if (buildPrefab == null)
+            return;
+
+        var grid = GridService.Instance;
+        if (grid == null)
+            return;
+
+        var cell = footprintCells[0];
+        var pos = grid.CellToWorld(cell, transform.position.z);
+        var go = Instantiate(buildPrefab, pos, buildRotation);
+        var powerCable = go.GetComponent<PowerCable>();
+        if (powerCable != null)
+        {
+            if (cableIsCurve)
+                powerCable.SetCurve(cableCurveFrom, cableCurveTo);
+            else
+                powerCable.SetDirection(cableDirection);
+        }
+    }
+
+    void CompletePole()
+    {
+        if (footprintCells == null || footprintCells.Length == 0)
+            return;
+
+        var pole = GetComponent<PowerPole>();
+        if (pole != null)
+        {
+            pole.ActivateFromBlueprint();
+            return;
+        }
+
+        if (buildPrefab == null)
+            return;
+
+        var grid = GridService.Instance;
+        if (grid == null)
+            return;
+
+        var cell = footprintCells[0];
+        var pos = grid.CellToWorld(cell, transform.position.z);
+        Instantiate(buildPrefab, pos, buildRotation);
     }
 
     void CompleteMachine(bool isHq)

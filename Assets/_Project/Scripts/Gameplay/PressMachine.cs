@@ -2,11 +2,12 @@ using System;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
-public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress
+public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress, IPowerConsumer
 {
     [Header("Services")]
     [SerializeField] GridService grid;
     [SerializeField] BeltSimulationService belt;
+    [SerializeField] PowerService powerService;
 
     [Header("Orientation")]
     [Tooltip("Output/facing vector. Input is the opposite side. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
@@ -36,6 +37,9 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     [SerializeField, Min(1)] int inputsPerProcess = 3;
     [Tooltip("Max items that can queue inside the press before belts block.")]
     [SerializeField, Min(1)] int maxBufferedInputs = 9;
+
+    [Header("Power")]
+    [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     [Header("Maintenance")]
     [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
@@ -105,6 +109,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
 
         if (grid == null) grid = GridService.Instance;
         if (belt == null) belt = BeltSimulationService.Instance;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
     }
 
     void Start()
@@ -118,6 +123,12 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             EnsureStorageDisplay();
         if (!isGhost)
             EnsureProgressDisplay();
+
+        if (!isGhost)
+        {
+            if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+            powerService?.RegisterConsumer(this);
+        }
 
         if (isGhost || grid == null) return;
 
@@ -151,6 +162,11 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             if (useGameTickForProcessing)
             {
                 try { GameTick.OnTickStart -= OnTick; } catch { }
+            }
+            if (!isGhost)
+            {
+                if (powerService == null) powerService = PowerService.Instance;
+                powerService?.UnregisterConsumer(this);
             }
             if (!registered) return;
             MachineRegistry.Unregister(this);
@@ -270,6 +286,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         if (!useGameTickForProcessing) return;
         if (!busy) return;
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return;
+        if (!HasPower()) return;
         StepProcessing(GetTickDeltaSeconds());
     }
 
@@ -286,6 +303,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         }
 
         if (!busy) return;
+        if (!HasPower()) return;
 
         StepProcessing(Time.deltaTime);
     }
@@ -347,6 +365,20 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         string outputLabel = ResolveOutputItemType();
         if (string.IsNullOrWhiteSpace(outputLabel)) outputLabel = "Output";
         return $"{InputsPerProcess} {inputLabel} -> 1 {outputLabel}";
+    }
+
+    bool HasPower()
+    {
+        if (powerUsageWatts <= 0f) return true;
+        if (!PowerConsumerUtil.IsMachinePowered(this)) return false;
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+    }
+
+    public float GetConsumptionWatts()
+    {
+        if (isGhost) return 0f;
+        return Mathf.Max(0f, powerUsageWatts);
     }
 
     string[] ResolveAcceptedTypes()

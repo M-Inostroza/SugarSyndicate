@@ -77,7 +77,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 4
-  m_Sprite: {fileID: 475990856446980580, guid: 0447df77d4c5fc34cbbea8d0d2af9f79, type: 3}
+  m_Sprite: {fileID: -8411550984442254071, guid: 57996e03f2f2fae4a90a6ae65599eb2c, type: 3}
   m_Color: {r: 0.5943396, g: 0.5943396, b: 0.5943396, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -102,3 +102,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   grid: {fileID: 0}
   powerService: {fileID: 0}
+  direction: 3
+  spriteRenderer: {fileID: 4201051881256447682}
+  straightSprite: {fileID: -8411550984442254071, guid: 57996e03f2f2fae4a90a6ae65599eb2c, type: 3}
+  curveSprite: {fileID: 3273141547805506138, guid: 36741f5ac4f92fb41afdc9e23a07479a, type: 3}
+  curveBaseCorner: 0
