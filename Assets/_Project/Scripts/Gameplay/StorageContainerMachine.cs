@@ -254,7 +254,12 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
             entry.item.view = view;
 
             bool ok = false;
-            try { ok = targetMachine.TryStartProcess(entry.item); } catch { ok = false; }
+            try
+            {
+                if (PowerConsumerUtil.IsMachinePowered(targetMachine))
+                    ok = targetMachine.TryStartProcess(entry.item);
+            }
+            catch { ok = false; }
             if (!ok)
             {
                 entry.item.view = null;

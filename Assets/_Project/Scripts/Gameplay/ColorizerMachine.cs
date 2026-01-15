@@ -274,7 +274,12 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress
         if (targetMachine != null)
         {
             bool ok = false;
-            try { ok = targetMachine.TryStartProcess(carriedItem); } catch { ok = false; }
+            try
+            {
+                if (PowerConsumerUtil.IsMachinePowered(targetMachine))
+                    ok = targetMachine.TryStartProcess(carriedItem);
+            }
+            catch { ok = false; }
             if (!ok)
             {
                 carriedItem.view = null;

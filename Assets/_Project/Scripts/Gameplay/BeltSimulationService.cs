@@ -494,6 +494,9 @@ public class BeltSimulationService : MonoBehaviour
             return blockWhenMissing;
         }
 
+        if (!PowerConsumerUtil.IsMachinePowered(machine))
+            return true;
+
         bool accepts = false;
         try { accepts = machine.CanAcceptFrom(approachFromVec); }
         catch (Exception ex)
@@ -969,7 +972,11 @@ public class BeltSimulationService : MonoBehaviour
         if (pending.machine != null)
         {
             bool started = false;
-            try { started = pending.machine.TryStartProcess(item); }
+            try
+            {
+                if (PowerConsumerUtil.IsMachinePowered(pending.machine))
+                    started = pending.machine.TryStartProcess(item);
+            }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[BeltSimulationService] Machine.TryStartProcess threw at {pending.dest}: {ex.Message}");
@@ -1023,7 +1030,7 @@ public class BeltSimulationService : MonoBehaviour
     {
         try
         {
-            if (MachineRegistry.TryGet(cellPos, out var machine) && machine != null)
+            if (MachineRegistry.TryGet(cellPos, out var machine) && machine != null && PowerConsumerUtil.IsMachinePowered(machine))
                 machine.TryStartProcess(item);
         }
         catch (Exception ex)

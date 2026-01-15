@@ -1,7 +1,8 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
-public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSource
+public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -19,6 +20,15 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSource
 
     public Vector2Int InputVec => Vector2Int.zero;
     public Vector2Int Cell => baseCell;
+    public IEnumerable<Vector2Int> PowerCells
+    {
+        get
+        {
+            yield return baseCell;
+            if (extraCell != baseCell)
+                yield return extraCell;
+        }
+    }
 
     class FootprintBlocker : IMachine
     {

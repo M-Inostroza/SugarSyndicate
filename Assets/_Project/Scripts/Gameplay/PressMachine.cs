@@ -455,7 +455,12 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         if (targetMachine != null)
         {
             bool ok = false;
-            try { ok = targetMachine.TryStartProcess(item); } catch { ok = false; }
+            try
+            {
+                if (PowerConsumerUtil.IsMachinePowered(targetMachine))
+                    ok = targetMachine.TryStartProcess(item);
+            }
+            catch { ok = false; }
             if (!ok)
             {
                 if (view != null) ItemViewPool.Return(view);
