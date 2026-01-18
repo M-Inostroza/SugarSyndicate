@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode
+public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPowerSourceDirectional
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -11,6 +11,15 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode
     [Header("Orientation")]
     [Tooltip("Facing vector. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
     public Vector2Int facingVec = new Vector2Int(1, 0);
+
+    public enum PowerOutputFace
+    {
+        BaseCell,
+        FacingCell
+    }
+
+    [Header("Power Output")]
+    [SerializeField] PowerOutputFace outputFace = PowerOutputFace.FacingCell;
 
     [Header("Power")]
     [SerializeField, Min(0f)] float dayOutputWatts = 40f;
@@ -27,10 +36,26 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode
     {
         get
         {
-            yield return baseCell;
-            if (extraCell != baseCell)
-                yield return extraCell;
+            yield return outputFace == PowerOutputFace.BaseCell ? baseCell : extraCell;
         }
+    }
+
+    public bool TryGetOutputDirection(Vector2Int cell, out Vector2Int direction)
+    {
+        direction = Vector2Int.zero;
+
+        if (outputFace == PowerOutputFace.BaseCell)
+        {
+            if (cell != baseCell) return false;
+            direction = new Vector2Int(-facingVec.x, -facingVec.y);
+        }
+        else
+        {
+            if (cell != extraCell) return false;
+            direction = facingVec;
+        }
+
+        return direction != Vector2Int.zero;
     }
 
     class FootprintBlocker : IMachine

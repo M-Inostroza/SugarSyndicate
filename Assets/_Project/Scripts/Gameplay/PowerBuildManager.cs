@@ -28,6 +28,8 @@ public class PowerBuildManager : MonoBehaviour
     readonly List<Vector2Int> dragPath = new();
     readonly Dictionary<Vector2Int, PowerCable> dragCables = new();
     readonly Dictionary<Vector2Int, int> dragDistances = new();
+    bool isDeleteDragging;
+    Vector2Int lastDeleteCell = new Vector2Int(int.MinValue, int.MinValue);
 
     static readonly Vector2Int[] NeighborDirs =
     {
@@ -55,6 +57,12 @@ public class PowerBuildManager : MonoBehaviour
 
     void Update()
     {
+        if (IsDeleteModeActive())
+        {
+            HandleDeleteModeInput();
+            return;
+        }
+
         if (mode == Mode.None) return;
 
         if (Input.GetKeyDown(KeyCode.Escape))
@@ -105,41 +113,13 @@ public class PowerBuildManager : MonoBehaviour
             var cell = GetMouseCell();
             if (!cell.HasValue) return;
             if (cell.Value == lastPlacedCell) return;
+            if (dragPath.Count == 0) return;
 
-            if (TryBacktrack(cell.Value))
-                return;
+            var start = dragPath[0];
+            var targetPath = FindCablePath(start, cell.Value);
+            if (targetPath == null || targetPath.Count == 0) return;
 
-            Vector2Int from = lastPlacedCell;
-            Vector2Int to = cell.Value;
-            while (from != to)
-            {
-                var delta = to - from;
-                Vector2Int step;
-                if (Mathf.Abs(delta.x) >= Mathf.Abs(delta.y))
-                    step = new Vector2Int(Math.Sign(delta.x), 0);
-                else
-                    step = new Vector2Int(0, Math.Sign(delta.y));
-
-                var next = from + step;
-                if (Mathf.Abs(next.x - from.x) + Mathf.Abs(next.y - from.y) != 1) break;
-
-                var dir = DeltaToDirection(step);
-                if (!TryGetNextDragDistance(next, from, out var nextDistance) || !IsWithinLengthLimit(nextDistance))
-                    break;
-                if (!TryPlaceCable(next, dir, out var newCable))
-                    break;
-
-                if (lastPlacedCable != null)
-                    UpdateCableVisualForTurn(lastPlacedCable, dir);
-                lastPlacedCable = newCable;
-                AddDragCable(next, newCable, nextDistance);
-                PinUndergroundView();
-
-                from = next;
-                lastPlacedCell = from;
-
-                if (from == to) break;
-            }
+            ApplyDragPath(targetPath);
         }
 
         if (isMouseDown && Input.GetMouseButtonUp(0))
@@ -148,6 +128,111 @@ public class PowerBuildManager : MonoBehaviour
             lastPlacedCable = null;
             ResetDragPath();
         }
+    }
+
+    void HandleDeleteModeInput()
+    {
+        if (cam == null) cam = Camera.main;
+        if (cam == null) return;
+
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return;
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            isDeleteDragging = true;
+            lastDeleteCell = new Vector2Int(int.MinValue, int.MinValue);
+        }
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            isDeleteDragging = false;
+            return;
+        }
+
+        if (!isDeleteDragging || !Input.GetMouseButton(0))
+            return;
+
+        var cell = GetMouseCell();
+        if (!cell.HasValue) return;
+        if (cell.Value == lastDeleteCell) return;
+
+        TryDeletePowerAtCell(cell.Value);
+        lastDeleteCell = cell.Value;
+    }
+
+    bool TryDeletePowerAtCell(Vector2Int cell)
+    {
+        if (TryDeleteCableAtCell(cell)) return true;
+        if (TryDeletePoleAtCell(cell)) return true;
+        return false;
+    }
+
+    bool TryDeleteCableAtCell(Vector2Int cell)
+    {
+        var cable = FindPowerCableAtCell(cell);
+        if (cable == null) return false;
+        DeletePowerObject(cable.gameObject, cableCost);
+        return true;
+    }
+
+    bool TryDeletePoleAtCell(Vector2Int cell)
+    {
+        var pole = FindPowerPoleAtCell(cell);
+        if (pole == null) return false;
+        DeletePowerObject(pole.gameObject, poleCost);
+        return true;
+    }
+
+    PowerCable FindPowerCableAtCell(Vector2Int cell)
+    {
+        var grid = GridService.Instance;
+        if (grid == null) return null;
+        var all = FindObjectsByType<PowerCable>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var cable in all)
+        {
+            if (cable == null) continue;
+            if (grid.WorldToCell(cable.transform.position) == cell)
+                return cable;
+        }
+        return null;
+    }
+
+    PowerPole FindPowerPoleAtCell(Vector2Int cell)
+    {
+        var grid = GridService.Instance;
+        if (grid == null) return null;
+        var all = FindObjectsByType<PowerPole>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var pole in all)
+        {
+            if (pole == null) continue;
+            if (grid.WorldToCell(pole.transform.position) == cell)
+                return pole;
+        }
+        return null;
+    }
+
+    void DeletePowerObject(GameObject go, int fallbackCost)
+    {
+        if (go == null) return;
+        var task = go.GetComponent<BlueprintTask>();
+        if (task != null)
+        {
+            task.CancelFromDelete();
+            return;
+        }
+
+        TryRefundCost(go, fallbackCost);
+        Destroy(go);
+    }
+
+    void TryRefundCost(GameObject go, int fallbackCost)
+    {
+        int refund = 0;
+        var tag = go.GetComponentInParent<BuildCostTag>() ?? go.GetComponentInChildren<BuildCostTag>(true);
+        if (tag != null) refund = Mathf.Max(0, tag.Cost);
+        if (refund <= 0) refund = Mathf.Max(0, fallbackCost);
+        if (refund > 0) GameManager.Instance?.AddSweetCredits(refund);
     }
 
     public void StartPlacingCable()
@@ -188,6 +273,11 @@ public class PowerBuildManager : MonoBehaviour
             BuildSelectionNotifier.Notify(null);
     }
 
+    bool IsDeleteModeActive()
+    {
+        return GameManager.Instance != null && GameManager.Instance.State == GameState.Delete;
+    }
+
     void HandleSelectionChanged(string selectionName)
     {
         if (string.Equals(selectionName, "PowerCable", StringComparison.OrdinalIgnoreCase)
@@ -220,10 +310,14 @@ public class PowerBuildManager : MonoBehaviour
         return cell;
     }
 
-    bool TryPlaceCable(Vector2Int cell, Direction? direction, out PowerCable placedCable)
+    bool TryPlaceCable(Vector2Int cell, Direction? direction, out PowerCable placedCable, bool allowChainPlacement = false)
     {
         placedCable = null;
-        if (!CanPlaceCableAt(cell)) return false;
+        if (allowChainPlacement)
+        {
+            if (!CanPlaceCableAtForDrag(cell)) return false;
+        }
+        else if (!CanPlaceCableAt(cell)) return false;
         if (cablePrefab == null)
         {
             Debug.LogWarning("[PowerBuildManager] Cable prefab not assigned.");
@@ -301,6 +395,14 @@ public class PowerBuildManager : MonoBehaviour
         var power = PowerService.Instance ?? PowerService.EnsureInstance();
         if (power == null) return true;
         return power.CanPlaceCableAt(cell) && !IsMachineCell(cell);
+    }
+
+    bool CanPlaceCableAtForDrag(Vector2Int cell)
+    {
+        var power = PowerService.Instance ?? PowerService.EnsureInstance();
+        if (power == null) return !IsMachineCell(cell);
+        if (power.IsCellOccupiedOrBlueprint(cell)) return false;
+        return !IsMachineCell(cell);
     }
 
     bool CanPlacePoleAt(Vector2Int cell)
@@ -382,6 +484,57 @@ public class PowerBuildManager : MonoBehaviour
         UpdateCableDirection(lastCable, dir);
     }
 
+    void ApplyDragPath(List<Vector2Int> targetPath)
+    {
+        if (targetPath == null || targetPath.Count == 0) return;
+        if (dragPath.Count == 0) return;
+        if (targetPath[0] != dragPath[0]) return;
+
+        int common = 0;
+        int min = Mathf.Min(dragPath.Count, targetPath.Count);
+        while (common < min && dragPath[common] == targetPath[common])
+            common++;
+
+        if (common == 0) return;
+
+        for (int i = dragPath.Count - 1; i >= common; i--)
+        {
+            var removeCell = dragPath[i];
+            RemoveDragCable(removeCell);
+            dragPath.RemoveAt(i);
+        }
+
+        UpdateTailDirectionFromPath();
+
+        for (int i = common; i < targetPath.Count; i++)
+        {
+            var cell = targetPath[i];
+            if (dragCables.ContainsKey(cell)) continue;
+
+            var prev = targetPath[i - 1];
+            var dir = DeltaToDirection(cell - prev);
+
+            if (!TryGetNextDragDistance(cell, prev, out var nextDistance) || !IsWithinLengthLimit(nextDistance))
+                break;
+            if (!TryPlaceCable(cell, dir, out var newCable, allowChainPlacement: true))
+                break;
+
+            if (dragCables.TryGetValue(prev, out var prevCable) && prevCable != null)
+                UpdateCableVisualForTurn(prevCable, dir);
+
+            lastPlacedCable = newCable;
+            AddDragCable(cell, newCable, nextDistance);
+            lastPlacedCell = cell;
+            PinUndergroundView();
+        }
+
+        if (dragPath.Count > 0)
+        {
+            lastPlacedCell = dragPath[dragPath.Count - 1];
+            dragCables.TryGetValue(lastPlacedCell, out lastPlacedCable);
+        }
+    }
+
     void AddDragCable(Vector2Int cell, PowerCable cable, int distance)
     {
         if (cable == null) return;
@@ -409,6 +562,92 @@ public class PowerBuildManager : MonoBehaviour
         dragDistances.Clear();
     }
 
+    List<Vector2Int> FindCablePath(Vector2Int start, Vector2Int goal)
+    {
+        if (start == goal)
+            return new List<Vector2Int> { start };
+
+        var grid = GridService.Instance;
+        if (grid == null) return null;
+        if (!grid.InBounds(goal)) return null;
+        if (!IsPathCellWalkable(goal, start, goal)) return null;
+
+        var open = new List<Vector2Int> { start };
+        var openSet = new HashSet<Vector2Int> { start };
+        var closed = new HashSet<Vector2Int>();
+        var cameFrom = new Dictionary<Vector2Int, Vector2Int>();
+        var gScore = new Dictionary<Vector2Int, int> { [start] = 0 };
+
+        while (open.Count > 0)
+        {
+            Vector2Int current = open[0];
+            int currentIndex = 0;
+            int bestF = gScore[current] + Heuristic(current, goal);
+            for (int i = 1; i < open.Count; i++)
+            {
+                var node = open[i];
+                int f = gScore[node] + Heuristic(node, goal);
+                if (f < bestF)
+                {
+                    bestF = f;
+                    current = node;
+                    currentIndex = i;
+                }
+            }
+
+            open.RemoveAt(currentIndex);
+            openSet.Remove(current);
+            if (current == goal)
+                return ReconstructPath(cameFrom, current);
+
+            closed.Add(current);
+
+            foreach (var dir in NeighborDirs)
+            {
+                var next = current + dir;
+                if (!grid.InBounds(next)) continue;
+                if (closed.Contains(next)) continue;
+                if (!IsPathCellWalkable(next, start, goal)) continue;
+
+                int tentative = gScore[current] + 1;
+                if (!gScore.TryGetValue(next, out var prevG) || tentative < prevG)
+                {
+                    cameFrom[next] = current;
+                    gScore[next] = tentative;
+                    if (!openSet.Contains(next))
+                    {
+                        open.Add(next);
+                        openSet.Add(next);
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    bool IsPathCellWalkable(Vector2Int cell, Vector2Int start, Vector2Int goal)
+    {
+        if (cell == start) return true;
+        if (dragCables.ContainsKey(cell)) return true;
+        return CanPlaceCableAtForDrag(cell);
+    }
+
+    static int Heuristic(Vector2Int a, Vector2Int b)
+        => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+
+    static List<Vector2Int> ReconstructPath(Dictionary<Vector2Int, Vector2Int> cameFrom, Vector2Int current)
+    {
+        var path = new List<Vector2Int> { current };
+        while (cameFrom.TryGetValue(current, out var prev))
+        {
+            current = prev;
+            path.Add(current);
+        }
+        path.Reverse();
+        return path;
+    }
+
     bool TryGetStartDragDistance(Vector2Int cell, out int distance)
     {
         distance = 0;
@@ -418,20 +657,12 @@ public class PowerBuildManager : MonoBehaviour
             distance = 1;
             return true;
         }
-
-        int best = int.MaxValue;
         if (power.IsAdjacentToSourceCell(cell) || power.IsAdjacentToConnectedPole(cell))
-            best = 1;
-
-        foreach (var dir in NeighborDirs)
         {
-            if (power.TryGetPlacementDistance(cell + dir, out var dist))
-                best = Mathf.Min(best, dist + 1);
+            distance = 1;
+            return true;
         }
-
-        if (best == int.MaxValue) return false;
-        distance = best;
-        return true;
+        return false;
     }
 
     bool TryGetNextDragDistance(Vector2Int cell, Vector2Int fromCell, out int distance)

@@ -21,6 +21,11 @@ public interface IPowerSourceNode : IPowerTerminal, IPowerSource
 {
 }
 
+public interface IPowerSourceDirectional : IPowerSourceNode
+{
+    bool TryGetOutputDirection(Vector2Int cell, out Vector2Int direction);
+}
+
 public interface IPowerNetworkConsumer : IPowerTerminal
 {
     void SetPowered(bool powered);
@@ -66,7 +71,7 @@ public class PowerService : MonoBehaviour
     readonly Dictionary<Vector2Int, int> bestDistance = new();
     readonly Dictionary<Vector2Int, Vector2Int> poleInputs = new();
     readonly Dictionary<Vector2Int, int> placementDistance = new();
-    readonly HashSet<Vector2Int> placementSourceCells = new();
+    readonly HashSet<Vector2Int> placementSourceAdjacents = new();
     readonly HashSet<Vector2Int> connectedPlacementPoles = new();
     readonly Dictionary<IPowerConsumer, float> consumerCharge = new();
 
@@ -490,7 +495,7 @@ public class PowerService : MonoBehaviour
             if (source == null) continue;
             if (source.GetOutputWatts(phase) <= 0f) continue;
             foreach (var cell in source.PowerCells)
-                SeedFromSourceCell(cell, queue);
+                SeedFromSourceCell(cell, source, queue);
         }
 
         while (queue.Count > 0)
@@ -528,7 +533,7 @@ public class PowerService : MonoBehaviour
     {
         placementDirty = false;
         placementDistance.Clear();
-        placementSourceCells.Clear();
+        placementSourceAdjacents.Clear();
         connectedPlacementPoles.Clear();
 
         networkSources.RemoveWhere(source => source == null);
@@ -539,8 +544,8 @@ public class PowerService : MonoBehaviour
             if (source == null) continue;
             foreach (var cell in source.PowerCells)
             {
-                placementSourceCells.Add(cell);
-                SeedPlacementFromSourceCell(cell, queue);
+                AddPlacementSourceAdjacents(source, cell);
+                SeedPlacementFromSourceCell(cell, source, queue);
             }
         }
 
@@ -562,16 +567,43 @@ public class PowerService : MonoBehaviour
         }
     }
 
-    void SeedPlacementFromSourceCell(Vector2Int cell, Queue<Step> queue)
+    void AddPlacementSourceAdjacents(IPowerSourceNode source, Vector2Int cell)
     {
-        foreach (var dir in NeighborDirs)
+        if (TryGetSourceOutputDirection(source, cell, out var dir))
         {
-            var next = cell + dir;
+            placementSourceAdjacents.Add(cell + dir);
+            return;
+        }
+
+        foreach (var d in NeighborDirs)
+            placementSourceAdjacents.Add(cell + d);
+    }
+
+    void SeedPlacementFromSourceCell(Vector2Int cell, IPowerSourceNode source, Queue<Step> queue)
+    {
+        if (TryGetSourceOutputDirection(source, cell, out var dir))
+        {
+            SeedPlacementFromSourceDirection(cell, dir, queue);
+            return;
+        }
+
+        foreach (var d in NeighborDirs)
+        {
+            var next = cell + d;
             if (IsAnyPole(next))
                 SeedPlacementFromPole(next, queue);
             if (IsAnyCable(next))
                 EnqueuePlacementCable(next, 1, queue);
         }
+    }
+
+    void SeedPlacementFromSourceDirection(Vector2Int cell, Vector2Int dir, Queue<Step> queue)
+    {
+        var next = cell + dir;
+        if (IsAnyPole(next))
+            SeedPlacementFromPole(next, queue);
+        if (IsAnyCable(next))
+            EnqueuePlacementCable(next, 1, queue);
     }
 
     void SeedPlacementFromPole(Vector2Int cell, Queue<Step> queue)
@@ -607,12 +639,7 @@ public class PowerService : MonoBehaviour
     public bool IsAdjacentToSourceCell(Vector2Int cell)
     {
         EnsurePlacementDistances();
-        foreach (var dir in NeighborDirs)
-        {
-            if (placementSourceCells.Contains(cell + dir))
-                return true;
-        }
-        return false;
+        return placementSourceAdjacents.Contains(cell);
     }
 
     public bool IsAdjacentToConnectedPole(Vector2Int cell)
@@ -630,18 +657,7 @@ public class PowerService : MonoBehaviour
     {
         if (IsCellOccupiedOrBlueprint(cell)) return false;
         EnsurePlacementDistances();
-        int best = int.MaxValue;
-        if (IsAdjacentToSourceCell(cell) || IsAdjacentToConnectedPole(cell))
-            best = 1;
-
-        foreach (var dir in NeighborDirs)
-        {
-            var next = cell + dir;
-            if (placementDistance.TryGetValue(next, out var dist))
-                best = Mathf.Min(best, dist + 1);
-        }
-
-        return best <= maxCableLength;
+        return IsAdjacentToSourceCell(cell) || IsAdjacentToConnectedPole(cell);
     }
 
     public bool CanPlacePoleAt(Vector2Int cell)
@@ -672,21 +688,55 @@ public class PowerService : MonoBehaviour
         }
     }
 
-    void SeedFromSourceCell(Vector2Int cell, Queue<Step> queue)
+    void SeedFromSourceCell(Vector2Int cell, IPowerSourceNode source, Queue<Step> queue)
     {
         if (poles.Contains(cell))
             PowerPole(cell, cell, queue);
         if (cables.Contains(cell))
             EnqueueCable(cell, 1, queue);
 
-        foreach (var dir in NeighborDirs)
+        if (TryGetSourceOutputDirection(source, cell, out var dir))
         {
-            var next = cell + dir;
+            SeedFromSourceDirection(cell, dir, queue);
+            return;
+        }
+
+        foreach (var d in NeighborDirs)
+        {
+            var next = cell + d;
             if (poles.Contains(next))
                 PowerPole(next, cell, queue);
             if (cables.Contains(next))
                 EnqueueCable(next, 1, queue);
         }
+    }
+
+    void SeedFromSourceDirection(Vector2Int cell, Vector2Int dir, Queue<Step> queue)
+    {
+        var next = cell + dir;
+        if (poles.Contains(next))
+            PowerPole(next, cell, queue);
+        if (cables.Contains(next))
+            EnqueueCable(next, 1, queue);
+    }
+
+    bool TryGetSourceOutputDirection(IPowerSourceNode source, Vector2Int cell, out Vector2Int dir)
+    {
+        if (source is IPowerSourceDirectional directional
+            && directional.TryGetOutputDirection(cell, out dir)
+            && IsCardinal(dir))
+        {
+            return true;
+        }
+        dir = default;
+        return false;
+    }
+
+    static bool IsCardinal(Vector2Int dir)
+    {
+        int ax = Mathf.Abs(dir.x);
+        int ay = Mathf.Abs(dir.y);
+        return (ax == 1 && ay == 0) || (ax == 0 && ay == 1);
     }
 
     void PowerPole(Vector2Int cell, Vector2Int inputCell, Queue<Step> queue)

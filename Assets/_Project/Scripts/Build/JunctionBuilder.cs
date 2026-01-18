@@ -17,6 +17,7 @@ public class JunctionBuilder : MonoBehaviour
 
     [Header("Ghost visuals")]
     [SerializeField] [Range(0f, 1f)] float ghostAlpha = 0.6f;
+    [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
 
     [Header("Build Times")]
     [SerializeField, Min(0.1f)] float splitterBuildSeconds = 0.8f;
@@ -239,7 +240,11 @@ public class JunctionBuilder : MonoBehaviour
             ghostGO = Instantiate(prefab, pos, Quaternion.identity);
             // tint ghost
             var srs = ghostGO.GetComponentsInChildren<SpriteRenderer>(true);
-            foreach (var sr in srs) { var c = sr.color; c.a *= ghostAlpha; sr.color = c; }
+            foreach (var sr in srs)
+            {
+                var c = sr.color;
+                sr.color = new Color(c.r * ghostTint.r, c.g * ghostTint.g, c.b * ghostTint.b, c.a * ghostAlpha * ghostTint.a);
+            }
         }
         else
         {
@@ -251,7 +256,7 @@ public class JunctionBuilder : MonoBehaviour
             if (mr != null)
             {
                 try { mr.material = new Material(Shader.Find("Universal Render Pipeline/Unlit")); } catch { }
-                var col = new Color(1f, 1f, 1f, ghostAlpha);
+                var col = new Color(ghostTint.r, ghostTint.g, ghostTint.b, ghostAlpha * ghostTint.a);
                 if (mr.material != null && mr.material.HasProperty("_BaseColor")) mr.material.SetColor("_BaseColor", col);
                 else if (mr.material != null && mr.material.HasProperty("_Color")) mr.material.SetColor("_Color", col);
             }

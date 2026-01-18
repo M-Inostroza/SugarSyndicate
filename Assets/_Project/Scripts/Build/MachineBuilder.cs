@@ -21,6 +21,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
+    [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
 
     [Header("Economy")]
     [SerializeField, Min(0)] int pressCost = 150;
@@ -756,9 +757,6 @@ public class MachineBuilder : MonoBehaviour
         if (ghostPress != null)
         {
             ghostPress.isGhost = true;
-            // tint ghost
-            var srs = ghostGO.GetComponentsInChildren<SpriteRenderer>(true);
-            foreach (var sr in srs) { var c = sr.color; c.a = 0.6f; sr.color = c; }
         }
         if (ghostColorizer != null) ghostColorizer.isGhost = true;
         if (ghostWaterPump != null) ghostWaterPump.isGhost = true;
@@ -767,13 +765,13 @@ public class MachineBuilder : MonoBehaviour
         if (ghostStorage != null)
         {
             ghostStorage.isGhost = true;
-            TintGhost(ghostGO);
         }
         if (ghostSolarPanel != null)
         {
             ghostSolarPanel.isGhost = true;
-            TintGhost(ghostGO);
         }
+        if (ghostHq == null)
+            TintGhost(ghostGO);
         UpdateGhost(cell, GetDefaultFacing());
     }
 

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 36741f5ac4f92fb41afdc9e23a07479a
+guid: 205c8def514509340b86f7f41b4485a9
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 3273141547805506138
-    second: Power cable curve_0
+      213: 3903950822170164222
+    second: Solar Panel (1)_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,19 +97,6 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
     buildTarget: iOS
     maxTextureSize: 2048
     resizeAlgorithm: 0
@@ -126,12 +113,12 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Power cable curve_0
+      name: Solar Panel (1)_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 100
+        width: 200
         height: 100
       alignment: 0
       pivot: {x: 0, y: 0}
@@ -141,8 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: a5af48855e88c6d20800000000000000
-      internalID: 3273141547805506138
+      spriteID: efbfb08b69e9d2630800000000000000
+      internalID: 3903950822170164222
       vertices: []
       indices: 
       edges: []
@@ -160,8 +147,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Power cable curve_0: 3273141547805506138
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

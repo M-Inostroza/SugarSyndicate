@@ -19,7 +19,7 @@ public class ConveyorPlacer : MonoBehaviour
     [Tooltip("Additional Z rotation to apply to the visual prefab so artwork aligns with logical direction.")]
     [SerializeField] float visualRotationOffset = 0f;
     [Tooltip("Tint applied to conveyors placed while dragging (preview/ghost color).")]
-    [SerializeField] Color ghostTint = new Color(1f,1f,1f,0.6f);
+    [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
     [Tooltip("Small sorting order offset applied to ghost previews to draw them just above existing belts without leaving mask range.")]
     [SerializeField] int ghostSortingOrderOffset = 1;
 

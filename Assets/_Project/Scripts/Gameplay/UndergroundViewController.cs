@@ -23,10 +23,15 @@ public class UndergroundViewController : MonoBehaviour
     [SerializeField] bool tintSurfaceMachines = true;
     [SerializeField] bool hideSurfaceMachineRenderers = true;
     [SerializeField] bool hideSurfaceBelts = true;
+    [SerializeField] bool hideSurfaceItems = true;
     [SerializeField] bool hideSurfacePowerLines = true;
     [SerializeField] bool includeInactiveMachines = true;
     [SerializeField] bool keepPowerSourcesVisible = true;
     [SerializeField] Color machineTint = new Color(1f, 0.9f, 0.2f, 0.5f);
+
+    [Header("Backgrounds")]
+    [SerializeField] GameObject dayBackground;
+    [SerializeField] GameObject undergroundBackground;
 
     GridService grid;
     BuildModeController buildModeController;
@@ -76,6 +81,7 @@ public class UndergroundViewController : MonoBehaviour
     {
         if (hideSurfacePowerLines)
             HideSurfacePowerLineRenderers();
+        SetBackgroundState(isUndergroundActive);
     }
 
     void OnEnable()
@@ -168,6 +174,9 @@ public class UndergroundViewController : MonoBehaviour
             HideSurfaceMachineRenderers();
         if (hideSurfaceBelts)
             HideSurfaceBeltRenderers();
+        if (hideSurfaceItems)
+            HideSurfaceItemContainer();
+        SetBackgroundState(true);
         if (hideSurfacePowerLines)
             RestoreSurfacePowerLineRenderers();
         DisableMarkers();
@@ -181,9 +190,16 @@ public class UndergroundViewController : MonoBehaviour
         RestoreStates(undergroundStates);
         RestoreSurfaceMachineTint();
         RestoreSurfaceMachineRenderers();
+        EnsureSurfaceMachineRenderersEnabled();
         RestoreSurfaceBeltRenderers();
+        EnsureSurfaceBeltRenderersEnabled();
+        SetBackgroundState(false);
         if (hideSurfacePowerLines)
             HideSurfacePowerLineRenderers();
+        else
+            RestoreSurfacePowerLineRenderers();
+        if (!hideSurfacePowerLines)
+            EnsureSurfacePowerLineRenderersEnabled();
         DisableMarkers();
     }
 
@@ -276,6 +292,24 @@ public class UndergroundViewController : MonoBehaviour
         hiddenRenderers.Clear();
     }
 
+    void EnsureSurfaceMachineRenderersEnabled()
+    {
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var behaviour in found)
+        {
+            if (behaviour == null) continue;
+            if (!behaviour.gameObject.activeInHierarchy) continue;
+            if (!(behaviour is IMachine) && !(behaviour is IPowerConsumer)) continue;
+
+            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                if (!r.enabled) r.enabled = true;
+            }
+        }
+    }
+
     void HideSurfaceBeltRenderers()
     {
         hiddenBeltRenderers.Clear();
@@ -306,6 +340,37 @@ public class UndergroundViewController : MonoBehaviour
         hiddenBeltRenderers.Clear();
     }
 
+    void EnsureSurfaceBeltRenderersEnabled()
+    {
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var behaviour in found)
+        {
+            if (behaviour == null) continue;
+            if (!behaviour.gameObject.activeInHierarchy) continue;
+            if (!(behaviour is IConveyor)) continue;
+
+            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                if (!r.enabled) r.enabled = true;
+            }
+        }
+    }
+
+    void HideSurfaceItemContainer()
+    {
+        var container = ContainerLocator.GetItemContainer();
+        if (container == null) return;
+        CacheAndSetActive(new[] { container.gameObject }, surfaceStates, false);
+    }
+
+    void SetBackgroundState(bool undergroundActive)
+    {
+        if (dayBackground != null) dayBackground.SetActive(!undergroundActive);
+        if (undergroundBackground != null) undergroundBackground.SetActive(undergroundActive);
+    }
+
     void HideSurfacePowerLineRenderers()
     {
         hiddenPowerLineRenderers.Clear();
@@ -334,6 +399,24 @@ public class UndergroundViewController : MonoBehaviour
             state.renderer.enabled = state.enabled;
         }
         hiddenPowerLineRenderers.Clear();
+    }
+
+    void EnsureSurfacePowerLineRenderersEnabled()
+    {
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var behaviour in found)
+        {
+            if (behaviour == null) continue;
+            if (!behaviour.gameObject.activeInHierarchy) continue;
+            if (!(behaviour is PowerCable) && !(behaviour is PowerPole)) continue;
+
+            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                if (!r.enabled) r.enabled = true;
+            }
+        }
     }
 
     void TintSurfaceMachineRenderers()

@@ -103,5 +103,7 @@ MonoBehaviour:
   grid: {fileID: 0}
   powerService: {fileID: 0}
   facingVec: {x: 1, y: 0}
+  outputFace: 1
   dayOutputWatts: 40
   nightOutputMultiplier: 0.4
+  outputRampSeconds: 10
