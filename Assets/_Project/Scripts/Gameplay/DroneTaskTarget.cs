@@ -13,11 +13,11 @@ public class DroneTaskTarget : MonoBehaviour
     bool registered;
     bool hasWorkPosition;
     Vector3 workPosition;
-    DroneWorker assignedDrone;
+    MonoBehaviour assignedWorker;
 
     public DroneTaskType TaskType => taskType;
     public DroneTaskPriority Priority => priority;
-    public bool IsAssigned => assignedDrone != null;
+    public bool IsAssigned => assignedWorker != null;
     public bool IsComplete => remainingSeconds <= 0f;
     public Vector3 WorkPosition => hasWorkPosition ? workPosition : transform.position;
     public float Progress01
@@ -53,19 +53,31 @@ public class DroneTaskTarget : MonoBehaviour
             registered = false;
             DroneTaskService.Instance?.UnregisterTask(this);
         }
-        assignedDrone = null;
+        assignedWorker = null;
     }
 
     public bool TryAssign(DroneWorker drone)
     {
-        if (drone == null || assignedDrone != null) return false;
-        assignedDrone = drone;
+        if (drone == null || assignedWorker != null) return false;
+        assignedWorker = drone;
+        return true;
+    }
+
+    public bool TryAssign(CrawlerWorker crawler)
+    {
+        if (crawler == null || assignedWorker != null) return false;
+        assignedWorker = crawler;
         return true;
     }
 
     public void ClearAssignment(DroneWorker drone)
     {
-        if (assignedDrone == drone) assignedDrone = null;
+        if (assignedWorker == drone) assignedWorker = null;
+    }
+
+    public void ClearAssignment(CrawlerWorker crawler)
+    {
+        if (assignedWorker == crawler) assignedWorker = null;
     }
 
     public void ApplyWork(float deltaSeconds)

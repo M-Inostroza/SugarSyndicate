@@ -20,13 +20,8 @@ public class TimeManager : MonoBehaviour
     [SerializeField] TimePhase currentPhase = TimePhase.Day;
     [SerializeField] bool running = true;
 
-    [Header("Debug")]
-    [SerializeField] bool logPhaseEveryInterval = true;
-    [SerializeField, Min(0.1f)] float logIntervalSeconds = 5f;
-
     float phaseElapsed;
     float totalElapsed;
-    float logElapsed;
 
     public event Action<TimePhase> OnPhaseChanged;
     public event Action<int> OnDayCountChanged;
@@ -56,15 +51,6 @@ public class TimeManager : MonoBehaviour
         if (delta <= 0f) return;
 
         totalElapsed += delta;
-        if (logPhaseEveryInterval && logIntervalSeconds > 0f)
-        {
-            logElapsed += delta;
-            while (logElapsed >= logIntervalSeconds)
-            {
-                logElapsed -= logIntervalSeconds;
-                Debug.Log($"[TimeManager] Time: {totalElapsed:F1}s, Phase: {currentPhase}");
-            }
-        }
 
         phaseElapsed += delta;
         float duration = PhaseDuration;
@@ -89,9 +75,9 @@ public class TimeManager : MonoBehaviour
         currentPhase = startPhase;
         phaseElapsed = 0f;
         totalElapsed = 0f;
-        logElapsed = 0f;
         OnDayCountChanged?.Invoke(dayCount);
         OnPhaseChanged?.Invoke(currentPhase);
+        LogPhaseStart();
         OnPhaseTimeChanged?.Invoke(PhaseRemaining);
     }
 
@@ -101,6 +87,7 @@ public class TimeManager : MonoBehaviour
         {
             currentPhase = TimePhase.Night;
             OnPhaseChanged?.Invoke(currentPhase);
+            LogPhaseStart();
             return;
         }
 
@@ -108,5 +95,11 @@ public class TimeManager : MonoBehaviour
         dayCount++;
         OnDayCountChanged?.Invoke(dayCount);
         OnPhaseChanged?.Invoke(currentPhase);
+        LogPhaseStart();
+    }
+
+    void LogPhaseStart()
+    {
+        Debug.Log($"[TimeManager] {currentPhase} begins (Day {dayCount}).");
     }
 }

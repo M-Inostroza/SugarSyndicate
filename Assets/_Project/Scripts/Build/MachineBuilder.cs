@@ -4,9 +4,22 @@ using System.Reflection;
 using UnityEngine.Rendering;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 
 public class MachineBuilder : MonoBehaviour
 {
+    static bool hqFreeUsed;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    static void ResetHqFreePerScene()
+    {
+        hqFreeUsed = false;
+    }
+
+    public static void MarkHqFreeUsed()
+    {
+        hqFreeUsed = true;
+    }
     [Header("Setup")]
     [SerializeField] GameObject pressMachinePrefab;
     [SerializeField] GameObject shrederPrefab;
@@ -22,6 +35,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
     [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
+    [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
 
     [Header("Economy")]
     [SerializeField, Min(0)] int pressCost = 150;
@@ -436,9 +450,13 @@ public class MachineBuilder : MonoBehaviour
         var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
         foreach (var sr in srs)
         {
-            var c = sr.color;
-            c.a = 0.6f;
-            sr.color = c;
+            var baseCol = sr.color;
+            sr.color = new Color(
+                baseCol.r * ghostTint.r,
+                baseCol.g * ghostTint.g,
+                baseCol.b * ghostTint.b,
+                Mathf.Clamp01(ghostTint.a)
+            );
         }
     }
 
@@ -525,6 +543,7 @@ public class MachineBuilder : MonoBehaviour
             var task = go.GetComponent<BlueprintTask>();
             if (task == null) task = go.AddComponent<BlueprintTask>();
             task.InitializePipe(cell, rot, activePrefab, waterPipeCost, waterPipeBuildSeconds);
+            task.SetBlueprintTint(blueprintTint);
         }
         ClearPipeGhosts(false);
         // Keep the tool armed so the player can place another path without re-selecting.
@@ -770,8 +789,7 @@ public class MachineBuilder : MonoBehaviour
         {
             ghostSolarPanel.isGhost = true;
         }
-        if (ghostHq == null)
-            TintGhost(ghostGO);
+        TintGhost(ghostGO);
         UpdateGhost(cell, GetDefaultFacing());
     }
 
@@ -849,6 +867,8 @@ public class MachineBuilder : MonoBehaviour
         }
 
         int cost = GetCostForActiveName(activeName);
+        if (activeName == "DroneHQ" && !hqFreeUsed)
+            cost = 0;
         if (!TrySpendBuildCost(cost, activeName))
         {
             if (ghostGO != null) Destroy(ghostGO);
@@ -858,32 +878,6 @@ public class MachineBuilder : MonoBehaviour
 
         // Ensure the target footprint cells are not belts anymore
         foreach (var fp in footprint) TryRemoveBeltAtCell(fp);
-
-        if (activeName == "DroneHQ")
-        {
-            Vector3 hqPos = GetFootprintCenterWorld(cell, outputDir);
-            if (ghostGO != null) Destroy(ghostGO);
-
-            var hqGo = Instantiate(activePrefab, hqPos, Quaternion.Euler(0, 0, DirToZ(outputDir)));
-            var hq = hqGo.GetComponent<DroneHQ>();
-            if (hq != null) hq.isGhost = false;
-            try
-            {
-                var tag = hqGo.GetComponent<BuildCostTag>();
-                if (tag == null) tag = hqGo.AddComponent<BuildCostTag>();
-                tag.Cost = cost;
-            }
-            catch { }
-
-            TryMarkMachineFootprint(footprint);
-
-            var repairable = hqGo.GetComponent<Repairable>();
-            if (repairable == null) repairable = hqGo.AddComponent<Repairable>();
-            repairable.Initialize(footprint.ToArray());
-
-            ClearPreviewState(clearActiveSelection: false);
-            return;
-        }
 
         if (ghostGO == null)
         {
@@ -899,7 +893,11 @@ public class MachineBuilder : MonoBehaviour
             bool isHq = activeName == "DroneHQ";
             int sortingOverride = RequiresSugarCell() ? mineSortingOrder : int.MinValue;
             task.InitializeMachine(footprint.ToArray(), outputDir, ghostGO.transform.rotation, activePrefab, cost, GetBuildSecondsForActiveName(activeName), isHq, sortingOverride);
+            task.SetBlueprintTint(blueprintTint);
         }
+
+        if (activeName == "DroneHQ" && !hqFreeUsed)
+            hqFreeUsed = true;
 
         // Successful placement: clear only temporary preview state, keep tool selection armed.
         ClearPreviewState(clearActiveSelection: false);

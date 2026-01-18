@@ -1841,6 +1841,11 @@ public class ConveyorPlacer : MonoBehaviour
                         if (!press.isGhost) return press.gameObject;
                         continue;
                     }
+                    if (parent is DroneHQ hq)
+                    {
+                        if (!hq.isGhost) return hq.gameObject;
+                        continue;
+                    }
                     if (parent is IMachine) return parent.gameObject;
                 }
                 var mine = col.GetComponentInParent<SugarMine>();
@@ -1859,6 +1864,20 @@ public class ConveyorPlacer : MonoBehaviour
                 var pos = mine.transform.position;
                 if (Mathf.Abs(pos.x - center.x) < tol && Mathf.Abs(pos.y - center.y) < tol)
                     return mine.gameObject;
+            }
+        }
+        catch { }
+
+        try
+        {
+            if (!hasCenter) return null;
+            var hqs = UnityEngine.Object.FindObjectsByType<DroneHQ>(FindObjectsSortMode.None);
+            foreach (var hq in hqs)
+            {
+                if (hq == null || hq.isGhost) continue;
+                var pos = hq.transform.position;
+                if (Mathf.Abs(pos.x - center.x) < tol && Mathf.Abs(pos.y - center.y) < tol)
+                    return hq.gameObject;
             }
         }
         catch { }

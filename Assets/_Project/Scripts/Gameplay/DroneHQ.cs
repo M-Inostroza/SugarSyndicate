@@ -24,6 +24,7 @@ public class DroneHQ : MonoBehaviour
             return;
         }
         Instance = this;
+        MachineBuilder.MarkHqFreeUsed();
         DroneTaskService.Instance?.RegisterHQ(this);
     }
 

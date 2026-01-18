@@ -18,6 +18,10 @@ public class MachineInspectUI : MonoBehaviour
     [SerializeField] CanvasGroup panelGroup;
     [SerializeField] RectTransform panelRect;
     [SerializeField] Button closeButton;
+    [SerializeField] Button buyDroneButton;
+    [SerializeField, Min(0)] int buyDroneCost = 50;
+    [SerializeField] Button buyCrawlerButton;
+    [SerializeField, Min(0)] int buyCrawlerCost = 50;
     [SerializeField] TMP_Text titleText;
     [SerializeField] TMP_Text maintenanceText;
     [SerializeField] Slider maintenanceSlider;
@@ -145,6 +149,7 @@ public class MachineInspectUI : MonoBehaviour
         isOpen = true;
         isClosing = false;
         UpdateMaintenance();
+        UpdateDroneHqUi();
     }
 
     void Close()
@@ -204,6 +209,7 @@ public class MachineInspectUI : MonoBehaviour
 
         SetUiImmediate(false);
         SetUiActive(false);
+        UpdateDroneHqUi();
     }
 
     void UpdateMaintenance()
@@ -312,6 +318,7 @@ public class MachineInspectUI : MonoBehaviour
         if (machine is StorageContainerMachine storage)
         {
             title = "Storage";
+            return;
             process = $"Stores items ({storage.StoredItemCount}/{storage.Capacity})";
             return;
         }
@@ -366,12 +373,60 @@ public class MachineInspectUI : MonoBehaviour
         if (service == null)
             return "Drones: 0/0\nSpeed: 0";
 
-        int total = service.TotalDrones;
-        int idle = service.IdleDrones;
-        int max = service.MaxDrones;
+        int totalDrones = service.TotalDrones;
+        int maxDrones = service.MaxDrones;
+        int totalCrawlers = service.TotalCrawlers;
+        int maxCrawlers = service.MaxCrawlers;
         float speed = service.DroneSpeed;
-        string maxPart = max > 0 ? $" (max {max})" : string.Empty;
-        return $"Available drones: {idle}/{total}{maxPart}\nSpeed: {speed:0.##}";
+        float crawlerSpeed = service.CrawlerSpeed;
+        string maxD = maxDrones > 0 ? $"/{maxDrones}" : string.Empty;
+        string maxC = maxCrawlers > 0 ? $"/{maxCrawlers}" : string.Empty;
+        return $"Drones: {totalDrones}{maxD}\nCrawlers: {totalCrawlers}{maxC}\nDrone Speed: {speed:0.##}\nCrawler Speed: {crawlerSpeed:0.##}";
+    }
+
+    void UpdateDroneHqUi()
+    {
+        bool isHq = currentMachine is DroneHQ;
+        if (!isHq)
+        {
+            if (buyDroneButton != null) buyDroneButton.gameObject.SetActive(false);
+            if (buyCrawlerButton != null) buyCrawlerButton.gameObject.SetActive(false);
+            return;
+        }
+
+        var service = DroneTaskService.Instance;
+        if (buyDroneButton != null)
+        {
+            buyDroneButton.gameObject.SetActive(true);
+            buyDroneButton.interactable = service != null && service.CanAddDrone;
+        }
+        if (buyCrawlerButton != null)
+        {
+            buyCrawlerButton.gameObject.SetActive(true);
+            buyCrawlerButton.interactable = service != null && service.CanAddCrawler;
+        }
+    }
+
+    public void TryBuyDrone()
+    {
+        var service = DroneTaskService.Instance;
+        if (service == null) return;
+        if (service.TryBuyDrone(buyDroneCost))
+        {
+            if (processText != null) processText.text = BuildDroneHqSummary();
+            UpdateDroneHqUi();
+        }
+    }
+
+    public void TryBuyCrawler()
+    {
+        var service = DroneTaskService.Instance;
+        if (service == null) return;
+        if (service.TryBuyCrawler(buyCrawlerCost))
+        {
+            if (processText != null) processText.text = BuildDroneHqSummary();
+            UpdateDroneHqUi();
+        }
     }
 
     void CacheUiReferences()
@@ -417,6 +472,30 @@ public class MachineInspectUI : MonoBehaviour
             else
             {
                 closeButton.onClick.RemoveListener(Close);
+            }
+        }
+        if (buyDroneButton != null)
+        {
+            if (add)
+            {
+                buyDroneButton.onClick.RemoveListener(TryBuyDrone);
+                buyDroneButton.onClick.AddListener(TryBuyDrone);
+            }
+            else
+            {
+                buyDroneButton.onClick.RemoveListener(TryBuyDrone);
+            }
+        }
+        if (buyCrawlerButton != null)
+        {
+            if (add)
+            {
+                buyCrawlerButton.onClick.RemoveListener(TryBuyCrawler);
+                buyCrawlerButton.onClick.AddListener(TryBuyCrawler);
+            }
+            else
+            {
+                buyCrawlerButton.onClick.RemoveListener(TryBuyCrawler);
             }
         }
     }

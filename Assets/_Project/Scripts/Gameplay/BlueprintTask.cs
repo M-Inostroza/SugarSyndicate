@@ -36,6 +36,8 @@ public class BlueprintTask : DroneTaskTarget
     List<SpriteRenderer> cachedRenderers;
 
     public static bool HasHqBlueprint => hqBlueprintCount > 0;
+    public BlueprintType Type => blueprintType;
+    public bool IsHqBlueprint => blueprintType == BlueprintType.DroneHQ;
 
     public void InitializeBelt(Vector2Int cell, Direction outDir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
     {
@@ -111,6 +113,14 @@ public class BlueprintTask : DroneTaskTarget
         buildCost = cost;
         keepVisualOnComplete = keepVisual;
         RegisterBlueprint(buildSeconds);
+    }
+
+    public void SetBlueprintTint(Color tint)
+    {
+        blueprintTint = tint;
+        if (cachedRenderers == null || cachedColors == null)
+            CacheOriginalColors();
+        ApplyBlueprintTint();
     }
 
     public bool ContainsCell(Vector2Int cell)
@@ -217,10 +227,13 @@ public class BlueprintTask : DroneTaskTarget
     {
         var srs = GetComponentsInChildren<SpriteRenderer>(true);
         if (srs == null || srs.Length == 0) return;
-        foreach (var sr in srs)
+        for (int i = 0; i < srs.Length; i++)
         {
+            var sr = srs[i];
             if (sr == null) continue;
-            var baseCol = sr.color;
+            var baseCol = (cachedRenderers != null && cachedColors != null && i < cachedRenderers.Count && i < cachedColors.Count && cachedRenderers[i] == sr)
+                ? cachedColors[i]
+                : sr.color;
             sr.color = new Color(baseCol.r * blueprintTint.r, baseCol.g * blueprintTint.g, baseCol.b * blueprintTint.b, Mathf.Clamp01(blueprintTint.a));
         }
     }

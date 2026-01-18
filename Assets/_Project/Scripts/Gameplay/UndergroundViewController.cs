@@ -11,14 +11,6 @@ public class UndergroundViewController : MonoBehaviour
     [SerializeField] GameObject[] surfaceRoots;
     [SerializeField] GameObject[] undergroundRoots;
 
-    [Header("Markers")]
-    [SerializeField] GameObject markerPrefab;
-    [SerializeField] Transform markerParent;
-    [SerializeField] float markerZ = 0f;
-    [SerializeField] bool includeBrokenMarkers = true;
-    [SerializeField] bool scaleMarkerToCell = true;
-    [SerializeField, Range(0.1f, 1f)] float markerCellFill = 0.9f;
-
     [Header("Surface Hiding")]
     [SerializeField] bool tintSurfaceMachines = true;
     [SerializeField] bool hideSurfaceMachineRenderers = true;
@@ -28,6 +20,8 @@ public class UndergroundViewController : MonoBehaviour
     [SerializeField] bool includeInactiveMachines = true;
     [SerializeField] bool keepPowerSourcesVisible = true;
     [SerializeField] Color machineTint = new Color(1f, 0.9f, 0.2f, 0.5f);
+    [SerializeField] Color powerSourceTint = new Color(1f, 0.95f, 0.35f, 0.6f);
+    [SerializeField] Color disconnectedTint = new Color(0.65f, 0.65f, 0.65f, 0.45f);
 
     [Header("Backgrounds")]
     [SerializeField] GameObject dayBackground;
@@ -40,13 +34,14 @@ public class UndergroundViewController : MonoBehaviour
     string lastSelectionName;
     readonly Dictionary<GameObject, bool> surfaceStates = new();
     readonly Dictionary<GameObject, bool> undergroundStates = new();
-    readonly List<GameObject> markerPool = new();
-    readonly List<Vector3> markerBaseScales = new();
     readonly List<RendererState> hiddenRenderers = new();
     readonly List<RendererState> hiddenBeltRenderers = new();
     readonly List<RendererState> hiddenPowerLineRenderers = new();
+    readonly List<RendererState> hiddenDroneRenderers = new();
+    readonly List<RendererState> hiddenCrawlerRenderers = new();
     readonly List<TintState> tintedRenderers = new();
-    bool warnedMissingMarker;
+    readonly Dictionary<SpriteRenderer, Color> originalTintColors = new();
+    readonly List<SpriteRenderer> tintCleanup = new();
 
     struct RendererState
     {
@@ -82,6 +77,13 @@ public class UndergroundViewController : MonoBehaviour
         if (hideSurfacePowerLines)
             HideSurfacePowerLineRenderers();
         SetBackgroundState(isUndergroundActive);
+    }
+
+    void Update()
+    {
+        if (!isUndergroundActive) return;
+        if (tintSurfaceMachines)
+            RefreshSurfaceMachineTintRealtime();
     }
 
     void OnEnable()
@@ -179,7 +181,8 @@ public class UndergroundViewController : MonoBehaviour
         SetBackgroundState(true);
         if (hideSurfacePowerLines)
             RestoreSurfacePowerLineRenderers();
-        DisableMarkers();
+        HideDroneRenderers();
+        RestoreCrawlerRenderers();
     }
 
     void HideUnderground()
@@ -200,7 +203,8 @@ public class UndergroundViewController : MonoBehaviour
             RestoreSurfacePowerLineRenderers();
         if (!hideSurfacePowerLines)
             EnsureSurfacePowerLineRenderersEnabled();
-        DisableMarkers();
+        RestoreDroneRenderers();
+        HideCrawlerRenderers();
     }
 
     void CacheAndSetActive(GameObject[] roots, Dictionary<GameObject, bool> cache, bool active)
@@ -225,45 +229,11 @@ public class UndergroundViewController : MonoBehaviour
         cache.Clear();
     }
 
-    void RebuildMarkers()
-    {
-        if (markerPrefab == null)
-        {
-            if (!warnedMissingMarker)
-            {
-                Debug.LogWarning("[UndergroundViewController] Missing markerPrefab; skipping building markers.");
-                warnedMissingMarker = true;
-            }
-            return;
-        }
-
-        if (grid == null) grid = GridService.Instance;
-        if (grid == null) return;
-
-        var size = grid.GridSize;
-        int used = 0;
-        for (int y = 0; y < size.y; y++)
-        {
-            for (int x = 0; x < size.x; x++)
-            {
-                var cellPos = new Vector2Int(x, y);
-                var cell = grid.GetCell(cellPos);
-                if (cell == null) continue;
-                if (cell.type != GridService.CellType.Machine) continue;
-                if (!includeBrokenMarkers && cell.isBroken) continue;
-                var marker = GetMarker(used++);
-                marker.transform.position = grid.CellToWorld(cellPos, markerZ);
-                ScaleMarker(marker, used - 1);
-                marker.SetActive(true);
-            }
-        }
-        DisableMarkers(used);
-    }
 
     void HideSurfaceMachineRenderers()
     {
         hiddenRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 
         var seen = new HashSet<Renderer>();
         foreach (var behaviour in found)
@@ -271,7 +241,7 @@ public class UndergroundViewController : MonoBehaviour
             if (behaviour == null) continue;
             if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
             if (keepPowerSourcesVisible && behaviour is IPowerSource) continue;
-            if (!(behaviour is IMachine) && !(behaviour is IPowerConsumer)) continue;
+            if (!IsOverlayTarget(behaviour)) continue;
             var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
             foreach (var r in renderers)
             {
@@ -299,7 +269,7 @@ public class UndergroundViewController : MonoBehaviour
         {
             if (behaviour == null) continue;
             if (!behaviour.gameObject.activeInHierarchy) continue;
-            if (!(behaviour is IMachine) && !(behaviour is IPowerConsumer)) continue;
+            if (!IsOverlayTarget(behaviour)) continue;
 
             var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
             foreach (var r in renderers)
@@ -313,7 +283,7 @@ public class UndergroundViewController : MonoBehaviour
     void HideSurfaceBeltRenderers()
     {
         hiddenBeltRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         var seen = new HashSet<Renderer>();
         foreach (var behaviour in found)
         {
@@ -374,7 +344,7 @@ public class UndergroundViewController : MonoBehaviour
     void HideSurfacePowerLineRenderers()
     {
         hiddenPowerLineRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         var seen = new HashSet<Renderer>();
         foreach (var behaviour in found)
         {
@@ -419,81 +389,178 @@ public class UndergroundViewController : MonoBehaviour
         }
     }
 
+    void HideDroneRenderers()
+    {
+        hiddenDroneRenderers.Clear();
+        var found = FindObjectsByType<DroneWorker>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        var seen = new HashSet<Renderer>();
+        foreach (var drone in found)
+        {
+            if (drone == null) continue;
+            var renderers = drone.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (r == null || !seen.Add(r)) continue;
+                hiddenDroneRenderers.Add(new RendererState(r, r.enabled));
+                r.enabled = false;
+            }
+        }
+    }
+
+    void RestoreDroneRenderers()
+    {
+        foreach (var state in hiddenDroneRenderers)
+        {
+            if (state.renderer == null) continue;
+            state.renderer.enabled = state.enabled;
+        }
+        hiddenDroneRenderers.Clear();
+    }
+
+    void HideCrawlerRenderers()
+    {
+        hiddenCrawlerRenderers.Clear();
+        var found = FindObjectsByType<CrawlerWorker>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        var seen = new HashSet<Renderer>();
+        foreach (var crawler in found)
+        {
+            if (crawler == null) continue;
+            var renderers = crawler.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                if (r == null || !seen.Add(r)) continue;
+                hiddenCrawlerRenderers.Add(new RendererState(r, r.enabled));
+                r.enabled = false;
+            }
+        }
+    }
+
+    void RestoreCrawlerRenderers()
+    {
+        foreach (var state in hiddenCrawlerRenderers)
+        {
+            if (state.renderer == null) continue;
+            state.renderer.enabled = state.enabled;
+        }
+        hiddenCrawlerRenderers.Clear();
+    }
+
     void TintSurfaceMachineRenderers()
     {
+        RefreshSurfaceMachineTintRealtime();
+    }
+
+    void RefreshSurfaceMachineTintRealtime()
+    {
         tintedRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         var seen = new HashSet<SpriteRenderer>();
         foreach (var behaviour in found)
         {
             if (behaviour == null) continue;
             if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
-            if (keepPowerSourcesVisible && behaviour is IPowerSource) continue;
-            if (!(behaviour is IMachine) && !(behaviour is IPowerConsumer)) continue;
+            if (!IsOverlayTarget(behaviour)) continue;
+            var tint = GetOverlayTint(behaviour);
             var renderers = behaviour.GetComponentsInChildren<SpriteRenderer>(true);
             foreach (var sr in renderers)
             {
                 if (sr == null || !seen.Add(sr)) continue;
-                tintedRenderers.Add(new TintState(sr, sr.color));
-                sr.color = new Color(sr.color.r * machineTint.r, sr.color.g * machineTint.g, sr.color.b * machineTint.b, sr.color.a * machineTint.a);
+                if (!originalTintColors.ContainsKey(sr))
+                    originalTintColors[sr] = sr.color;
+                var baseCol = originalTintColors[sr];
+                tintedRenderers.Add(new TintState(sr, baseCol));
+                sr.color = new Color(baseCol.r * tint.r, baseCol.g * tint.g, baseCol.b * tint.b, baseCol.a * tint.a);
             }
         }
+
+        if (originalTintColors.Count > 0)
+        {
+            tintCleanup.Clear();
+            foreach (var kv in originalTintColors)
+            {
+                if (kv.Key == null || !seen.Contains(kv.Key))
+                    tintCleanup.Add(kv.Key);
+            }
+            for (int i = 0; i < tintCleanup.Count; i++)
+                originalTintColors.Remove(tintCleanup[i]);
+        }
+    }
+
+    bool IsOverlayTarget(MonoBehaviour behaviour)
+    {
+        if (behaviour == null) return false;
+        if (behaviour is DroneHQ) return true;
+        if (behaviour is IPowerSource) return true;
+        if (behaviour is IPowerConsumer) return true;
+        if (behaviour is IMachine) return true;
+        return false;
+    }
+
+    Color GetOverlayTint(MonoBehaviour behaviour)
+    {
+        if (behaviour is IPowerSource) return powerSourceTint;
+        bool connected = IsConnectedToPower(behaviour);
+        if (!connected) return disconnectedTint;
+        return machineTint;
+    }
+
+    bool IsConnectedToPower(MonoBehaviour behaviour)
+    {
+        if (behaviour == null) return false;
+        var power = PowerService.Instance;
+        if (power == null) return true;
+
+        if (behaviour is IPowerConsumer consumer)
+        {
+            return IsConsumerConnected(consumer, behaviour);
+        }
+
+        if (behaviour is IPowerTerminal terminal)
+        {
+            foreach (var cell in terminal.PowerCells)
+            {
+                if (power.IsCellPoweredOrAdjacent(cell)) return true;
+            }
+            return false;
+        }
+
+        if (behaviour is DroneHQ)
+        {
+            var grid = GridService.Instance;
+            if (grid == null) return true;
+            var cell = grid.WorldToCell(behaviour.transform.position);
+            return power.IsCellPoweredOrAdjacent(cell);
+        }
+
+        return true;
+    }
+
+    bool IsConsumerConnected(IPowerConsumer consumer, MonoBehaviour behaviour)
+    {
+        if (consumer == null) return false;
+        var power = PowerService.Instance;
+        if (power == null) return true;
+
+        if (consumer is IMachine machine)
+            return power.IsCellPoweredOrAdjacent(machine.Cell);
+
+        var grid = GridService.Instance;
+        if (grid == null) return true;
+        var cell = grid.WorldToCell(behaviour.transform.position);
+        return power.IsCellPoweredOrAdjacent(cell);
     }
 
     void RestoreSurfaceMachineTint()
     {
-        foreach (var state in tintedRenderers)
+        foreach (var kv in originalTintColors)
         {
-            if (state.renderer == null) continue;
-            state.renderer.color = state.color;
+            if (kv.Key == null) continue;
+            kv.Key.color = kv.Value;
         }
         tintedRenderers.Clear();
+        originalTintColors.Clear();
     }
 
-    GameObject GetMarker(int index)
-    {
-        if (index < markerPool.Count) return markerPool[index];
-        var parent = markerParent != null ? markerParent : transform;
-        var marker = Instantiate(markerPrefab, parent);
-        markerPool.Add(marker);
-        markerBaseScales.Add(marker.transform.localScale);
-        return marker;
-    }
-
-    void DisableMarkers(int startIndex = 0)
-    {
-        for (int i = startIndex; i < markerPool.Count; i++)
-        {
-            var marker = markerPool[i];
-            if (marker != null) marker.SetActive(false);
-        }
-    }
-
-    void ScaleMarker(GameObject marker, int index)
-    {
-        if (!scaleMarkerToCell) return;
-        if (marker == null) return;
-        if (grid == null) grid = GridService.Instance;
-        if (grid == null) return;
-
-        var renderers = marker.GetComponentsInChildren<SpriteRenderer>(true);
-        if (renderers == null || renderers.Length == 0) return;
-
-        float maxSize = 0f;
-        foreach (var sr in renderers)
-        {
-            if (sr == null || sr.sprite == null) continue;
-            var size = sr.sprite.bounds.size;
-            maxSize = Mathf.Max(maxSize, size.x, size.y);
-        }
-
-        if (maxSize <= 0.0001f) return;
-
-        float targetSize = Mathf.Max(0.01f, grid.CellSize * Mathf.Clamp01(markerCellFill));
-        float scaleFactor = targetSize / maxSize;
-        var baseScale = index < markerBaseScales.Count ? markerBaseScales[index] : marker.transform.localScale;
-        marker.transform.localScale = new Vector3(baseScale.x * scaleFactor, baseScale.y * scaleFactor, baseScale.z);
-    }
 
     void TryHookBuildModeController()
     {

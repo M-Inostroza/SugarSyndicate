@@ -35,8 +35,6 @@ public class PowerService : MonoBehaviour
 {
     public static PowerService Instance { get; private set; }
 
-    [Header("Debug")]
-    [SerializeField] bool logPowerChanges = false;
     [SerializeField, Min(0f)] float powerTransitionSeconds = 2f;
 
     readonly HashSet<IPowerSource> sources = new();
@@ -59,8 +57,6 @@ public class PowerService : MonoBehaviour
     [Header("Network Rules")]
     [SerializeField, Min(0)] int maxCableLength = 8;
 
-    [Header("Network Debug")]
-    [SerializeField] bool logNetworkChanges = false;
 
     readonly HashSet<Vector2Int> cables = new();
     readonly HashSet<Vector2Int> poles = new();
@@ -263,7 +259,6 @@ public class PowerService : MonoBehaviour
         float net = totalGeneratedWatts - totalConsumedWatts;
         if (Mathf.Abs(net - totalWatts) < 0.001f) return;
         totalWatts = net;
-        if (logPowerChanges) Debug.Log($"[PowerService] Power = {totalWatts:0.##} W");
         OnPowerChanged?.Invoke(totalWatts);
     }
 
@@ -519,8 +514,6 @@ public class PowerService : MonoBehaviour
 
         UpdateNetworkConsumers();
 
-        if (logNetworkChanges)
-            Debug.Log($"[PowerService] Powered cables={poweredCables.Count}, poles={poweredPoles.Count}");
     }
 
     void EnsurePlacementDistances()

@@ -1,28 +1,28 @@
 using UnityEngine;
 
-public class DroneWorker : MonoBehaviour
+public class CrawlerWorker : MonoBehaviour
 {
-    [Tooltip("Base movement speed used to compute flight duration (distance / speed).")]
-    [SerializeField, Min(0.01f)] float moveSpeed = 3.5f;
-    [Tooltip("Distance threshold to consider the drone at its target (stops/restarts tweening).")]
+    [Tooltip("Base movement speed used to compute travel duration (distance / speed).")]
+    [SerializeField, Min(0.01f)] float moveSpeed = 3.0f;
+    [Tooltip("Distance threshold to consider the crawler at its target.")]
     [SerializeField, Min(0.01f)] float arriveDistance = 0.05f;
-    [Tooltip("If true, use the custom flight curve for movement; otherwise linear.")]
-    [SerializeField] bool useFlightCurve = true;
-    [Tooltip("Ease curve for the flight (0..1 time to 0..1 progress).")]
-    [SerializeField] AnimationCurve flightCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+    [Tooltip("If true, use the custom movement curve; otherwise linear.")]
+    [SerializeField] bool useMoveCurve = true;
+    [Tooltip("Ease curve for the movement (0..1 time to 0..1 progress).")]
+    [SerializeField] AnimationCurve moveCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
 
     [Header("Rendering")]
-    [Tooltip("Raise drone sorting order so it stays above machines.")]
+    [Tooltip("Raise sorting order so it stays above machines.")]
     [SerializeField] bool enforceSortingOrder = true;
-    [Tooltip("Sorting order offset applied to the drone visuals.")]
-    [SerializeField] int sortingOrderOffset = 2000;
+    [Tooltip("Sorting order offset applied to the crawler visuals.")]
+    [SerializeField] int sortingOrderOffset = 1900;
 
     [Header("Progress Bar")]
-    [Tooltip("Show a small progress bar below the drone while it is working.")]
+    [Tooltip("Show a small progress bar below the crawler while it is working.")]
     [SerializeField] bool showProgressBar = true;
     [Tooltip("Size of the progress bar in world units (width, height).")]
     [SerializeField] Vector2 barSize = new Vector2(0.5f, 0.06f);
-    [Tooltip("Vertical offset below the drone in world units.")]
+    [Tooltip("Vertical offset below the crawler in world units.")]
     [SerializeField, Min(0f)] float barYOffset = 0.25f;
     [Tooltip("Fill color of the progress bar.")]
     [SerializeField] Color barFillColor = new Color(0.2f, 0.9f, 0.4f, 1f);
@@ -30,15 +30,10 @@ public class DroneWorker : MonoBehaviour
     [SerializeField] Color barBackgroundColor = new Color(0f, 0f, 0f, 0.4f);
 
     DroneTaskTarget currentTask;
-    DroneTaskTarget bootstrapTask;
     Vector3 currentTarget;
     bool hasTarget;
     bool isMoving;
     bool isPaused;
-    bool isBootstrap;
-    bool bootstrapExiting;
-    Vector3 bootstrapExitTarget;
-    float bootstrapSpeedMultiplier = 1f;
     Vector3 moveStart;
     float moveElapsed;
     float moveDuration;
@@ -51,7 +46,6 @@ public class DroneWorker : MonoBehaviour
     Transform barRoot;
     SpriteRenderer barBackground;
     SpriteRenderer barFill;
-    bool barVisible;
     UnityEngine.Rendering.SortingGroup sortingGroup;
     SpriteRenderer[] cachedRenderers;
 
@@ -68,12 +62,6 @@ public class DroneWorker : MonoBehaviour
 
     void Update()
     {
-        if (isBootstrap)
-        {
-            UpdateBootstrap();
-            return;
-        }
-
         var service = DroneTaskService.Instance;
         if (service == null)
         {
@@ -101,14 +89,12 @@ public class DroneWorker : MonoBehaviour
 
         if (currentTask == null)
         {
-            if (service.HasHq && service.TryAssignTask(this, out var task))
-            {
+            if (service.HasHq && TryAssignCrawlerTask(service, out var task))
                 currentTask = task;
-            }
             else
             {
                 if (service.HasHq)
-                    SetMoveTarget(service.GetHqPosition());
+                    SetMoveTarget(GetHqPosition(service));
                 else
                     StopMovement();
                 UpdateProgressBar(false);
@@ -125,7 +111,7 @@ public class DroneWorker : MonoBehaviour
         var target = currentTask.WorkPosition;
         if (!IsValidTarget(target))
         {
-            currentTask.ClearAssignment(this);
+            ClearTaskAssignment(currentTask);
             currentTask = null;
             StopMovement();
             UpdateProgressBar(false);
@@ -141,89 +127,10 @@ public class DroneWorker : MonoBehaviour
         currentTask.ApplyWork(Time.deltaTime);
         if (currentTask.IsComplete)
         {
-            currentTask.ClearAssignment(this);
+            ClearTaskAssignment(currentTask);
             currentTask = null;
         }
         UpdateProgressBar(true);
-    }
-
-    public void StartBootstrap(DroneTaskTarget task, Vector3 exitTarget, float speedMultiplier)
-    {
-        isBootstrap = true;
-        bootstrapTask = task;
-        bootstrapExitTarget = exitTarget;
-        bootstrapExiting = false;
-        bootstrapSpeedMultiplier = Mathf.Max(0.1f, speedMultiplier);
-        currentTask = null;
-        hasTarget = false;
-        isMoving = false;
-    }
-
-    public void AbortBootstrap()
-    {
-        if (!isBootstrap) return;
-        BeginBootstrapExit();
-    }
-
-    void UpdateBootstrap()
-    {
-        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play)
-        {
-            isPaused = true;
-            UpdateProgressBar(false);
-            return;
-        }
-
-        isPaused = false;
-        RefreshMovementSettings();
-
-        if (!bootstrapExiting)
-        {
-            var task = bootstrapTask;
-            if (task == null || task.IsComplete)
-            {
-                BeginBootstrapExit();
-                UpdateProgressBar(false);
-                return;
-            }
-            else
-            {
-                var target = task.WorkPosition;
-                if (!IsAt(target))
-                {
-                    SetMoveTarget(target);
-                    UpdateProgressBar(false);
-                    return;
-                }
-
-                task.ApplyWork(Time.deltaTime);
-                if (task.IsComplete)
-                {
-                    BeginBootstrapExit();
-                    UpdateProgressBar(false);
-                    return;
-                }
-
-                UpdateProgressBar(true);
-                return;
-            }
-        }
-
-        if (!IsAt(bootstrapExitTarget))
-        {
-            SetMoveTarget(bootstrapExitTarget);
-            UpdateProgressBar(false);
-            return;
-        }
-
-        Destroy(gameObject);
-    }
-
-    void BeginBootstrapExit()
-    {
-        bootstrapTask = null;
-        bootstrapExiting = true;
-        SetMoveTarget(bootstrapExitTarget);
     }
 
     void SetMoveTarget(Vector3 target)
@@ -256,7 +163,7 @@ public class DroneWorker : MonoBehaviour
     void StartMovement(Vector3 target)
     {
         float distance = Vector3.Distance(transform.position, target);
-        float duration = distance / Mathf.Max(0.01f, GetEffectiveMoveSpeed());
+        float duration = distance / Mathf.Max(0.01f, moveSpeed);
         moveStart = transform.position;
         moveElapsed = 0f;
         moveDuration = duration;
@@ -272,25 +179,19 @@ public class DroneWorker : MonoBehaviour
 
     void RefreshMovementSettings()
     {
-        float effectiveSpeed = GetEffectiveMoveSpeed();
-        int curveHash = GetCurveHash(flightCurve);
-        bool changed = !Mathf.Approximately(lastMoveSpeed, effectiveSpeed)
-                       || lastUseCurve != useFlightCurve
+        int curveHash = GetCurveHash(moveCurve);
+        bool changed = !Mathf.Approximately(lastMoveSpeed, moveSpeed)
+                       || lastUseCurve != useMoveCurve
                        || lastCurveHash != curveHash;
         if (!changed) return;
 
-        lastMoveSpeed = effectiveSpeed;
-        lastUseCurve = useFlightCurve;
+        lastMoveSpeed = moveSpeed;
+        lastUseCurve = useMoveCurve;
         lastCurveHash = curveHash;
         CacheCurveEndpoints();
 
         if (hasTarget && isMoving)
             StartMovement(currentTarget);
-    }
-
-    float GetEffectiveMoveSpeed()
-    {
-        return isBootstrap ? moveSpeed * Mathf.Max(0.1f, bootstrapSpeedMultiplier) : moveSpeed;
     }
 
     static int GetCurveHash(AnimationCurve curve)
@@ -330,15 +231,15 @@ public class DroneWorker : MonoBehaviour
 
     void CacheCurveEndpoints()
     {
-        if (flightCurve == null)
+        if (moveCurve == null)
         {
             curveStart = 0f;
             curveEnd = 1f;
             hasCurveRange = false;
             return;
         }
-        curveStart = flightCurve.Evaluate(0f);
-        curveEnd = flightCurve.Evaluate(1f);
+        curveStart = moveCurve.Evaluate(0f);
+        curveEnd = moveCurve.Evaluate(1f);
         hasCurveRange = !Mathf.Approximately(curveStart, curveEnd);
     }
 
@@ -350,8 +251,7 @@ public class DroneWorker : MonoBehaviour
             return;
         }
 
-        var task = currentTask != null ? currentTask : (isBootstrap ? bootstrapTask : null);
-        if (!hasWork || task == null)
+        if (!hasWork || currentTask == null)
         {
             SetBarVisible(false);
             return;
@@ -360,7 +260,7 @@ public class DroneWorker : MonoBehaviour
         EnsureProgressBar();
         SetBarVisible(true);
 
-        float progress = Mathf.Clamp01(task.Progress01);
+        float progress = Mathf.Clamp01(currentTask.Progress01);
         if (barRoot != null)
             barRoot.localPosition = new Vector3(-barSize.x * 0.5f, -barYOffset, 0f);
 
@@ -381,7 +281,7 @@ public class DroneWorker : MonoBehaviour
     {
         if (barRoot != null) return;
 
-        var root = new GameObject("DroneProgressBar");
+        var root = new GameObject("CrawlerProgressBar");
         root.transform.SetParent(transform, false);
         root.transform.localPosition = new Vector3(-barSize.x * 0.5f, -barYOffset, 0f);
         barRoot = root.transform;
@@ -411,18 +311,13 @@ public class DroneWorker : MonoBehaviour
         barFill.color = barFillColor;
         barFill.sortingOrder = baseOrder + 2;
         barFill.sortingLayerID = baseLayer;
-        barFill.transform.localScale = new Vector3(0f, barSize.y, 1f);
+        barFill.transform.localScale = new Vector3(barSize.x, barSize.y, 1f);
     }
 
     void SetBarVisible(bool visible)
     {
-        if (barRoot == null)
-        {
-            barVisible = false;
-            return;
-        }
-        if (barVisible == visible) return;
-        barVisible = visible;
+        if (barRoot == null) return;
+        if (barRoot.gameObject.activeSelf == visible) return;
         barRoot.gameObject.SetActive(visible);
     }
 
@@ -435,7 +330,7 @@ public class DroneWorker : MonoBehaviour
         tex.wrapMode = TextureWrapMode.Clamp;
         tex.filterMode = FilterMode.Point;
         barSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0f, 0.5f), 1f);
-        barSprite.name = "DroneProgressBarSprite";
+        barSprite.name = "CrawlerProgressBarSprite";
         return barSprite;
     }
 
@@ -480,26 +375,64 @@ public class DroneWorker : MonoBehaviour
         if (!isMoving || !hasTarget) return;
         float dt = Time.deltaTime;
         if (dt <= 0f) return;
+        if (moveDuration <= 0f) return;
 
         moveElapsed += dt;
-        float t = moveDuration <= 0.0001f ? 1f : Mathf.Clamp01(moveElapsed / moveDuration);
-        float eval = useFlightCurve && flightCurve != null ? flightCurve.Evaluate(t) : t;
-        float progress = eval;
-        if (useFlightCurve && flightCurve != null && hasCurveRange)
-        {
-            progress = Mathf.InverseLerp(curveStart, curveEnd, eval);
-        }
-        transform.position = Vector3.LerpUnclamped(moveStart, currentTarget, progress);
-
-        if (t >= 1f || IsAt(currentTarget))
+        float t = Mathf.Clamp01(moveElapsed / moveDuration);
+        float eased = useMoveCurve ? EvaluateCurve(t) : t;
+        transform.position = Vector3.Lerp(moveStart, currentTarget, eased);
+        if (t >= 1f)
         {
             transform.position = currentTarget;
-            StopMovement();
+            isMoving = false;
         }
     }
 
-    void OnDisable()
+    float EvaluateCurve(float t)
     {
-        StopMovement();
+        if (!hasCurveRange || moveCurve == null) return t;
+        float raw = moveCurve.Evaluate(t);
+        return Mathf.InverseLerp(curveStart, curveEnd, raw);
+    }
+
+    bool TryAssignCrawlerTask(DroneTaskService service, out DroneTaskTarget task)
+    {
+        task = null;
+        if (service == null) return false;
+
+        var mi = service.GetType().GetMethod("TryAssignCrawlerTask", new[] { typeof(CrawlerWorker), typeof(DroneTaskTarget).MakeByRefType() });
+        if (mi != null)
+        {
+            object[] args = { this, null };
+            bool ok = (bool)mi.Invoke(service, args);
+            task = args[1] as DroneTaskTarget;
+            return ok && task != null;
+        }
+
+        return false;
+    }
+
+    Vector3 GetHqPosition(DroneTaskService service)
+    {
+        if (service == null) return transform.position;
+        var mi = service.GetType().GetMethod("GetHqPosition", System.Type.EmptyTypes);
+        if (mi != null)
+        {
+            var res = mi.Invoke(service, null);
+            if (res is Vector3 v) return v;
+        }
+        var hq = DroneHQ.Instance;
+        return hq != null ? hq.DockPosition : service.transform.position;
+    }
+
+    void ClearTaskAssignment(DroneTaskTarget task)
+    {
+        if (task == null) return;
+        var mi = task.GetType().GetMethod("ClearAssignment", new[] { typeof(CrawlerWorker) });
+        if (mi != null)
+        {
+            mi.Invoke(task, new object[] { this });
+            return;
+        }
     }
 }
