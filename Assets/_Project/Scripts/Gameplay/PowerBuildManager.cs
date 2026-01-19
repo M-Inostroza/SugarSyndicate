@@ -92,7 +92,23 @@ public class PowerBuildManager : MonoBehaviour
                 return;
             }
 
-            if (!TryGetStartDragDistance(cell.Value, out var startDistance) || !IsWithinLengthLimit(startDistance))
+            if (TryGetExistingCableAtCell(cell.Value, out var existingCable))
+            {
+                if (!TryGetStartDragDistanceFromExisting(cell.Value, out var startDistance) || !IsWithinLengthLimit(startDistance))
+                {
+                    isMouseDown = false;
+                    return;
+                }
+
+                lastPlacedCell = cell.Value;
+                lastPlacedCable = existingCable;
+                AddDragCable(cell.Value, existingCable, startDistance);
+                PinUndergroundView();
+                UpdateDragCableConnections();
+                return;
+            }
+
+            if (!TryGetStartDragDistance(cell.Value, out var newStartDistance) || !IsWithinLengthLimit(newStartDistance))
             {
                 isMouseDown = false;
                 return;
@@ -101,8 +117,9 @@ public class PowerBuildManager : MonoBehaviour
             if (TryPlaceCable(cell.Value, null, out lastPlacedCable))
             {
                 lastPlacedCell = cell.Value;
-                AddDragCable(cell.Value, lastPlacedCable, startDistance);
+                AddDragCable(cell.Value, lastPlacedCable, newStartDistance);
                 PinUndergroundView();
+                UpdateDragCableConnections();
             }
             else
                 isMouseDown = false;
@@ -186,6 +203,8 @@ public class PowerBuildManager : MonoBehaviour
 
     PowerCable FindPowerCableAtCell(Vector2Int cell)
     {
+        if (PowerCable.TryGetAtCell(cell, out var cached))
+            return cached;
         var grid = GridService.Instance;
         if (grid == null) return null;
         var all = FindObjectsByType<PowerCable>(FindObjectsInactive.Include, FindObjectsSortMode.None);
@@ -196,6 +215,12 @@ public class PowerBuildManager : MonoBehaviour
                 return cable;
         }
         return null;
+    }
+
+    bool TryGetExistingCableAtCell(Vector2Int cell, out PowerCable cable)
+    {
+        cable = FindPowerCableAtCell(cell);
+        return cable != null;
     }
 
     PowerPole FindPowerPoleAtCell(Vector2Int cell)
@@ -433,7 +458,7 @@ public class PowerBuildManager : MonoBehaviour
 
     void UpdateCableVisualForTurn(PowerCable cable, Direction outgoing)
     {
-        if (cable == null) return;
+        if (cable == null || !cable.isGhost) return;
         Direction travelIn = outgoing;
         if (dragPath.Count >= 2)
         {
@@ -471,6 +496,7 @@ public class PowerBuildManager : MonoBehaviour
         lastPlacedCell = cell;
         dragCables.TryGetValue(cell, out lastPlacedCable);
         UpdateTailDirectionFromPath();
+        UpdateDragCableConnections();
         return true;
     }
 
@@ -480,8 +506,37 @@ public class PowerBuildManager : MonoBehaviour
         var prevCell = dragPath[dragPath.Count - 2];
         var lastCell = dragPath[dragPath.Count - 1];
         if (!dragCables.TryGetValue(lastCell, out var lastCable) || lastCable == null) return;
+        if (!lastCable.isGhost) return;
         var dir = DeltaToDirection(lastCell - prevCell);
         UpdateCableDirection(lastCable, dir);
+    }
+
+    void UpdateDragCableConnections()
+    {
+        if (dragPath.Count == 0) return;
+
+        for (int i = 0; i < dragPath.Count; i++)
+        {
+            var cell = dragPath[i];
+            if (!dragCables.TryGetValue(cell, out var cable) || cable == null) continue;
+            if (!cable.isGhost) continue;
+
+            PowerCable.ConnectionMask mask = PowerCable.ConnectionMask.None;
+            if (i > 0)
+            {
+                var prev = dragPath[i - 1];
+                var dirToPrev = DeltaToDirection(prev - cell);
+                mask |= PowerCable.MaskFromDirection(dirToPrev);
+            }
+            if (i < dragPath.Count - 1)
+            {
+                var next = dragPath[i + 1];
+                var dirToNext = DeltaToDirection(next - cell);
+                mask |= PowerCable.MaskFromDirection(dirToNext);
+            }
+
+            cable.SetBaseConnections(mask, refresh: true);
+        }
     }
 
     void ApplyDragPath(List<Vector2Int> targetPath)
@@ -533,6 +588,7 @@ public class PowerBuildManager : MonoBehaviour
             lastPlacedCell = dragPath[dragPath.Count - 1];
             dragCables.TryGetValue(lastPlacedCell, out lastPlacedCable);
         }
+        UpdateDragCableConnections();
     }
 
     void AddDragCable(Vector2Int cell, PowerCable cable, int distance)
@@ -665,6 +721,20 @@ public class PowerBuildManager : MonoBehaviour
         return false;
     }
 
+    bool TryGetStartDragDistanceFromExisting(Vector2Int cell, out int distance)
+    {
+        distance = 0;
+        var power = PowerService.Instance ?? PowerService.EnsureInstance();
+        if (power == null)
+        {
+            distance = 1;
+            return true;
+        }
+        if (power.TryGetPlacementDistance(cell, out distance))
+            return true;
+        return TryGetStartDragDistance(cell, out distance);
+    }
+
     bool TryGetNextDragDistance(Vector2Int cell, Vector2Int fromCell, out int distance)
     {
         if (!dragDistances.TryGetValue(fromCell, out var prev))
@@ -700,6 +770,10 @@ public class PowerBuildManager : MonoBehaviour
             if (cellData != null && (cellData.type == GridService.CellType.Machine || cellData.hasMachine))
                 return true;
         }
+
+        var power = PowerService.Instance;
+        if (power != null && power.HasPowerTerminalAt(cell))
+            return true;
 
         if (MachineRegistry.TryGet(cell, out _))
             return true;

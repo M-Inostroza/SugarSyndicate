@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: a0ac92ccbad273740850db3e495eac5f
+guid: 554a10f75f8fa5c45baf3ce5edf4653d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -5272565717807722116
-    second: Power pole_0
+      213: 2203621338136207589
+    second: Power cable T_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,7 +97,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
+    buildTarget: Android
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -126,7 +126,7 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Power pole_0
+      name: Power cable T_0
       rect:
         serializedVersion: 2
         x: 0
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: c711b273a6514d6b0800000000000000
-      internalID: -5272565717807722116
+      spriteID: 5e064178ee5d49e10800000000000000
+      internalID: 2203621338136207589
       vertices: []
       indices: 
       edges: []
@@ -160,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Power pole_0: -5272565717807722116
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

@@ -80,6 +80,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
         if (useGameTickForOutput)
         {
             try { GameTick.OnTickStart += OnTick; } catch { }
@@ -88,6 +89,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
 
     void OnDisable()
     {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
         if (useGameTickForOutput)
         {
             try { GameTick.OnTickStart -= OnTick; } catch { }

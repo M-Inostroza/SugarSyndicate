@@ -1,8 +1,5 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
-using System;
-using System.Linq;
-using System.Reflection;
 
 /// <summary>
 /// Simple camera panning with mouse drag while in Play state.
@@ -119,92 +116,21 @@ public class CameraDragPan : MonoBehaviour
 
     bool IsPlayState()
     {
-        try
-        {
-            // Find type named GameManager
-            var gmType = AppDomain.CurrentDomain.GetAssemblies()
-                .SelectMany(a => {
-                    try { return a.GetTypes(); } catch { return Array.Empty<Type>(); }
-                })
-                .FirstOrDefault(t => t.Name == "GameManager");
-            if (gmType == null) return true; // if no GM, allow pan
+        var gm = GameManager.Instance;
+        if (gm == null) return true;
 
-            // Try static Instance property
-            object instance = null;
-            var piInstance = gmType.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            if (piInstance != null)
-            {
-                try { instance = piInstance.GetValue(null, null); } catch { instance = null; }
-            }
-            if (instance == null)
-            {
-                // Fallback: find component in scene
-                var go = GameObject.Find("GameManager");
-                if (go != null) instance = go.GetComponent(gmType);
-                if (instance == null)
-                {
-                    var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-                    foreach (var mb in all) { if (mb != null && mb.GetType() == gmType) { instance = mb; break; } }
-                }
-            }
-            if (instance == null) return true;
-
-            // Read State property/field and compare its ToString() to "Play"
-            object stateObj = null;
-            var piState = gmType.GetProperty("State", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (piState != null)
-            {
-                try { stateObj = piState.GetValue(instance, null); } catch { stateObj = null; }
-            }
-            if (stateObj == null)
-            {
-                var fiState = gmType.GetField("State", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (fiState != null) { try { stateObj = fiState.GetValue(instance); } catch { stateObj = null; } }
-            }
-            if (stateObj == null) return true;
-
-            var name = stateObj.ToString();
-            if (string.Equals(name, "Play", StringComparison.OrdinalIgnoreCase)) return true;
-
-            // Allow panning in Build/Delete when no build tool is active
-            if (string.Equals(name, "Build", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(name, "Delete", StringComparison.OrdinalIgnoreCase))
-            {
-                return !HasActiveBuildTool();
-            }
-
-            // other states: default allow
+        if (gm.State == GameState.Play)
             return true;
-        }
-        catch { return true; }
+
+        if (gm.State == GameState.Build || gm.State == GameState.Delete)
+            return !HasActiveBuildTool();
+
+        return true;
     }
 
     bool HasActiveBuildTool()
     {
-        try
-        {
-            var type = AppDomain.CurrentDomain.GetAssemblies()
-                .SelectMany(a => {
-                    try { return a.GetTypes(); } catch { return Array.Empty<Type>(); }
-                })
-                .FirstOrDefault(t => t.Name == "BuildModeController");
-            if (type == null) return false;
-
-            // static property HasActiveTool
-            var pi = type.GetProperty("HasActiveTool", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            if (pi != null && pi.PropertyType == typeof(bool))
-            {
-                try { return (bool)pi.GetValue(null, null); } catch { }
-            }
-
-            var fi = type.GetField("HasActiveTool", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            if (fi != null && fi.FieldType == typeof(bool))
-            {
-                try { return (bool)fi.GetValue(null); } catch { }
-            }
-        }
-        catch { }
-        return false;
+        return BuildModeController.HasActiveTool;
     }
 
     void ClampToGrid(ref Vector3 pos)

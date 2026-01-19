@@ -19,12 +19,19 @@ public class PowerPole : MonoBehaviour
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterPowerPole(this);
         Register();
+        if (registered)
+            PowerCable.RefreshAround(cell);
     }
 
     void OnDisable()
     {
+        bool wasRegistered = registered;
+        UndergroundVisibilityRegistry.UnregisterPowerPole(this);
         Unregister();
+        if (wasRegistered)
+            PowerCable.RefreshAround(cell);
     }
 
     void Register()

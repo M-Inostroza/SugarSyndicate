@@ -46,12 +46,12 @@ public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer
         if (isGhost) return;
         if (grid == null) return;
 
-        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-        powerService?.RegisterConsumer(this);
-
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
+
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
 
         UpdatePowerRegistration(true);
 
@@ -59,6 +59,16 @@ public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer
         {
             Debug.LogWarning($"[WaterPump] Placed off water at {cell}. Pump will not supply water until moved onto water.");
         }
+    }
+
+    void OnEnable()
+    {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
+    }
+
+    void OnDisable()
+    {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
     }
 
     void Update()

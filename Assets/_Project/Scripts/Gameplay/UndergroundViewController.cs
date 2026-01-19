@@ -25,71 +25,71 @@ public class UndergroundViewController : MonoBehaviour
 
     [Header("Backgrounds")]
     [SerializeField] GameObject dayBackground;
+    [SerializeField] GameObject nightBackground;
     [SerializeField] GameObject undergroundBackground;
+    [SerializeField] Color nightTint = new Color(0.2235294f, 0.454902f, 1f, 1f);
 
-    GridService grid;
     BuildModeController buildModeController;
     bool isUndergroundActive;
     bool manualOverride;
     string lastSelectionName;
     readonly Dictionary<GameObject, bool> surfaceStates = new();
     readonly Dictionary<GameObject, bool> undergroundStates = new();
-    readonly List<RendererState> hiddenRenderers = new();
-    readonly List<RendererState> hiddenBeltRenderers = new();
-    readonly List<RendererState> hiddenPowerLineRenderers = new();
-    readonly List<RendererState> hiddenDroneRenderers = new();
-    readonly List<RendererState> hiddenCrawlerRenderers = new();
-    readonly List<TintState> tintedRenderers = new();
+    readonly Dictionary<Renderer, bool> hiddenMachineRenderers = new();
+    readonly Dictionary<Renderer, bool> hiddenBeltRenderers = new();
+    readonly Dictionary<Renderer, bool> hiddenPowerLineRenderers = new();
+    readonly Dictionary<Renderer, bool> hiddenDroneRenderers = new();
+    readonly Dictionary<Renderer, bool> hiddenCrawlerRenderers = new();
     readonly Dictionary<SpriteRenderer, Color> originalTintColors = new();
     readonly List<SpriteRenderer> tintCleanup = new();
-
-    struct RendererState
-    {
-        public Renderer renderer;
-        public bool enabled;
-
-        public RendererState(Renderer renderer, bool enabled)
-        {
-            this.renderer = renderer;
-            this.enabled = enabled;
-        }
-    }
-
-    struct TintState
-    {
-        public SpriteRenderer renderer;
-        public Color color;
-
-        public TintState(SpriteRenderer renderer, Color color)
-        {
-            this.renderer = renderer;
-            this.color = color;
-        }
-    }
+    PowerService powerService;
+    bool tintDirty;
+    TimeManager timeManager;
+    SpriteRenderer[] dayBackgroundRenderers;
+    Color[] dayBackgroundColors;
+    SpriteRenderer[] nightBackgroundRenderers;
+    Color[] nightBackgroundColors;
+    float lastNightBlend = -1f;
+    bool backgroundDirty;
 
     void Awake()
     {
-        if (grid == null) grid = GridService.Instance;
     }
 
     void Start()
     {
         if (hideSurfacePowerLines)
             HideSurfacePowerLineRenderers();
+        CacheBackgroundRenderers();
         SetBackgroundState(isUndergroundActive);
+        if (!isUndergroundActive)
+            HideCrawlerRenderers();
+        TryHookPowerService();
+        TryHookTimeManager();
+        UpdateBackgroundFromTime(true);
     }
 
-    void Update()
+    void LateUpdate()
     {
-        if (!isUndergroundActive) return;
-        if (tintSurfaceMachines)
+        if (tintSurfaceMachines && isUndergroundActive && tintDirty)
+        {
             RefreshSurfaceMachineTintRealtime();
+            tintDirty = false;
+        }
+        if (backgroundDirty)
+        {
+            UpdateBackgroundFromTime(false);
+            backgroundDirty = false;
+        }
     }
 
     void OnEnable()
     {
         BuildSelectionNotifier.OnSelectionChanged += HandleSelectionChanged;
         TryHookBuildModeController();
+        HookRegistryEvents(true);
+        TryHookPowerService();
+        TryHookTimeManager();
     }
 
     void OnDisable()
@@ -97,6 +97,9 @@ public class UndergroundViewController : MonoBehaviour
         BuildSelectionNotifier.OnSelectionChanged -= HandleSelectionChanged;
         if (buildModeController != null)
             buildModeController.onExitBuildMode -= HandleBuildModeExit;
+        HookRegistryEvents(false);
+        UnhookPowerService();
+        UnhookTimeManager();
         HideUnderground();
     }
 
@@ -168,6 +171,7 @@ public class UndergroundViewController : MonoBehaviour
     {
         if (isUndergroundActive) return;
         isUndergroundActive = true;
+        TryHookPowerService();
         CacheAndSetActive(surfaceRoots, surfaceStates, false);
         CacheAndSetActive(undergroundRoots, undergroundStates, true);
         if (tintSurfaceMachines)
@@ -179,6 +183,7 @@ public class UndergroundViewController : MonoBehaviour
         if (hideSurfaceItems)
             HideSurfaceItemContainer();
         SetBackgroundState(true);
+        UpdateBackgroundFromTime(true);
         if (hideSurfacePowerLines)
             RestoreSurfacePowerLineRenderers();
         HideDroneRenderers();
@@ -193,16 +198,13 @@ public class UndergroundViewController : MonoBehaviour
         RestoreStates(undergroundStates);
         RestoreSurfaceMachineTint();
         RestoreSurfaceMachineRenderers();
-        EnsureSurfaceMachineRenderersEnabled();
         RestoreSurfaceBeltRenderers();
-        EnsureSurfaceBeltRenderersEnabled();
         SetBackgroundState(false);
+        UpdateBackgroundFromTime(true);
         if (hideSurfacePowerLines)
             HideSurfacePowerLineRenderers();
         else
             RestoreSurfacePowerLineRenderers();
-        if (!hideSurfacePowerLines)
-            EnsureSurfacePowerLineRenderersEnabled();
         RestoreDroneRenderers();
         HideCrawlerRenderers();
     }
@@ -214,6 +216,7 @@ public class UndergroundViewController : MonoBehaviour
         {
             var root = roots[i];
             if (root == null) continue;
+            if (!IsSceneObject(root)) continue;
             if (!cache.ContainsKey(root)) cache[root] = root.activeSelf;
             root.SetActive(active);
         }
@@ -224,108 +227,42 @@ public class UndergroundViewController : MonoBehaviour
         foreach (var kv in cache)
         {
             if (kv.Key == null) continue;
+            if (!IsSceneObject(kv.Key)) continue;
             kv.Key.SetActive(kv.Value);
         }
         cache.Clear();
     }
 
+    static bool IsSceneObject(GameObject go)
+    {
+        if (go == null) return false;
+        var scene = go.scene;
+        return scene.IsValid() && scene.isLoaded;
+    }
+
 
     void HideSurfaceMachineRenderers()
     {
-        hiddenRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-
-        var seen = new HashSet<Renderer>();
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
-            if (keepPowerSourcesVisible && behaviour is IPowerSource) continue;
-            if (!IsOverlayTarget(behaviour)) continue;
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null || !seen.Add(r)) continue;
-                hiddenRenderers.Add(new RendererState(r, r.enabled));
-                r.enabled = false;
-            }
-        }
+        hiddenMachineRenderers.Clear();
+        foreach (var behaviour in UndergroundVisibilityRegistry.OverlayTargets)
+            HideOverlayRenderers(behaviour);
     }
 
     void RestoreSurfaceMachineRenderers()
     {
-        foreach (var state in hiddenRenderers)
-        {
-            if (state.renderer == null) continue;
-            state.renderer.enabled = state.enabled;
-        }
-        hiddenRenderers.Clear();
-    }
-
-    void EnsureSurfaceMachineRenderersEnabled()
-    {
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!behaviour.gameObject.activeInHierarchy) continue;
-            if (!IsOverlayTarget(behaviour)) continue;
-
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null) continue;
-                if (!r.enabled) r.enabled = true;
-            }
-        }
+        RestoreRenderers(hiddenMachineRenderers);
     }
 
     void HideSurfaceBeltRenderers()
     {
         hiddenBeltRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        var seen = new HashSet<Renderer>();
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
-            if (!(behaviour is IConveyor)) continue;
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null || !seen.Add(r)) continue;
-                hiddenBeltRenderers.Add(new RendererState(r, r.enabled));
-                r.enabled = false;
-            }
-        }
+        foreach (var belt in UndergroundVisibilityRegistry.Belts)
+            CacheAndDisableRenderers(belt, hiddenBeltRenderers);
     }
 
     void RestoreSurfaceBeltRenderers()
     {
-        foreach (var state in hiddenBeltRenderers)
-        {
-            if (state.renderer == null) continue;
-            state.renderer.enabled = state.enabled;
-        }
-        hiddenBeltRenderers.Clear();
-    }
-
-    void EnsureSurfaceBeltRenderersEnabled()
-    {
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!behaviour.gameObject.activeInHierarchy) continue;
-            if (!(behaviour is IConveyor)) continue;
-
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null) continue;
-                if (!r.enabled) r.enabled = true;
-            }
-        }
+        RestoreRenderers(hiddenBeltRenderers);
     }
 
     void HideSurfaceItemContainer()
@@ -337,125 +274,61 @@ public class UndergroundViewController : MonoBehaviour
 
     void SetBackgroundState(bool undergroundActive)
     {
-        if (dayBackground != null) dayBackground.SetActive(!undergroundActive);
+        bool surfaceActive = !undergroundActive;
+        if (dayBackground != null) dayBackground.SetActive(surfaceActive);
+        if (nightBackground != null) nightBackground.SetActive(surfaceActive);
         if (undergroundBackground != null) undergroundBackground.SetActive(undergroundActive);
     }
 
     void HideSurfacePowerLineRenderers()
     {
         hiddenPowerLineRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        var seen = new HashSet<Renderer>();
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
-            if (!(behaviour is PowerCable) && !(behaviour is PowerPole)) continue;
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null || !seen.Add(r)) continue;
-                hiddenPowerLineRenderers.Add(new RendererState(r, r.enabled));
-                r.enabled = false;
-            }
-        }
+        foreach (var cable in UndergroundVisibilityRegistry.PowerCables)
+            CacheAndDisableRenderers(cable, hiddenPowerLineRenderers);
+        foreach (var pole in UndergroundVisibilityRegistry.PowerPoles)
+            CacheAndDisableRenderers(pole, hiddenPowerLineRenderers);
     }
 
     void RestoreSurfacePowerLineRenderers()
     {
-        foreach (var state in hiddenPowerLineRenderers)
-        {
-            if (state.renderer == null) continue;
-            state.renderer.enabled = state.enabled;
-        }
-        hiddenPowerLineRenderers.Clear();
-    }
-
-    void EnsureSurfacePowerLineRenderersEnabled()
-    {
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (var behaviour in found)
-        {
-            if (behaviour == null) continue;
-            if (!behaviour.gameObject.activeInHierarchy) continue;
-            if (!(behaviour is PowerCable) && !(behaviour is PowerPole)) continue;
-
-            var renderers = behaviour.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null) continue;
-                if (!r.enabled) r.enabled = true;
-            }
-        }
+        RestoreRenderers(hiddenPowerLineRenderers);
     }
 
     void HideDroneRenderers()
     {
         hiddenDroneRenderers.Clear();
-        var found = FindObjectsByType<DroneWorker>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        var seen = new HashSet<Renderer>();
-        foreach (var drone in found)
-        {
-            if (drone == null) continue;
-            var renderers = drone.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null || !seen.Add(r)) continue;
-                hiddenDroneRenderers.Add(new RendererState(r, r.enabled));
-                r.enabled = false;
-            }
-        }
+        foreach (var drone in UndergroundVisibilityRegistry.Drones)
+            CacheAndDisableRenderers(drone, hiddenDroneRenderers);
     }
 
     void RestoreDroneRenderers()
     {
-        foreach (var state in hiddenDroneRenderers)
-        {
-            if (state.renderer == null) continue;
-            state.renderer.enabled = state.enabled;
-        }
-        hiddenDroneRenderers.Clear();
+        RestoreRenderers(hiddenDroneRenderers);
     }
 
     void HideCrawlerRenderers()
     {
         hiddenCrawlerRenderers.Clear();
-        var found = FindObjectsByType<CrawlerWorker>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        var seen = new HashSet<Renderer>();
-        foreach (var crawler in found)
-        {
-            if (crawler == null) continue;
-            var renderers = crawler.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r == null || !seen.Add(r)) continue;
-                hiddenCrawlerRenderers.Add(new RendererState(r, r.enabled));
-                r.enabled = false;
-            }
-        }
+        foreach (var crawler in UndergroundVisibilityRegistry.Crawlers)
+            CacheAndDisableRenderers(crawler, hiddenCrawlerRenderers);
     }
 
     void RestoreCrawlerRenderers()
     {
-        foreach (var state in hiddenCrawlerRenderers)
-        {
-            if (state.renderer == null) continue;
-            state.renderer.enabled = state.enabled;
-        }
-        hiddenCrawlerRenderers.Clear();
+        RestoreRenderers(hiddenCrawlerRenderers);
     }
 
     void TintSurfaceMachineRenderers()
     {
+        tintDirty = true;
         RefreshSurfaceMachineTintRealtime();
+        tintDirty = false;
     }
 
     void RefreshSurfaceMachineTintRealtime()
     {
-        tintedRenderers.Clear();
-        var found = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         var seen = new HashSet<SpriteRenderer>();
-        foreach (var behaviour in found)
+        foreach (var behaviour in UndergroundVisibilityRegistry.OverlayTargets)
         {
             if (behaviour == null) continue;
             if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) continue;
@@ -468,7 +341,6 @@ public class UndergroundViewController : MonoBehaviour
                 if (!originalTintColors.ContainsKey(sr))
                     originalTintColors[sr] = sr.color;
                 var baseCol = originalTintColors[sr];
-                tintedRenderers.Add(new TintState(sr, baseCol));
                 sr.color = new Color(baseCol.r * tint.r, baseCol.g * tint.g, baseCol.b * tint.b, baseCol.a * tint.a);
             }
         }
@@ -507,7 +379,7 @@ public class UndergroundViewController : MonoBehaviour
     bool IsConnectedToPower(MonoBehaviour behaviour)
     {
         if (behaviour == null) return false;
-        var power = PowerService.Instance;
+        var power = powerService ?? PowerService.Instance;
         if (power == null) return true;
 
         if (behaviour is IPowerConsumer consumer)
@@ -524,13 +396,7 @@ public class UndergroundViewController : MonoBehaviour
             return false;
         }
 
-        if (behaviour is DroneHQ)
-        {
-            var grid = GridService.Instance;
-            if (grid == null) return true;
-            var cell = grid.WorldToCell(behaviour.transform.position);
-            return power.IsCellPoweredOrAdjacent(cell);
-        }
+        if (behaviour is DroneHQ) return true;
 
         return true;
     }
@@ -538,7 +404,7 @@ public class UndergroundViewController : MonoBehaviour
     bool IsConsumerConnected(IPowerConsumer consumer, MonoBehaviour behaviour)
     {
         if (consumer == null) return false;
-        var power = PowerService.Instance;
+        var power = powerService ?? PowerService.Instance;
         if (power == null) return true;
 
         if (consumer is IMachine machine)
@@ -557,8 +423,232 @@ public class UndergroundViewController : MonoBehaviour
             if (kv.Key == null) continue;
             kv.Key.color = kv.Value;
         }
-        tintedRenderers.Clear();
         originalTintColors.Clear();
+        tintDirty = false;
+    }
+
+    void HideOverlayRenderers(MonoBehaviour behaviour)
+    {
+        if (behaviour == null) return;
+        if (!includeInactiveMachines && !behaviour.gameObject.activeInHierarchy) return;
+        if (keepPowerSourcesVisible && behaviour is IPowerSource) return;
+        if (!IsOverlayTarget(behaviour)) return;
+        CacheAndDisableRenderers(behaviour, hiddenMachineRenderers);
+    }
+
+    void CacheAndDisableRenderers(Component root, Dictionary<Renderer, bool> store)
+    {
+        if (root == null) return;
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
+        foreach (var r in renderers)
+        {
+            if (r == null || store.ContainsKey(r)) continue;
+            store[r] = r.enabled;
+            r.enabled = false;
+        }
+    }
+
+    void RestoreRenderers(Dictionary<Renderer, bool> store)
+    {
+        foreach (var kv in store)
+        {
+            if (kv.Key == null) continue;
+            kv.Key.enabled = kv.Value;
+        }
+        store.Clear();
+    }
+
+    void RestoreRenderersFor(Component root, Dictionary<Renderer, bool> store)
+    {
+        if (root == null) return;
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
+        foreach (var r in renderers)
+        {
+            if (r == null) continue;
+            if (store.TryGetValue(r, out var enabled))
+            {
+                r.enabled = enabled;
+                store.Remove(r);
+            }
+        }
+    }
+
+    void ForgetRenderers(Component root, Dictionary<Renderer, bool> store)
+    {
+        if (root == null) return;
+        var renderers = root.GetComponentsInChildren<Renderer>(true);
+        foreach (var r in renderers)
+        {
+            if (r == null) continue;
+            store.Remove(r);
+        }
+    }
+
+    void ForgetTintedRenderers(MonoBehaviour behaviour)
+    {
+        if (behaviour == null) return;
+        var renderers = behaviour.GetComponentsInChildren<SpriteRenderer>(true);
+        foreach (var sr in renderers)
+        {
+            if (sr == null) continue;
+            if (originalTintColors.TryGetValue(sr, out var color))
+                sr.color = color;
+            originalTintColors.Remove(sr);
+        }
+    }
+
+    void HookRegistryEvents(bool hook)
+    {
+        if (hook)
+        {
+            UndergroundVisibilityRegistry.OverlayRegistered += HandleOverlayRegistered;
+            UndergroundVisibilityRegistry.OverlayUnregistered += HandleOverlayUnregistered;
+            UndergroundVisibilityRegistry.BeltRegistered += HandleBeltRegistered;
+            UndergroundVisibilityRegistry.BeltUnregistered += HandleBeltUnregistered;
+            UndergroundVisibilityRegistry.PowerCableRegistered += HandlePowerCableRegistered;
+            UndergroundVisibilityRegistry.PowerCableUnregistered += HandlePowerCableUnregistered;
+            UndergroundVisibilityRegistry.PowerPoleRegistered += HandlePowerPoleRegistered;
+            UndergroundVisibilityRegistry.PowerPoleUnregistered += HandlePowerPoleUnregistered;
+            UndergroundVisibilityRegistry.DroneRegistered += HandleDroneRegistered;
+            UndergroundVisibilityRegistry.DroneUnregistered += HandleDroneUnregistered;
+            UndergroundVisibilityRegistry.CrawlerRegistered += HandleCrawlerRegistered;
+            UndergroundVisibilityRegistry.CrawlerUnregistered += HandleCrawlerUnregistered;
+            return;
+        }
+
+        UndergroundVisibilityRegistry.OverlayRegistered -= HandleOverlayRegistered;
+        UndergroundVisibilityRegistry.OverlayUnregistered -= HandleOverlayUnregistered;
+        UndergroundVisibilityRegistry.BeltRegistered -= HandleBeltRegistered;
+        UndergroundVisibilityRegistry.BeltUnregistered -= HandleBeltUnregistered;
+        UndergroundVisibilityRegistry.PowerCableRegistered -= HandlePowerCableRegistered;
+        UndergroundVisibilityRegistry.PowerCableUnregistered -= HandlePowerCableUnregistered;
+        UndergroundVisibilityRegistry.PowerPoleRegistered -= HandlePowerPoleRegistered;
+        UndergroundVisibilityRegistry.PowerPoleUnregistered -= HandlePowerPoleUnregistered;
+        UndergroundVisibilityRegistry.DroneRegistered -= HandleDroneRegistered;
+        UndergroundVisibilityRegistry.DroneUnregistered -= HandleDroneUnregistered;
+        UndergroundVisibilityRegistry.CrawlerRegistered -= HandleCrawlerRegistered;
+        UndergroundVisibilityRegistry.CrawlerUnregistered -= HandleCrawlerUnregistered;
+    }
+
+    void HandleOverlayRegistered(MonoBehaviour behaviour)
+    {
+        if (!isUndergroundActive) return;
+        if (tintSurfaceMachines)
+        {
+            tintDirty = true;
+            return;
+        }
+        if (hideSurfaceMachineRenderers)
+            HideOverlayRenderers(behaviour);
+    }
+
+    void HandleOverlayUnregistered(MonoBehaviour behaviour)
+    {
+        ForgetTintedRenderers(behaviour);
+        ForgetRenderers(behaviour, hiddenMachineRenderers);
+    }
+
+    void HandleBeltRegistered(Conveyor belt)
+    {
+        if (!isUndergroundActive || !hideSurfaceBelts) return;
+        CacheAndDisableRenderers(belt, hiddenBeltRenderers);
+    }
+
+    void HandleBeltUnregistered(Conveyor belt)
+    {
+        ForgetRenderers(belt, hiddenBeltRenderers);
+    }
+
+    void HandlePowerCableRegistered(PowerCable cable)
+    {
+        HandlePowerLineRegistered(cable);
+    }
+
+    void HandlePowerCableUnregistered(PowerCable cable)
+    {
+        ForgetRenderers(cable, hiddenPowerLineRenderers);
+    }
+
+    void HandlePowerPoleRegistered(PowerPole pole)
+    {
+        HandlePowerLineRegistered(pole);
+    }
+
+    void HandlePowerPoleUnregistered(PowerPole pole)
+    {
+        ForgetRenderers(pole, hiddenPowerLineRenderers);
+    }
+
+    void HandlePowerLineRegistered(Component line)
+    {
+        if (!hideSurfacePowerLines) return;
+        if (isUndergroundActive)
+        {
+            RestoreRenderersFor(line, hiddenPowerLineRenderers);
+            return;
+        }
+        CacheAndDisableRenderers(line, hiddenPowerLineRenderers);
+    }
+
+    void HandleDroneRegistered(DroneWorker drone)
+    {
+        if (!isUndergroundActive) return;
+        CacheAndDisableRenderers(drone, hiddenDroneRenderers);
+    }
+
+    void HandleDroneUnregistered(DroneWorker drone)
+    {
+        ForgetRenderers(drone, hiddenDroneRenderers);
+    }
+
+    void HandleCrawlerRegistered(CrawlerWorker crawler)
+    {
+        if (isUndergroundActive)
+        {
+            RestoreRenderersFor(crawler, hiddenCrawlerRenderers);
+            return;
+        }
+        CacheAndDisableRenderers(crawler, hiddenCrawlerRenderers);
+    }
+
+    void HandleCrawlerUnregistered(CrawlerWorker crawler)
+    {
+        ForgetRenderers(crawler, hiddenCrawlerRenderers);
+    }
+
+    void TryHookPowerService()
+    {
+        if (powerService != null) return;
+        powerService = PowerService.Instance;
+        if (powerService == null)
+            powerService = FindAnyObjectByType<PowerService>();
+        if (powerService == null) return;
+        powerService.OnPowerChanged -= HandlePowerChanged;
+        powerService.OnPowerChanged += HandlePowerChanged;
+        powerService.OnNetworkChanged -= HandleNetworkChanged;
+        powerService.OnNetworkChanged += HandleNetworkChanged;
+        if (isUndergroundActive && tintSurfaceMachines)
+            tintDirty = true;
+    }
+
+    void UnhookPowerService()
+    {
+        if (powerService == null) return;
+        powerService.OnPowerChanged -= HandlePowerChanged;
+        powerService.OnNetworkChanged -= HandleNetworkChanged;
+        powerService = null;
+    }
+
+    void HandlePowerChanged(float _)
+    {
+        if (!isUndergroundActive || !tintSurfaceMachines) return;
+        tintDirty = true;
+    }
+
+    void HandleNetworkChanged()
+    {
+        if (!isUndergroundActive || !tintSurfaceMachines) return;
+        tintDirty = true;
     }
 
 
@@ -572,5 +662,105 @@ public class UndergroundViewController : MonoBehaviour
                 buildModeController.onExitBuildMode += HandleBuildModeExit;
         }
         catch { }
+    }
+
+    void CacheBackgroundRenderers()
+    {
+        CacheBackgroundRenderers(dayBackground, ref dayBackgroundRenderers, ref dayBackgroundColors);
+        CacheBackgroundRenderers(nightBackground, ref nightBackgroundRenderers, ref nightBackgroundColors);
+    }
+
+    static void CacheBackgroundRenderers(GameObject root, ref SpriteRenderer[] renderers, ref Color[] baseColors)
+    {
+        if (root == null)
+        {
+            renderers = null;
+            baseColors = null;
+            return;
+        }
+        renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+        baseColors = new Color[renderers.Length];
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var sr = renderers[i];
+            baseColors[i] = sr != null ? sr.color : Color.white;
+        }
+    }
+
+    void TryHookTimeManager()
+    {
+        if (timeManager != null) return;
+        timeManager = TimeManager.Instance;
+        if (timeManager == null) return;
+        timeManager.OnPhaseChanged -= HandlePhaseChanged;
+        timeManager.OnPhaseChanged += HandlePhaseChanged;
+        timeManager.OnPhaseTimeChanged -= HandlePhaseTimeChanged;
+        timeManager.OnPhaseTimeChanged += HandlePhaseTimeChanged;
+        backgroundDirty = true;
+    }
+
+    void UnhookTimeManager()
+    {
+        if (timeManager == null) return;
+        timeManager.OnPhaseChanged -= HandlePhaseChanged;
+        timeManager.OnPhaseTimeChanged -= HandlePhaseTimeChanged;
+        timeManager = null;
+    }
+
+    void HandlePhaseChanged(TimePhase _)
+    {
+        backgroundDirty = true;
+    }
+
+    void HandlePhaseTimeChanged(float _)
+    {
+        backgroundDirty = true;
+    }
+
+    void UpdateBackgroundFromTime(bool force)
+    {
+        if (isUndergroundActive) return;
+        float blend = GetNightBlend();
+        if (!force && Mathf.Abs(blend - lastNightBlend) < 0.001f) return;
+        lastNightBlend = blend;
+
+        var tint = nightBackground != null ? Color.white : Color.Lerp(Color.white, nightTint, blend);
+        ApplyTint(dayBackgroundRenderers, dayBackgroundColors, tint);
+        if (nightBackground != null)
+            ApplyNightAlpha(nightBackgroundRenderers, nightBackgroundColors, blend);
+    }
+
+    float GetNightBlend()
+    {
+        if (timeManager == null) return 0f;
+        float duration = Mathf.Max(0.01f, timeManager.PhaseDuration);
+        float t = Mathf.Clamp01(timeManager.PhaseElapsed / duration);
+        return timeManager.CurrentPhase == TimePhase.Night ? 1f - t : t;
+    }
+
+    static void ApplyTint(SpriteRenderer[] renderers, Color[] baseColors, Color tint)
+    {
+        if (renderers == null || baseColors == null) return;
+        float alpha = Mathf.Clamp01(tint.a);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var sr = renderers[i];
+            if (sr == null) continue;
+            var baseCol = baseColors[i];
+            sr.color = new Color(baseCol.r * tint.r, baseCol.g * tint.g, baseCol.b * tint.b, baseCol.a * alpha);
+        }
+    }
+
+    static void ApplyNightAlpha(SpriteRenderer[] renderers, Color[] baseColors, float alpha01)
+    {
+        if (renderers == null || baseColors == null) return;
+        float alpha = Mathf.Clamp01(alpha01);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var sr = renderers[i];
+            if (sr == null) continue;
+            var baseCol = baseColors[i];
+            sr.color = new Color(baseCol.r, baseCol.g, baseCol.b, baseCol.a * alpha);
+        }
     }
 }

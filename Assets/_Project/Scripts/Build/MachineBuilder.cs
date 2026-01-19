@@ -35,6 +35,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
     [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
+    [SerializeField] Color blockedGhostTint = new Color(1f, 0.25f, 0.25f, 0.75f);
     [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
 
     [Header("Economy")]
@@ -85,6 +86,10 @@ public class MachineBuilder : MonoBehaviour
     bool placingPipePath;
     readonly List<GameObject> ghostPipes = new List<GameObject>();
     readonly List<Vector2Int> pipePath = new List<Vector2Int>();
+    SpriteRenderer[] ghostRenderers;
+    Color[] ghostBaseColors;
+    bool ghostBlocked;
+    bool ghostTintApplied;
 
     void Awake()
     {
@@ -171,24 +176,23 @@ public class MachineBuilder : MonoBehaviour
                 {
                     if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
 
-                if (!TryCellFromWorld(world, out baseCell)) return;
-                var footprint = GetFootprintCells(baseCell, GetDefaultFacing());
-                if (IsAnyBlocked(footprint)) return;
-                if (RequiresWaterCell() && !IsWaterCell(baseCell))
-                {
-                    Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
-                    return;
+                    if (!TryCellFromWorld(world, out baseCell)) return;
+                    if (IsBlocked(baseCell)) return;
+                    if (RequiresWaterCell() && !IsWaterCell(baseCell))
+                    {
+                        Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
+                        return;
+                    }
+                    if (RequiresSugarCell() && !IsSugarCell(baseCell))
+                    {
+                        Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+                        return;
+                    }
+                    TrySetBuildToolActive(true);
+                    SpawnGhost(baseCell);
+                    placing = true;
                 }
-                if (RequiresSugarCell() && !IsSugarCell(baseCell))
-                {
-                    Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
-                    return;
-                }
-                TrySetBuildToolActive(true);
-                SpawnGhost(baseCell);
-                placing = true;
             }
-        }
             else
             {
                 // Drag to set orientation, release to commit
@@ -789,7 +793,7 @@ public class MachineBuilder : MonoBehaviour
         {
             ghostSolarPanel.isGhost = true;
         }
-        TintGhost(ghostGO);
+        CacheGhostColors(ghostGO);
         UpdateGhost(cell, GetDefaultFacing());
     }
 
@@ -811,6 +815,8 @@ public class MachineBuilder : MonoBehaviour
         if (ghostStorage != null) ghostStorage.facingVec = outputDir;
         if (ghostSolarPanel != null) ghostSolarPanel.facingVec = outputDir;
         if (ghostMine != null) ghostMine.SetFacing(outputDir);
+        var footprint = GetFootprintCells(cell, outputDir);
+        UpdateGhostTint(IsAnyBlocked(footprint));
     }
 
     void ApplyGhostSorting(GameObject go)
@@ -820,6 +826,42 @@ public class MachineBuilder : MonoBehaviour
         if (group != null) group.sortingOrder = ghostSortingOrder;
         var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
         foreach (var sr in srs) sr.sortingOrder = ghostSortingOrder;
+    }
+
+    void CacheGhostColors(GameObject go)
+    {
+        if (go == null) return;
+        ghostRenderers = go.GetComponentsInChildren<SpriteRenderer>(true);
+        ghostBaseColors = new Color[ghostRenderers.Length];
+        for (int i = 0; i < ghostRenderers.Length; i++)
+        {
+            var sr = ghostRenderers[i];
+            ghostBaseColors[i] = sr != null ? sr.color : Color.white;
+        }
+        ghostBlocked = false;
+        ghostTintApplied = false;
+    }
+
+    void UpdateGhostTint(bool blocked)
+    {
+        if (ghostRenderers == null || ghostBaseColors == null) return;
+        if (ghostTintApplied && ghostBlocked == blocked) return;
+        ghostBlocked = blocked;
+        ghostTintApplied = true;
+        ApplyGhostTint(blocked ? blockedGhostTint : ghostTint);
+    }
+
+    void ApplyGhostTint(Color tint)
+    {
+        if (ghostRenderers == null || ghostBaseColors == null) return;
+        float alpha = Mathf.Clamp01(tint.a);
+        for (int i = 0; i < ghostRenderers.Length; i++)
+        {
+            var sr = ghostRenderers[i];
+            if (sr == null) continue;
+            var baseCol = ghostBaseColors[i];
+            sr.color = new Color(baseCol.r * tint.r, baseCol.g * tint.g, baseCol.b * tint.b, alpha);
+        }
     }
 
     void ApplyPlacedSorting(GameObject go, int sortingOrder)
@@ -967,6 +1009,10 @@ public class MachineBuilder : MonoBehaviour
         ghostSolarPanel = null;
         ghostMine = null;
         ghostHq = null;
+        ghostRenderers = null;
+        ghostBaseColors = null;
+        ghostBlocked = false;
+        ghostTintApplied = false;
         if (clearActiveSelection) activePrefab = null;
         ClearPipeGhosts();
         if (clearActiveSelection) TrySetBuildToolActive(false);

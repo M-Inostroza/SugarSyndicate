@@ -28,6 +28,16 @@ public class DroneHQ : MonoBehaviour
         DroneTaskService.Instance?.RegisterHQ(this);
     }
 
+    void OnEnable()
+    {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
+    }
+
+    void OnDisable()
+    {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
+    }
+
     void OnDestroy()
     {
         if (isGhost) return;

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: c39de14778407e643be4e084fda2a67b
+guid: a0ac92ccbad273740850db3e495eac5f
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 2530086582174172366
-    second: Power icon_0
+      213: -5272565717807722116
+    second: Power pole_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -122,11 +122,24 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Power icon_0
+      name: Power pole_0
       rect:
         serializedVersion: 2
         x: 0
@@ -141,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: ec4497d675cac1320800000000000000
-      internalID: 2530086582174172366
+      spriteID: c711b273a6514d6b0800000000000000
+      internalID: -5272565717807722116
       vertices: []
       indices: 
       edges: []
@@ -161,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Power icon_0: 2530086582174172366
+      Power pole_0: -5272565717807722116
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

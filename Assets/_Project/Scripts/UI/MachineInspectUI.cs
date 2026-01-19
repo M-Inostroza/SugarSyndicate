@@ -26,6 +26,7 @@ public class MachineInspectUI : MonoBehaviour
     [SerializeField] TMP_Text maintenanceText;
     [SerializeField] Slider maintenanceSlider;
     [SerializeField] TMP_Text processText;
+    [SerializeField] TMP_Text powerText;
     [SerializeField] bool persistAcrossScenes = false;
 
     [Header("Input")]
@@ -50,6 +51,7 @@ public class MachineInspectUI : MonoBehaviour
     MonoBehaviour currentMachine;
     bool hasMaintenance;
     float lastMaintenance = -1f;
+    string lastPowerInfo;
 
     Vector2 panelBasePos;
     bool panelBaseCached;
@@ -98,6 +100,7 @@ public class MachineInspectUI : MonoBehaviour
             if (!isClosing)
             {
                 UpdateMaintenance();
+                UpdatePowerInfo();
                 if (Input.GetKeyDown(KeyCode.Escape))
                     Close();
             }
@@ -122,6 +125,7 @@ public class MachineInspectUI : MonoBehaviour
         if (titleText != null) titleText.text = title;
         if (processText != null) processText.text = processSummary;
         lastMaintenance = -1f;
+        lastPowerInfo = null;
 
         SetUiActive(true);
         CachePanelBasePos();
@@ -149,6 +153,7 @@ public class MachineInspectUI : MonoBehaviour
         isOpen = true;
         isClosing = false;
         UpdateMaintenance();
+        UpdatePowerInfo();
         UpdateDroneHqUi();
     }
 
@@ -206,9 +211,11 @@ public class MachineInspectUI : MonoBehaviour
         currentMachine = null;
         hasMaintenance = false;
         lastMaintenance = -1f;
+        lastPowerInfo = null;
 
         SetUiImmediate(false);
         SetUiActive(false);
+        UpdatePowerInfo();
         UpdateDroneHqUi();
     }
 
@@ -217,10 +224,17 @@ public class MachineInspectUI : MonoBehaviour
         if (maintenanceSlider == null || maintenanceText == null) return;
         if (!hasMaintenance)
         {
-            maintenanceSlider.value = 1f;
-            maintenanceText.text = "Maintenance: N/A";
+            if (maintenanceSlider.gameObject.activeSelf)
+                maintenanceSlider.gameObject.SetActive(false);
+            if (maintenanceText.gameObject.activeSelf)
+                maintenanceText.gameObject.SetActive(false);
             return;
         }
+
+        if (!maintenanceSlider.gameObject.activeSelf)
+            maintenanceSlider.gameObject.SetActive(true);
+        if (!maintenanceText.gameObject.activeSelf)
+            maintenanceText.gameObject.SetActive(true);
 
         if (!TryGetMaintenance(currentMachine, out var value)) return;
         value = Mathf.Clamp01(value);
@@ -228,6 +242,39 @@ public class MachineInspectUI : MonoBehaviour
         lastMaintenance = value;
         maintenanceSlider.value = value;
         maintenanceText.text = $"Maintenance: {Mathf.RoundToInt(value * 100f)}%";
+    }
+
+    void UpdatePowerInfo()
+    {
+        if (powerText == null) return;
+        if (currentMachine == null)
+        {
+            SetPowerInfo(false, null);
+            return;
+        }
+
+        if (currentMachine is IPowerConsumer consumer)
+        {
+            float usage = Mathf.Max(0f, consumer.GetConsumptionWatts());
+            bool hasPower = PowerConsumerUtil.IsConsumerPowered(consumer);
+            string state = hasPower ? "On" : "Off";
+            string info = $"Power: {state}\nUse: {PowerService.FormatPower(usage)}";
+            SetPowerInfo(true, info);
+            return;
+        }
+
+        SetPowerInfo(false, null);
+    }
+
+    void SetPowerInfo(bool visible, string info)
+    {
+        if (powerText == null) return;
+        if (powerText.gameObject.activeSelf != visible)
+            powerText.gameObject.SetActive(visible);
+        if (!visible) return;
+        if (lastPowerInfo == info) return;
+        lastPowerInfo = info;
+        powerText.text = info ?? string.Empty;
     }
 
     MonoBehaviour TryPickMachineAt(Vector3 screenPos)
@@ -240,6 +287,7 @@ public class MachineInspectUI : MonoBehaviour
         var hit = Physics2D.OverlapPoint(world);
         if (hit != null)
         {
+            if (IsBlueprintObject(hit.transform)) return null;
             var fromCollider = FindMachineFromTransform(hit.transform);
             if (fromCollider != null) return fromCollider;
         }
@@ -270,6 +318,7 @@ public class MachineInspectUI : MonoBehaviour
     MonoBehaviour FindMachineFromTransform(Transform t)
     {
         if (t == null) return null;
+        if (IsBlueprintObject(t)) return null;
         var mbs = t.GetComponentsInParent<MonoBehaviour>(true);
         for (int i = 0; i < mbs.Length; i++)
         {
@@ -279,6 +328,11 @@ public class MachineInspectUI : MonoBehaviour
             if (mb is DroneHQ) return mb;
         }
         return null;
+    }
+
+    static bool IsBlueprintObject(Transform t)
+    {
+        return t != null && t.GetComponentInParent<BlueprintTask>() != null;
     }
 
     void BuildMachineInfo(MonoBehaviour machine, out string title, out string process, out bool hasMaintenanceInfo)
@@ -318,7 +372,6 @@ public class MachineInspectUI : MonoBehaviour
         if (machine is StorageContainerMachine storage)
         {
             title = "Storage";
-            return;
             process = $"Stores items ({storage.StoredItemCount}/{storage.Capacity})";
             return;
         }

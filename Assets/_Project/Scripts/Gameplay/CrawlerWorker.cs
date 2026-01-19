@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class CrawlerWorker : MonoBehaviour
@@ -50,6 +51,13 @@ public class CrawlerWorker : MonoBehaviour
     SpriteRenderer[] cachedRenderers;
 
     static Sprite barSprite;
+    struct BarInstance
+    {
+        public Transform root;
+        public SpriteRenderer background;
+        public SpriteRenderer fill;
+    }
+    static readonly Stack<BarInstance> barPool = new();
 
     public float MoveSpeed => moveSpeed;
     public bool IsBusy => currentTask != null;
@@ -58,6 +66,11 @@ public class CrawlerWorker : MonoBehaviour
     {
         CacheRenderers();
         ApplySortingOrder();
+    }
+
+    void OnEnable()
+    {
+        UndergroundVisibilityRegistry.RegisterCrawler(this);
     }
 
     void Update()
@@ -245,7 +258,7 @@ public class CrawlerWorker : MonoBehaviour
 
     void UpdateProgressBar(bool hasWork)
     {
-        if (!showProgressBar)
+        if (!showProgressBar || !AreVisualsVisible())
         {
             SetBarVisible(false);
             return;
@@ -277,14 +290,33 @@ public class CrawlerWorker : MonoBehaviour
         }
     }
 
+    bool AreVisualsVisible()
+    {
+        if (cachedRenderers != null)
+        {
+            for (int i = 0; i < cachedRenderers.Length; i++)
+            {
+                var sr = cachedRenderers[i];
+                if (sr != null && sr.enabled) return true;
+            }
+            return false;
+        }
+        var fallback = GetComponentInChildren<SpriteRenderer>();
+        return fallback != null && fallback.enabled;
+    }
+
     void EnsureProgressBar()
     {
         if (barRoot != null) return;
 
-        var root = new GameObject("CrawlerProgressBar");
-        root.transform.SetParent(transform, false);
-        root.transform.localPosition = new Vector3(-barSize.x * 0.5f, -barYOffset, 0f);
-        barRoot = root.transform;
+        var instance = GetBarInstance();
+        barRoot = instance.root;
+        barBackground = instance.background;
+        barFill = instance.fill;
+
+        barRoot.SetParent(transform, false);
+        barRoot.gameObject.SetActive(true);
+        barRoot.localPosition = new Vector3(-barSize.x * 0.5f, -barYOffset, 0f);
 
         int baseOrder = 0;
         int baseLayer = 0;
@@ -295,23 +327,67 @@ public class CrawlerWorker : MonoBehaviour
             baseLayer = sr.sortingLayerID;
         }
 
+        if (barBackground != null)
+        {
+            barBackground.sprite = GetBarSprite();
+            barBackground.color = barBackgroundColor;
+            barBackground.sortingOrder = baseOrder + 1;
+            barBackground.sortingLayerID = baseLayer;
+            barBackground.transform.localScale = new Vector3(barSize.x, barSize.y, 1f);
+        }
+
+        if (barFill != null)
+        {
+            barFill.sprite = GetBarSprite();
+            barFill.color = barFillColor;
+            barFill.sortingOrder = baseOrder + 2;
+            barFill.sortingLayerID = baseLayer;
+            barFill.transform.localScale = new Vector3(barSize.x, barSize.y, 1f);
+        }
+    }
+
+    static BarInstance GetBarInstance()
+    {
+        while (barPool.Count > 0)
+        {
+            var instance = barPool.Pop();
+            if (instance.root != null && instance.background != null && instance.fill != null)
+                return instance;
+        }
+
+        var root = new GameObject("CrawlerProgressBar");
         var bg = new GameObject("Background");
-        bg.transform.SetParent(barRoot, false);
-        barBackground = bg.AddComponent<SpriteRenderer>();
-        barBackground.sprite = GetBarSprite();
-        barBackground.color = barBackgroundColor;
-        barBackground.sortingOrder = baseOrder + 1;
-        barBackground.sortingLayerID = baseLayer;
-        barBackground.transform.localScale = new Vector3(barSize.x, barSize.y, 1f);
+        bg.transform.SetParent(root.transform, false);
+        var bgRenderer = bg.AddComponent<SpriteRenderer>();
 
         var fill = new GameObject("Fill");
-        fill.transform.SetParent(barRoot, false);
-        barFill = fill.AddComponent<SpriteRenderer>();
-        barFill.sprite = GetBarSprite();
-        barFill.color = barFillColor;
-        barFill.sortingOrder = baseOrder + 2;
-        barFill.sortingLayerID = baseLayer;
-        barFill.transform.localScale = new Vector3(barSize.x, barSize.y, 1f);
+        fill.transform.SetParent(root.transform, false);
+        var fillRenderer = fill.AddComponent<SpriteRenderer>();
+
+        return new BarInstance
+        {
+            root = root.transform,
+            background = bgRenderer,
+            fill = fillRenderer,
+        };
+    }
+
+    void ReleaseProgressBar()
+    {
+        if (barRoot == null) return;
+        var instance = new BarInstance
+        {
+            root = barRoot,
+            background = barBackground,
+            fill = barFill,
+        };
+        barRoot.gameObject.SetActive(false);
+        if (barRoot.parent != null && barRoot.parent.gameObject.activeInHierarchy)
+            barRoot.SetParent(null, false);
+        barPool.Push(instance);
+        barRoot = null;
+        barBackground = null;
+        barFill = null;
     }
 
     void SetBarVisible(bool visible)
@@ -397,42 +473,29 @@ public class CrawlerWorker : MonoBehaviour
 
     bool TryAssignCrawlerTask(DroneTaskService service, out DroneTaskTarget task)
     {
-        task = null;
-        if (service == null) return false;
-
-        var mi = service.GetType().GetMethod("TryAssignCrawlerTask", new[] { typeof(CrawlerWorker), typeof(DroneTaskTarget).MakeByRefType() });
-        if (mi != null)
+        if (service == null)
         {
-            object[] args = { this, null };
-            bool ok = (bool)mi.Invoke(service, args);
-            task = args[1] as DroneTaskTarget;
-            return ok && task != null;
+            task = null;
+            return false;
         }
-
-        return false;
+        return service.TryAssignCrawlerTask(this, out task);
     }
 
     Vector3 GetHqPosition(DroneTaskService service)
     {
         if (service == null) return transform.position;
-        var mi = service.GetType().GetMethod("GetHqPosition", System.Type.EmptyTypes);
-        if (mi != null)
-        {
-            var res = mi.Invoke(service, null);
-            if (res is Vector3 v) return v;
-        }
-        var hq = DroneHQ.Instance;
-        return hq != null ? hq.DockPosition : service.transform.position;
+        return service.GetHqPosition();
     }
 
     void ClearTaskAssignment(DroneTaskTarget task)
     {
         if (task == null) return;
-        var mi = task.GetType().GetMethod("ClearAssignment", new[] { typeof(CrawlerWorker) });
-        if (mi != null)
-        {
-            mi.Invoke(task, new object[] { this });
-            return;
-        }
+        task.ClearAssignment(this);
+    }
+
+    void OnDisable()
+    {
+        UndergroundVisibilityRegistry.UnregisterCrawler(this);
+        ReleaseProgressBar();
     }
 }

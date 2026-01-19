@@ -56,6 +56,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
         if (isGhost) return;
         running = autoStart;
         GameTick.OnTickStart += OnTick;
@@ -76,6 +77,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer
 
     void OnDisable()
     {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
         if (isGhost) return;
         GameTick.OnTickStart -= OnTick;
         if (powerService == null) powerService = PowerService.Instance;

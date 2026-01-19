@@ -46,11 +46,13 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
         OnTrucksCalledChanged += HandleTrucksCalledChanged;
     }
 
     void OnDisable()
     {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
         OnTrucksCalledChanged -= HandleTrucksCalledChanged;
     }
 
@@ -61,12 +63,12 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
         EnsureStorageDisplay();
 
-        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-        powerService?.RegisterConsumer(this);
-
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
+
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
     }
 
     void OnDestroy()

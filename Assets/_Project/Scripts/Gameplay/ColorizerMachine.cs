@@ -83,18 +83,20 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowe
     void Start()
     {
         if (isGhost) return;
-        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-        powerService?.RegisterConsumer(this);
         if (grid == null) return;
 
         EnsureProgressDisplay();
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
+
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
     }
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
         if (isGhost) return;
         if (useGameTickForProcessing)
         {
@@ -104,6 +106,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowe
 
     void OnDisable()
     {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
         if (isGhost) return;
         if (useGameTickForProcessing)
         {

@@ -1,5 +1,3 @@
-using System;
-using System.Reflection;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -10,6 +8,7 @@ public class Conveyor : MonoBehaviour, IConveyor
     [Min(1)] public int ticksPerCell = 4;
 
     Vector2Int lastCell;
+    GridService grid;
     
     // Flag to mark this conveyor as a ghost (visual only, should not be registered)
     [System.NonSerialized]
@@ -39,25 +38,17 @@ public class Conveyor : MonoBehaviour, IConveyor
             }
             
             // Check if there's already a conveyor at this position
-            var gs = FindGridServiceInstance();
+            var gs = GetGridService();
             if (gs != null)
             {
-                var currentCell = SafeInvokeWorldToCell(gs, transform.position);
-                var getConv = gs.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-                if (getConv != null)
+                var currentCell = gs.WorldToCell(transform.position);
+                var existing = gs.GetConveyor(currentCell);
+                if (existing != null && existing != this && !existing.isGhost)
                 {
-                    try
-                    {
-                        var existing = getConv.Invoke(gs, new object[] { currentCell }) as Conveyor;
-                        if (existing != null && existing != this && !existing.isGhost)
-                        {
-                            // There's already a real conveyor here, destroy this one
-                            Debug.Log($"[Conveyor] Duplicate conveyor detected at {currentCell}, destroying duplicate.");
-                            Destroy(gameObject);
-                            return;
-                        }
-                    }
-                    catch { }
+                    // There's already a real conveyor here, destroy this one
+                    Debug.Log($"[Conveyor] Duplicate conveyor detected at {currentCell}, destroying duplicate.");
+                    Destroy(gameObject);
+                    return;
                 }
             }
             
@@ -68,6 +59,18 @@ public class Conveyor : MonoBehaviour, IConveyor
         }
     }
 
+    void OnEnable()
+    {
+        if (!Application.isPlaying) return;
+        UndergroundVisibilityRegistry.RegisterBelt(this);
+    }
+
+    void OnDisable()
+    {
+        if (!Application.isPlaying) return;
+        UndergroundVisibilityRegistry.UnregisterBelt(this);
+    }
+
     void Update()
     {
         // Don't update grid registration for ghost conveyors
@@ -76,34 +79,22 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (!Application.isPlaying)
         {
             // Editor-time grid snapping while moving in Scene view
-            var gs = FindGridServiceInstance();
+            var gs = GetGridService();
             if (gs == null) return;
 
-            var currentCell = SafeInvokeWorldToCell(gs, transform.position);
-            if (currentCell == default) return;
-
-            var cellToWorld = gs.GetType().GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
-            if (cellToWorld == null) return;
-
             float z = transform.position.z;
-            try
-            {
-                var worldObj = cellToWorld.Invoke(gs, new object[] { currentCell, z });
-                if (worldObj is Vector3 world)
-                {
-                    if ((world - transform.position).sqrMagnitude > 1e-6f)
-                        transform.position = world;
-                }
-            }
-            catch { /* ignore in edit mode */ }
+            var currentCell = gs.WorldToCell(transform.position);
+            var world = gs.CellToWorld(currentCell, z);
+            if ((world - transform.position).sqrMagnitude > 1e-6f)
+                transform.position = world;
             return;
         }
 
         // Runtime: track cell changes and update grid + belt graph incrementally
-        var rgs = FindGridServiceInstance();
+        var rgs = GetGridService();
         if (rgs == null) return;
 
-        var current = SafeInvokeWorldToCell(rgs, transform.position);
+        var current = rgs.WorldToCell(transform.position);
         if (current != lastCell)
         {
             SetConveyorAtCell(lastCell, null);
@@ -126,34 +117,21 @@ public class Conveyor : MonoBehaviour, IConveyor
     void OnValidate()
     {
         if (UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode) return;
-        try
-        {
-            var gs = FindGridServiceInstance();
-            if (gs == null) return;
-            var worldToCell = gs.GetType().GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
-            var cellToWorld = gs.GetType().GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
-            if (worldToCell == null || cellToWorld == null) return;
-            var cellObj = worldToCell.Invoke(gs, new object[] { transform.position });
-            if (cellObj is Vector2Int cell)
-            {
-                var worldObj = cellToWorld.Invoke(gs, new object[] { cell, transform.position.z });
-                if (worldObj is Vector3 world)
-                    transform.position = world;
-            }
-        }
-        catch
-        {
-            // ignore
-        }
+        var gs = GetGridService();
+        if (gs == null) return;
+        var cell = gs.WorldToCell(transform.position);
+        var world = gs.CellToWorld(cell, transform.position.z);
+        if ((world - transform.position).sqrMagnitude > 1e-6f)
+            transform.position = world;
     }
 #endif
 
     void RegisterWithGridService()
     {
-        var gs = FindGridServiceInstance();
+        var gs = GetGridService();
         if (gs == null) return;
 
-        var currentCell = SafeInvokeWorldToCell(gs, transform.position);
+        var currentCell = gs.WorldToCell(transform.position);
 
         // Only register if not a ghost
         if (!isGhost)
@@ -166,22 +144,17 @@ public class Conveyor : MonoBehaviour, IConveyor
     void TrySetConveyorSafe(Vector2Int cell, Conveyor conveyor)
     {
         // check for an existing conveyor in the cell
-        var gs = FindGridServiceInstance();
+        var gs = GetGridService();
         if (gs == null) return;
-        var getConv = gs.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-        var setConv = gs.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) });
-        if (getConv == null || setConv == null) { SetConveyorAtCell(cell, conveyor); return; }
-
-        var existingObj = getConv.Invoke(gs, new object[] { cell });
-        var existing = existingObj as Conveyor;
+        var existing = gs.GetConveyor(cell);
         if (existing != null && existing != this)
         {
             // Check if existing is a ghost and this is not
             if (existing.isGhost && !this.isGhost)
             {
                 // Replace ghost with real conveyor
-                try { Destroy(existing.gameObject); } catch { }
-                setConv.Invoke(gs, new object[] { cell, conveyor });
+                Destroy(existing.gameObject);
+                gs.SetConveyor(cell, conveyor);
                 return;
             }
             
@@ -207,60 +180,29 @@ public class Conveyor : MonoBehaviour, IConveyor
             Debug.LogWarning($"Conveyor already present at {cell}, keeping existing.");
             return;
         }
-        setConv.Invoke(gs, new object[] { cell, conveyor });
+        gs.SetConveyor(cell, conveyor);
     }
 
     void SetConveyorAtCell(Vector2Int cell, Conveyor conveyor)
     {
-        var gs = FindGridServiceInstance();
+        var gs = GetGridService();
         if (gs == null) return;
-
-        var setConv = gs.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) });
-        if (setConv != null)
-        {
-            setConv.Invoke(gs, new object[] { cell, conveyor });
-            return;
-        }
+        gs.SetConveyor(cell, conveyor);
     }
 
     Vector2Int GetCellForPosition(Vector3 pos)
     {
-        var gs = FindGridServiceInstance();
+        var gs = GetGridService();
         if (gs == null) return default;
-        return SafeInvokeWorldToCell(gs, pos);
+        return gs.WorldToCell(pos);
     }
 
-    Vector2Int SafeInvokeWorldToCell(object gridService, Vector3 position)
+    GridService GetGridService()
     {
-        if (gridService == null) return default;
-
-        try
-        {
-            var worldToCell = gridService.GetType().GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
-            if (worldToCell == null) return default;
-            var cellObj = worldToCell.Invoke(gridService, new object[] { position });
-            if (cellObj is Vector2Int cell)
-                return cell;
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"Failed to call WorldToCell: {ex.Message}");
-        }
-
-        return default;
-    }
-
-    static object FindGridServiceInstance()
-    {
-        // Prefer the authoritative singleton if available
-        if (GridService.Instance != null) return GridService.Instance;
-        var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-        foreach (var mb in all)
-        {
-            if (mb == null) continue;
-            var t = mb.GetType();
-            if (t.Name == "GridService") return mb;
-        }
-        return null;
+        if (grid != null) return grid;
+        grid = GridService.Instance;
+        if (grid == null)
+            grid = FindAnyObjectByType<GridService>();
+        return grid;
     }
 }

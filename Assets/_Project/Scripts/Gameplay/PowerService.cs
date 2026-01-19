@@ -53,6 +53,7 @@ public class PowerService : MonoBehaviour
     public float TotalGeneratedWatts => totalGeneratedWatts;
     public float TotalConsumedWatts => totalConsumedWatts;
     public event Action<float> OnPowerChanged;
+    public event Action OnNetworkChanged;
 
     [Header("Network Rules")]
     [SerializeField, Min(0)] int maxCableLength = 8;
@@ -70,6 +71,26 @@ public class PowerService : MonoBehaviour
     readonly HashSet<Vector2Int> placementSourceAdjacents = new();
     readonly HashSet<Vector2Int> connectedPlacementPoles = new();
     readonly Dictionary<IPowerConsumer, float> consumerCharge = new();
+    readonly Dictionary<IPowerConsumer, LinearRamp> consumerRamps = new();
+    readonly Dictionary<Vector2Int, int> terminalCellCounts = new();
+    readonly Dictionary<Vector2Int, TerminalDirectionCounts> terminalDirectionCounts = new();
+    readonly Dictionary<IPowerConsumer, Vector2Int> consumerCells = new();
+
+    struct LinearRamp
+    {
+        public float start;
+        public float target;
+        public float elapsed;
+        public bool active;
+    }
+
+    struct TerminalDirectionCounts
+    {
+        public int up;
+        public int right;
+        public int down;
+        public int left;
+    }
 
     static readonly Vector2Int[] NeighborDirs =
     {
@@ -81,6 +102,7 @@ public class PowerService : MonoBehaviour
 
     bool networkDirty;
     bool placementDirty;
+    LinearRamp generatedRamp;
 
     void Awake()
     {
@@ -134,7 +156,11 @@ public class PowerService : MonoBehaviour
     {
         if (source == null) return;
         if (sources.Add(source))
+        {
+            if (source is IPowerTerminal terminal)
+                AddTerminalCells(terminal, source as IPowerSourceDirectional);
             Recalculate();
+        }
         if (source is IPowerSourceNode node && networkSources.Add(node))
         {
             MarkNetworkDirty();
@@ -146,7 +172,11 @@ public class PowerService : MonoBehaviour
     {
         if (source == null) return;
         if (sources.Remove(source))
+        {
+            if (source is IPowerTerminal terminal)
+                RemoveTerminalCells(terminal, source as IPowerSourceDirectional);
             Recalculate();
+        }
         if (source is IPowerSourceNode node && networkSources.Remove(node))
         {
             MarkNetworkDirty();
@@ -160,6 +190,8 @@ public class PowerService : MonoBehaviour
         if (consumers.Add(consumer))
         {
             consumerCharge[consumer] = 0f;
+            consumerRamps[consumer] = new LinearRamp { start = 0f, target = 0f, elapsed = 0f, active = false };
+            AddConsumerTerminal(consumer);
             Recalculate();
         }
     }
@@ -170,8 +202,176 @@ public class PowerService : MonoBehaviour
         if (consumers.Remove(consumer))
         {
             consumerCharge.Remove(consumer);
+            consumerRamps.Remove(consumer);
+            RemoveConsumerTerminal(consumer);
             Recalculate();
         }
+    }
+
+    void AddConsumerTerminal(IPowerConsumer consumer)
+    {
+        if (consumer is IPowerTerminal terminal)
+        {
+            AddTerminalCells(terminal, null);
+            return;
+        }
+
+        if (TryGetConsumerCell(consumer, out var cell))
+        {
+            consumerCells[consumer] = cell;
+            AddTerminalCell(cell, null);
+            PowerCable.RefreshAround(cell);
+        }
+    }
+
+    void RemoveConsumerTerminal(IPowerConsumer consumer)
+    {
+        if (consumer is IPowerTerminal terminal)
+        {
+            RemoveTerminalCells(terminal, null);
+            return;
+        }
+
+        if (!consumerCells.TryGetValue(consumer, out var cell)) return;
+        consumerCells.Remove(consumer);
+        RemoveTerminalCell(cell, null);
+        PowerCable.RefreshAround(cell);
+    }
+
+    void AddTerminalCells(IPowerTerminal terminal, IPowerSourceDirectional directional)
+    {
+        if (terminal == null) return;
+        foreach (var cell in terminal.PowerCells)
+        {
+            AddTerminalCell(cell, GetDirectionalOutput(directionally: directional, cell: cell));
+            PowerCable.RefreshAround(cell);
+        }
+    }
+
+    void RemoveTerminalCells(IPowerTerminal terminal, IPowerSourceDirectional directional)
+    {
+        if (terminal == null) return;
+        foreach (var cell in terminal.PowerCells)
+        {
+            RemoveTerminalCell(cell, GetDirectionalOutput(directionally: directional, cell: cell));
+            PowerCable.RefreshAround(cell);
+        }
+    }
+
+    Direction? GetDirectionalOutput(IPowerSourceDirectional directionally, Vector2Int cell)
+    {
+        if (directionally == null) return null;
+        if (!directionally.TryGetOutputDirection(cell, out var dirVec)) return null;
+        return TryGetDirection(dirVec, out var dir) ? dir : null;
+    }
+
+    void AddTerminalCell(Vector2Int cell, Direction? onlyDirection)
+    {
+        if (terminalCellCounts.TryGetValue(cell, out var count))
+            terminalCellCounts[cell] = count + 1;
+        else
+            terminalCellCounts[cell] = 1;
+
+        if (!terminalDirectionCounts.TryGetValue(cell, out var counts))
+            counts = new TerminalDirectionCounts();
+        if (onlyDirection.HasValue)
+            AddDirection(ref counts, onlyDirection.Value, 1);
+        else
+            AddAllDirections(ref counts, 1);
+        terminalDirectionCounts[cell] = counts;
+    }
+
+    void RemoveTerminalCell(Vector2Int cell, Direction? onlyDirection)
+    {
+        if (!terminalCellCounts.TryGetValue(cell, out var count)) return;
+        count--;
+        if (count <= 0)
+            terminalCellCounts.Remove(cell);
+        else
+            terminalCellCounts[cell] = count;
+
+        if (!terminalDirectionCounts.TryGetValue(cell, out var counts)) return;
+        if (onlyDirection.HasValue)
+            AddDirection(ref counts, onlyDirection.Value, -1);
+        else
+            AddAllDirections(ref counts, -1);
+        if (IsEmpty(counts))
+            terminalDirectionCounts.Remove(cell);
+        else
+            terminalDirectionCounts[cell] = counts;
+    }
+
+    static bool TryGetConsumerCell(IPowerConsumer consumer, out Vector2Int cell)
+    {
+        cell = default;
+        if (consumer == null) return false;
+        if (consumer is IMachine machine)
+        {
+            cell = machine.Cell;
+            return true;
+        }
+        if (consumer is Component component)
+        {
+            var grid = GridService.Instance;
+            if (grid == null) return false;
+            cell = grid.WorldToCell(component.transform.position);
+            return true;
+        }
+        return false;
+    }
+
+    static bool TryGetDirection(Vector2Int vec, out Direction dir)
+    {
+        if (vec == Vector2Int.up) { dir = Direction.Up; return true; }
+        if (vec == Vector2Int.right) { dir = Direction.Right; return true; }
+        if (vec == Vector2Int.down) { dir = Direction.Down; return true; }
+        if (vec == Vector2Int.left) { dir = Direction.Left; return true; }
+        dir = Direction.None;
+        return false;
+    }
+
+    static int GetDirectionCount(TerminalDirectionCounts counts, Direction dir)
+    {
+        return dir switch
+        {
+            Direction.Up => counts.up,
+            Direction.Right => counts.right,
+            Direction.Down => counts.down,
+            Direction.Left => counts.left,
+            _ => 0,
+        };
+    }
+
+    static bool IsEmpty(TerminalDirectionCounts counts)
+    {
+        return counts.up <= 0 && counts.right <= 0 && counts.down <= 0 && counts.left <= 0;
+    }
+
+    static void AddDirection(ref TerminalDirectionCounts counts, Direction dir, int delta)
+    {
+        switch (dir)
+        {
+            case Direction.Up:
+                counts.up = Mathf.Max(0, counts.up + delta);
+                break;
+            case Direction.Right:
+                counts.right = Mathf.Max(0, counts.right + delta);
+                break;
+            case Direction.Down:
+                counts.down = Mathf.Max(0, counts.down + delta);
+                break;
+            case Direction.Left:
+                counts.left = Mathf.Max(0, counts.left + delta);
+                break;
+        }
+    }
+
+    static void AddAllDirections(ref TerminalDirectionCounts counts, int delta)
+    {
+        counts.up = Mathf.Max(0, counts.up + delta);
+        counts.right = Mathf.Max(0, counts.right + delta);
+        counts.down = Mathf.Max(0, counts.down + delta);
+        counts.left = Mathf.Max(0, counts.left + delta);
     }
 
     public void RegisterNetworkConsumer(IPowerNetworkConsumer consumer)
@@ -205,6 +405,19 @@ public class PowerService : MonoBehaviour
         if (consumer.GetConsumptionWatts() <= 0f) return true;
         if (!consumerCharge.TryGetValue(consumer, out var charge)) return false;
         return charge >= threshold;
+    }
+
+    public bool HasPowerTerminalAt(Vector2Int cell)
+    {
+        return terminalCellCounts.TryGetValue(cell, out var count) && count > 0;
+    }
+
+    public bool AllowsTerminalConnection(Vector2Int terminalCell, Vector2Int neighborCell)
+    {
+        if (!terminalDirectionCounts.TryGetValue(terminalCell, out var counts)) return false;
+        var delta = neighborCell - terminalCell;
+        if (!TryGetDirection(delta, out var dir)) return false;
+        return GetDirectionCount(counts, dir) > 0;
     }
 
     void TryHookTimeManager()
@@ -253,7 +466,7 @@ public class PowerService : MonoBehaviour
         if (dt <= 0f) return;
 
         float transition = Mathf.Max(0f, powerTransitionSeconds);
-        totalGeneratedWatts = SmoothTowards(totalGeneratedWatts, targetGeneratedWatts, transition, dt);
+        totalGeneratedWatts = StepGeneratedRamp(targetGeneratedWatts, transition, dt);
         totalConsumedWatts = ComputeSmoothedConsumption(transition, dt);
 
         float net = totalGeneratedWatts - totalConsumedWatts;
@@ -270,6 +483,7 @@ public class PowerService : MonoBehaviour
         {
             if (consumer == null)
             {
+                RemoveDestroyedConsumerTerminal(consumer);
                 (toRemove ??= new List<IPowerConsumer>()).Add(consumer);
                 continue;
             }
@@ -278,13 +492,14 @@ public class PowerService : MonoBehaviour
             if (usage <= 0f)
             {
                 consumerCharge[consumer] = 1f;
+                consumerRamps.Remove(consumer);
                 continue;
             }
 
             bool connected = IsConsumerNetworkPowered(consumer);
             float target = connected ? 1f : 0f;
             float current = consumerCharge.TryGetValue(consumer, out var charge) ? charge : 0f;
-            float next = SmoothTowards(current, target, transition, dt);
+            float next = StepConsumerRamp(consumer, current, target, transition, dt);
             consumerCharge[consumer] = next;
             consumed += usage * next;
         }
@@ -295,19 +510,76 @@ public class PowerService : MonoBehaviour
             {
                 consumers.Remove(consumer);
                 consumerCharge.Remove(consumer);
+                consumerRamps.Remove(consumer);
             }
         }
 
         return consumed;
     }
 
-    static float SmoothTowards(float current, float target, float duration, float dt)
+    void RemoveDestroyedConsumerTerminal(IPowerConsumer consumer)
     {
-        if (duration <= 0f) return target;
-        float diff = Mathf.Abs(target - current);
-        if (diff <= 0.0001f) return target;
-        float rate = diff / duration;
-        return Mathf.MoveTowards(current, target, rate * dt);
+        if (consumer == null) return;
+        if (consumerCells == null || consumerCells.Count == 0) return;
+        if (!consumerCells.TryGetValue(consumer, out var cell)) return;
+        consumerCells.Remove(consumer);
+        RemoveTerminalCell(cell, null);
+        PowerCable.RefreshAround(cell);
+    }
+
+    float StepGeneratedRamp(float target, float duration, float dt)
+    {
+        if (duration <= 0f)
+        {
+            generatedRamp.active = false;
+            generatedRamp.start = target;
+            generatedRamp.target = target;
+            generatedRamp.elapsed = 0f;
+            return target;
+        }
+
+        if (!generatedRamp.active || Mathf.Abs(target - generatedRamp.target) > 0.0001f)
+        {
+            generatedRamp.start = totalGeneratedWatts;
+            generatedRamp.target = target;
+            generatedRamp.elapsed = 0f;
+            generatedRamp.active = true;
+        }
+
+        generatedRamp.elapsed += dt;
+        float t = Mathf.Clamp01(generatedRamp.elapsed / duration);
+        float value = Mathf.Lerp(generatedRamp.start, generatedRamp.target, t);
+        if (t >= 1f) generatedRamp.active = false;
+        return value;
+    }
+
+    float StepConsumerRamp(IPowerConsumer consumer, float current, float target, float duration, float dt)
+    {
+        if (duration <= 0f)
+        {
+            consumerRamps.Remove(consumer);
+            return target;
+        }
+
+        if (!consumerRamps.TryGetValue(consumer, out var ramp))
+        {
+            ramp = new LinearRamp { start = current, target = current, elapsed = 0f, active = false };
+        }
+
+        if (!ramp.active || Mathf.Abs(target - ramp.target) > 0.0001f)
+        {
+            ramp.start = current;
+            ramp.target = target;
+            ramp.elapsed = 0f;
+            ramp.active = true;
+        }
+
+        ramp.elapsed += dt;
+        float t = Mathf.Clamp01(ramp.elapsed / duration);
+        float value = Mathf.Lerp(ramp.start, ramp.target, t);
+        if (t >= 1f) ramp.active = false;
+        consumerRamps[consumer] = ramp;
+        return value;
     }
 
     bool IsConsumerNetworkPowered(IPowerConsumer consumer)
@@ -341,6 +613,10 @@ public class PowerService : MonoBehaviour
     public bool IsCellPowered(Vector2Int cell) => poweredCables.Contains(cell) || poweredPoles.Contains(cell);
     public bool IsCablePowered(Vector2Int cell) => poweredCables.Contains(cell);
     public bool IsPolePowered(Vector2Int cell) => poweredPoles.Contains(cell);
+    public bool IsCableAt(Vector2Int cell) => cables.Contains(cell);
+    public bool IsCableOrBlueprintAt(Vector2Int cell) => cables.Contains(cell) || cableBlueprints.Contains(cell);
+    public bool IsPoleAt(Vector2Int cell) => poles.Contains(cell);
+    public bool IsPoleOrBlueprintAt(Vector2Int cell) => poles.Contains(cell) || poleBlueprints.Contains(cell);
     public bool IsCableBlueprint(Vector2Int cell) => cableBlueprints.Contains(cell);
     public bool IsPoleBlueprint(Vector2Int cell) => poleBlueprints.Contains(cell);
     public bool IsCellOccupiedOrBlueprint(Vector2Int cell) => IsCellOccupied(cell) || cableBlueprints.Contains(cell) || poleBlueprints.Contains(cell);
@@ -513,6 +789,7 @@ public class PowerService : MonoBehaviour
         }
 
         UpdateNetworkConsumers();
+        OnNetworkChanged?.Invoke();
 
     }
 

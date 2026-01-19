@@ -124,22 +124,20 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         if (!isGhost)
             EnsureProgressDisplay();
 
-        if (!isGhost)
-        {
-            if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-            powerService?.RegisterConsumer(this);
-        }
-
         if (isGhost || grid == null) return;
 
         TryRegisterAsMachineAndSnap();
         MachineRegistry.Register(this);
         registered = true;
         DLog($"[PressMachine] Registered at cell {cell} facing {OutputVec}");
+
+        if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+        powerService?.RegisterConsumer(this);
     }
 
     void OnEnable()
     {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
         // Optionally drive processing with GameTick so it lines up with belt steps
         if (useGameTickForProcessing)
         {
@@ -149,6 +147,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
 
     void OnDisable()
     {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
         if (useGameTickForProcessing)
         {
             try { GameTick.OnTickStart -= OnTick; } catch { }

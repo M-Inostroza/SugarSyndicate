@@ -100,6 +100,16 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
         InitializeOutput();
     }
 
+    void OnEnable()
+    {
+        UndergroundVisibilityRegistry.RegisterOverlay(this);
+    }
+
+    void OnDisable()
+    {
+        UndergroundVisibilityRegistry.UnregisterOverlay(this);
+    }
+
     void Update()
     {
         if (isGhost) return;
