@@ -100,7 +100,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f47d9ef4fab2b3f40be757bbf018aa2e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 1
+  moveSpeed: 4
   arriveDistance: 0.01
   useFlightCurve: 1
   flightCurve:
