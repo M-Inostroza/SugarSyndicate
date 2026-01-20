@@ -19,8 +19,8 @@ public class BuildModeOverlay : MonoBehaviour
     [Header("Visuals")]
     [SerializeField] Color overlayColor = new Color(1f, 0.97f, 0.72f, 0.25f);
     [SerializeField, Min(0.01f)] float fadeSpeed = 8f;
-    [Tooltip("Sorting order for the overlay canvas (higher draws on top).")]
-    [SerializeField] int sortingOrder = 5000;
+    [Tooltip("Sorting order for the overlay canvas (lower draws behind UI).")]
+    [SerializeField] int sortingOrder = -10;
     [Header("Vignette")]
     [SerializeField, Tooltip("Normalized center of the clear area (0-1).")]
     Vector2 center = new Vector2(0.5f, 0.5f);

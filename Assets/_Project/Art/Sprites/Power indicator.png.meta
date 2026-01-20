@@ -210,7 +210,10 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable: {}
+    nameFileIdTable:
+      Power indicator_0: 2757859731683968861
+      Power indicator_1: -7406764758588068205
+      Power indicator_2: -2565676193359188271
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

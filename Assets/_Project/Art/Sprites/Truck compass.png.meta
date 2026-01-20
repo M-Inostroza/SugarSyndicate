@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 986f19430fd4fbc488a0f4124dc87bc1
+guid: aeb19c4d826ec0c438ea873595a311cd
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -4664859710540766604
-    second: Info card drone HQ 1_0
+      213: 2170411805493580036
+    second: Truck compass_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,19 +97,6 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
     buildTarget: iOS
     maxTextureSize: 2048
     resizeAlgorithm: 0
@@ -126,13 +113,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Info card drone HQ 1_0
+      name: Truck compass_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 600
-        height: 820
+        width: 56
+        height: 85
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 472af2a0fc6134fb0800000000000000
-      internalID: -4664859710540766604
+      spriteID: 40152caa90ade1e10800000000000000
+      internalID: 2170411805493580036
       vertices: []
       indices: 
       edges: []
@@ -160,8 +147,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Info card drone HQ 1_0: -4664859710540766604
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

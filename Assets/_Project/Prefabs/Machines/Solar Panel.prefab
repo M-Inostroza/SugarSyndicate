@@ -105,5 +105,5 @@ MonoBehaviour:
   facingVec: {x: 1, y: 0}
   outputFace: 1
   dayOutputWatts: 40
-  nightOutputMultiplier: 0.4
+  nightOutputMultiplier: 0.7
   outputRampSeconds: 4
