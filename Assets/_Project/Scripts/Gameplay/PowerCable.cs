@@ -81,12 +81,9 @@ public class PowerCable : MonoBehaviour
 
     void OnDisable()
     {
-        bool removed = UnregisterFromMap();
-        if (removed)
-        {
-            RemoveNeighborBaseConnections();
-            RefreshNeighbors(cell);
-        }
+        UnregisterFromMap();
+        RemoveNeighborBaseConnections();
+        RefreshNeighbors(cell);
         UndergroundVisibilityRegistry.UnregisterPowerCable(this);
         Unregister();
     }
@@ -308,7 +305,10 @@ public class PowerCable : MonoBehaviour
 
         int count = (up ? 1 : 0) + (right ? 1 : 0) + (down ? 1 : 0) + (left ? 1 : 0);
         if (count <= 0)
+        {
+            SetStraight(direction);
             return;
+        }
 
         if (count == 1)
         {
@@ -343,6 +343,7 @@ public class PowerCable : MonoBehaviour
     bool HasDynamicConnection(PowerService power, Vector2Int targetCell)
     {
         if (power == null) return false;
+        if (power.IsCableOrBlueprintAt(targetCell)) return true;
         if (power.IsPoleOrBlueprintAt(targetCell)) return true;
         return power.AllowsTerminalConnection(targetCell, cell);
     }

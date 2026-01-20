@@ -176,6 +176,6 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
         if (powerUsageWatts <= 0f) return true;
         if (!PowerConsumerUtil.IsMachinePowered(this)) return false;
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-        return powerService != null && powerService.HasPowerFor(powerUsageWatts);
+        return powerService != null && powerService.HasPowerFor(this, powerUsageWatts);
     }
 }

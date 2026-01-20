@@ -75,6 +75,11 @@ public class PowerService : MonoBehaviour
     readonly Dictionary<Vector2Int, int> terminalCellCounts = new();
     readonly Dictionary<Vector2Int, TerminalDirectionCounts> terminalDirectionCounts = new();
     readonly Dictionary<IPowerConsumer, Vector2Int> consumerCells = new();
+    readonly Dictionary<Vector2Int, int> poweredNetworkIds = new();
+    readonly Dictionary<IPowerSource, int> sourceNetworks = new();
+    readonly Dictionary<int, float> networkGeneratedWatts = new();
+    readonly Dictionary<int, float> networkConsumedWatts = new();
+    readonly Dictionary<int, float> networkNetWatts = new();
 
     struct LinearRamp
     {
@@ -161,6 +166,8 @@ public class PowerService : MonoBehaviour
                 AddTerminalCells(terminal, source as IPowerSourceDirectional);
             Recalculate();
         }
+        if (source is Component component)
+            EnsurePowerDisplay(component);
         if (source is IPowerSourceNode node && networkSources.Add(node))
         {
             MarkNetworkDirty();
@@ -194,6 +201,8 @@ public class PowerService : MonoBehaviour
             AddConsumerTerminal(consumer);
             Recalculate();
         }
+        if (consumer is Component component)
+            EnsurePowerDisplay(component);
     }
 
     public void UnregisterConsumer(IPowerConsumer consumer)
@@ -399,6 +408,51 @@ public class PowerService : MonoBehaviour
         return totalGeneratedWatts > 0f && totalWatts >= 0f;
     }
 
+    public bool HasPowerFor(IPowerConsumer consumer, float watts = 0f)
+    {
+        if (consumer == null) return HasPowerFor(watts);
+        if (consumer.GetConsumptionWatts() <= 0f) return true;
+        int networkId = GetNetworkIdForConsumer(consumer);
+        return HasPowerForNetwork(networkId);
+    }
+
+    public bool TryGetNetworkIdForSource(IPowerSource source, out int networkId)
+    {
+        networkId = -1;
+        if (source == null) return false;
+        if (sourceNetworks.TryGetValue(source, out networkId))
+            return networkId >= 0;
+        if (source is IPowerSourceNode node)
+        {
+            networkId = FindNetworkForSource(node);
+            return networkId >= 0;
+        }
+        return false;
+    }
+
+    public float GetNetworkNetWatts(int networkId)
+    {
+        if (networkId < 0) return 0f;
+        if (networkNetWatts.TryGetValue(networkId, out var net))
+            return net;
+        float generated = networkGeneratedWatts.TryGetValue(networkId, out var g) ? g : 0f;
+        float consumed = networkConsumedWatts.TryGetValue(networkId, out var c) ? c : 0f;
+        return generated - consumed;
+    }
+
+    bool HasPowerForNetwork(int networkId)
+    {
+        if (networkId < 0) return false;
+        float generated = networkGeneratedWatts.TryGetValue(networkId, out var g) ? g : 0f;
+        float net = networkNetWatts.TryGetValue(networkId, out var n) ? n : generated;
+        if (networkNetWatts.Count == 0)
+        {
+            float consumed = networkConsumedWatts.TryGetValue(networkId, out var c) ? c : 0f;
+            net = generated - consumed;
+        }
+        return generated > 0f && net >= 0f;
+    }
+
     public bool IsConsumerFullyCharged(IPowerConsumer consumer, float threshold = 0.999f)
     {
         if (consumer == null) return false;
@@ -440,9 +494,16 @@ public class PowerService : MonoBehaviour
         MarkNetworkDirty();
     }
 
+    TimePhase GetCurrentPhase()
+    {
+        if (hasPhase) return cachedPhase;
+        var tm = TimeManager.Instance;
+        return tm != null ? tm.CurrentPhase : TimePhase.Day;
+    }
+
     void Recalculate()
     {
-        var phase = hasPhase ? cachedPhase : (TimeManager.Instance != null ? TimeManager.Instance.CurrentPhase : TimePhase.Day);
+        var phase = GetCurrentPhase();
         float generated = 0f;
         foreach (var source in sources)
         {
@@ -466,13 +527,64 @@ public class PowerService : MonoBehaviour
         if (dt <= 0f) return;
 
         float transition = Mathf.Max(0f, powerTransitionSeconds);
+        float prevGenerated = totalGeneratedWatts;
+        float prevConsumed = totalConsumedWatts;
+        float prevNet = totalWatts;
+        networkConsumedWatts.Clear();
+        networkGeneratedWatts.Clear();
+        networkNetWatts.Clear();
         totalGeneratedWatts = StepGeneratedRamp(targetGeneratedWatts, transition, dt);
         totalConsumedWatts = ComputeSmoothedConsumption(transition, dt);
+        UpdateNetworkGeneratedWatts();
+        UpdateNetworkNetWatts();
 
         float net = totalGeneratedWatts - totalConsumedWatts;
-        if (Mathf.Abs(net - totalWatts) < 0.001f) return;
+        bool changed = Mathf.Abs(net - prevNet) > 0.001f
+            || Mathf.Abs(totalGeneratedWatts - prevGenerated) > 0.001f
+            || Mathf.Abs(totalConsumedWatts - prevConsumed) > 0.001f;
+        if (!changed) return;
         totalWatts = net;
         OnPowerChanged?.Invoke(totalWatts);
+    }
+
+    void UpdateNetworkGeneratedWatts()
+    {
+        var phase = GetCurrentPhase();
+        foreach (var source in sources)
+        {
+            if (source == null) continue;
+            if (!sourceNetworks.TryGetValue(source, out var networkId)) continue;
+            if (networkId < 0) continue;
+            float output = Mathf.Max(0f, source.GetOutputWatts(phase));
+            if (output <= 0f) continue;
+            if (networkGeneratedWatts.TryGetValue(networkId, out var current))
+                networkGeneratedWatts[networkId] = current + output;
+            else
+                networkGeneratedWatts[networkId] = output;
+        }
+    }
+
+    void UpdateNetworkNetWatts()
+    {
+        foreach (var kv in networkGeneratedWatts)
+        {
+            float consumed = networkConsumedWatts.TryGetValue(kv.Key, out var c) ? c : 0f;
+            networkNetWatts[kv.Key] = kv.Value - consumed;
+        }
+
+        foreach (var kv in networkConsumedWatts)
+        {
+            if (networkNetWatts.ContainsKey(kv.Key)) continue;
+            float generated = networkGeneratedWatts.TryGetValue(kv.Key, out var g) ? g : 0f;
+            networkNetWatts[kv.Key] = generated - kv.Value;
+        }
+    }
+
+    void EnsurePowerDisplay(Component component)
+    {
+        if (component == null) return;
+        if (component.GetComponentInChildren<MachinePowerDisplay>(true) != null) return;
+        component.gameObject.AddComponent<MachinePowerDisplay>();
     }
 
     float ComputeSmoothedConsumption(float transition, float dt)
@@ -501,7 +613,16 @@ public class PowerService : MonoBehaviour
             float current = consumerCharge.TryGetValue(consumer, out var charge) ? charge : 0f;
             float next = StepConsumerRamp(consumer, current, target, transition, dt);
             consumerCharge[consumer] = next;
-            consumed += usage * next;
+            float applied = usage * next;
+            consumed += applied;
+            int networkId = GetNetworkIdForConsumer(consumer);
+            if (networkId >= 0)
+            {
+                if (networkConsumedWatts.TryGetValue(networkId, out var currentConsumed))
+                    networkConsumedWatts[networkId] = currentConsumed + applied;
+                else
+                    networkConsumedWatts[networkId] = applied;
+            }
         }
 
         if (toRemove != null)
@@ -598,6 +719,34 @@ public class PowerService : MonoBehaviour
             }
         }
         return false;
+    }
+
+    int GetNetworkIdForConsumer(IPowerConsumer consumer)
+    {
+        if (consumer == null) return -1;
+        if (consumer is IPowerTerminal terminal)
+        {
+            foreach (var cell in terminal.PowerCells)
+            {
+                int id = GetNetworkIdAtCellOrAdjacent(cell);
+                if (id >= 0) return id;
+            }
+            return -1;
+        }
+
+        if (!TryGetConsumerCell(consumer, out var consumerCell)) return -1;
+        return GetNetworkIdAtCellOrAdjacent(consumerCell);
+    }
+
+    int GetNetworkIdAtCellOrAdjacent(Vector2Int cell)
+    {
+        if (poweredNetworkIds.TryGetValue(cell, out var id)) return id;
+        foreach (var dir in NeighborDirs)
+        {
+            var next = cell + dir;
+            if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+        }
+        return -1;
     }
 
     public int MaxCableLength => maxCableLength;
@@ -758,7 +907,7 @@ public class PowerService : MonoBehaviour
         bestDistance.Clear();
         poleInputs.Clear();
 
-        var phase = hasPhase ? cachedPhase : (TimeManager.Instance != null ? TimeManager.Instance.CurrentPhase : TimePhase.Day);
+        var phase = GetCurrentPhase();
 
         var queue = new Queue<Step>();
         foreach (var source in networkSources)
@@ -789,8 +938,85 @@ public class PowerService : MonoBehaviour
         }
 
         UpdateNetworkConsumers();
+        BuildPowerNetworks();
         OnNetworkChanged?.Invoke();
 
+    }
+
+    void BuildPowerNetworks()
+    {
+        poweredNetworkIds.Clear();
+        sourceNetworks.Clear();
+
+        int networkId = 0;
+        foreach (var cell in poweredCables)
+        {
+            if (poweredNetworkIds.ContainsKey(cell)) continue;
+            FloodFillNetwork(cell, networkId++);
+        }
+        foreach (var cell in poweredPoles)
+        {
+            if (poweredNetworkIds.ContainsKey(cell)) continue;
+            FloodFillNetwork(cell, networkId++);
+        }
+
+        foreach (var source in networkSources)
+        {
+            if (source == null) continue;
+            int id = FindNetworkForSource(source);
+            if (id >= 0)
+                sourceNetworks[source] = id;
+        }
+    }
+
+    void FloodFillNetwork(Vector2Int startCell, int networkId)
+    {
+        var queue = new Queue<Vector2Int>();
+        queue.Enqueue(startCell);
+        poweredNetworkIds[startCell] = networkId;
+
+        while (queue.Count > 0)
+        {
+            var cell = queue.Dequeue();
+            bool isCable = poweredCables.Contains(cell);
+            foreach (var dir in NeighborDirs)
+            {
+                var next = cell + dir;
+                if (poweredNetworkIds.ContainsKey(next)) continue;
+                if (isCable)
+                {
+                    if (!poweredCables.Contains(next) && !poweredPoles.Contains(next)) continue;
+                }
+                else
+                {
+                    if (!poweredCables.Contains(next)) continue;
+                }
+                poweredNetworkIds[next] = networkId;
+                queue.Enqueue(next);
+            }
+        }
+    }
+
+    int FindNetworkForSource(IPowerSourceNode source)
+    {
+        foreach (var cell in source.PowerCells)
+        {
+            if (poweredNetworkIds.TryGetValue(cell, out var id)) return id;
+            if (TryGetSourceOutputDirection(source, cell, out var dir))
+            {
+                var next = cell + dir;
+                if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+            }
+            else
+            {
+                foreach (var d in NeighborDirs)
+                {
+                    var next = cell + d;
+                    if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+                }
+            }
+        }
+        return -1;
     }
 
     void EnsurePlacementDistances()

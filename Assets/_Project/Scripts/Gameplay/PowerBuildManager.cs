@@ -738,11 +738,21 @@ public class PowerBuildManager : MonoBehaviour
     bool TryGetNextDragDistance(Vector2Int cell, Vector2Int fromCell, out int distance)
     {
         if (!dragDistances.TryGetValue(fromCell, out var prev))
-            return TryGetStartDragDistance(cell, out distance);
+        {
+            var powerService = PowerService.Instance ?? PowerService.EnsureInstance();
+            if (powerService != null && powerService.TryGetPlacementDistance(fromCell, out prev))
+            {
+                // Use existing cable distance to keep max-length enforcement intact.
+            }
+            else
+            {
+                return TryGetStartDragDistance(cell, out distance);
+            }
+        }
 
         distance = prev + 1;
-        var power = PowerService.Instance ?? PowerService.EnsureInstance();
-        if (power != null && (power.IsAdjacentToSourceCell(cell) || power.IsAdjacentToConnectedPole(cell)))
+        var powerService2 = PowerService.Instance ?? PowerService.EnsureInstance();
+        if (powerService2 != null && (powerService2.IsAdjacentToSourceCell(cell) || powerService2.IsAdjacentToConnectedPole(cell)))
             distance = Mathf.Min(distance, 1);
         return true;
     }

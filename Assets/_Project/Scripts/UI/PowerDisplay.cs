@@ -9,6 +9,7 @@ public class PowerDisplay : MonoBehaviour
     [SerializeField] Text legacyText;
     [SerializeField] string prefix = "Power: ";
     [SerializeField] string suffix = "";
+    [SerializeField] bool showBreakdown = true;
 
     PowerService powerService;
     bool warnedMissingText;
@@ -66,7 +67,7 @@ public class PowerDisplay : MonoBehaviour
             }
             return;
         }
-        string text = $"{prefix}{PowerService.FormatPower(watts)}{suffix}";
+        string text = $"{watts:0.#} W";
         if (powerText != null) powerText.text = text;
         if (legacyText != null) legacyText.text = text;
     }

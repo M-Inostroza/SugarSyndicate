@@ -33,6 +33,8 @@ public static class PowerConsumerUtil
             return false;
         }
 
-        return power.IsCellPoweredOrAdjacent(cell) && power.IsConsumerFullyCharged(consumer);
+        if (!power.IsCellPoweredOrAdjacent(cell) || !power.IsConsumerFullyCharged(consumer))
+            return false;
+        return power.HasPowerFor(consumer, consumer.GetConsumptionWatts());
     }
 }

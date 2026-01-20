@@ -188,6 +188,7 @@ public class UndergroundViewController : MonoBehaviour
             RestoreSurfacePowerLineRenderers();
         HideDroneRenderers();
         RestoreCrawlerRenderers();
+        SetPowerLabelVisibility(true);
     }
 
     void HideUnderground()
@@ -207,6 +208,7 @@ public class UndergroundViewController : MonoBehaviour
             RestoreSurfacePowerLineRenderers();
         RestoreDroneRenderers();
         HideCrawlerRenderers();
+        SetPowerLabelVisibility(false);
     }
 
     void CacheAndSetActive(GameObject[] roots, Dictionary<GameObject, bool> cache, bool active)
@@ -540,12 +542,33 @@ public class UndergroundViewController : MonoBehaviour
         }
         if (hideSurfaceMachineRenderers)
             HideOverlayRenderers(behaviour);
+        SetPowerLabelVisibility(behaviour, true);
     }
 
     void HandleOverlayUnregistered(MonoBehaviour behaviour)
     {
         ForgetTintedRenderers(behaviour);
         ForgetRenderers(behaviour, hiddenMachineRenderers);
+    }
+
+    void SetPowerLabelVisibility(bool visible)
+    {
+        foreach (var behaviour in UndergroundVisibilityRegistry.OverlayTargets)
+        {
+            if (behaviour == null) continue;
+            SetPowerLabelVisibility(behaviour, visible);
+        }
+    }
+
+    void SetPowerLabelVisibility(MonoBehaviour behaviour, bool visible)
+    {
+        if (behaviour == null) return;
+        var displays = behaviour.GetComponentsInChildren<MachinePowerDisplay>(true);
+        for (int i = 0; i < displays.Length; i++)
+        {
+            if (displays[i] == null) continue;
+            displays[i].SetUndergroundVisible(visible);
+        }
     }
 
     void HandleBeltRegistered(Conveyor belt)
