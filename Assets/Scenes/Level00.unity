@@ -5755,6 +5755,10 @@ PrefabInstance:
       value: 72
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: truckSprite
+      value: 
+      objectReference: {fileID: -6461785809725244843, guid: c4ebbeab103af804d98812b3b16e9cb5, type: 3}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: activeOnStart
       value: 0
       objectReference: {fileID: 0}
@@ -8258,7 +8262,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 5}
-  m_SizeDelta: {x: 150, y: 150}
+  m_SizeDelta: {x: 160, y: 160}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1146198731
 MonoBehaviour:
@@ -8336,7 +8340,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 7574710001357896364, guid: 5986b25b759e7494ab6e39ab4e75a06f, type: 3}
+  m_Sprite: {fileID: -499557590448303725, guid: bcf16ddd84c436b44b413af7b45aab7f, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -9064,7 +9068,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: -300, y: 5}
-  m_SizeDelta: {x: 150, y: 150}
+  m_SizeDelta: {x: 160, y: 160}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1263700387
 MonoBehaviour:
@@ -9142,7 +9146,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 8295197601343583261, guid: da07a8e8d621cb147ba424548415278b, type: 3}
+  m_Sprite: {fileID: 7804435192785893900, guid: 79c76efe8ed286648b91a75dc28f2bc3, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1

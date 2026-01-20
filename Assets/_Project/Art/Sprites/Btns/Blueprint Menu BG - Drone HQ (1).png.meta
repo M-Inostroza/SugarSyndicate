@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 1f911592bc56f2f4ebcc249d6d57856d
+guid: bcf16ddd84c436b44b413af7b45aab7f
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 4685028420576345335
-    second: Polygon 10_0
+      213: -499557590448303725
+    second: Blueprint Menu BG - Drone HQ (1)_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,7 +97,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: iOS
+    buildTarget: WebGL
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -110,7 +110,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
+    buildTarget: iOS
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Polygon 10_0
+      name: Blueprint Menu BG - Drone HQ (1)_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 34
-        height: 30
+        y: 4
+        width: 300
+        height: 292
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 7fcff03b680940140800000000000000
-      internalID: 4685028420576345335
+      spriteID: 3919a7ca4073119f0800000000000000
+      internalID: -499557590448303725
       vertices: []
       indices: 
       edges: []
@@ -160,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Polygon 10_0: 4685028420576345335
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
