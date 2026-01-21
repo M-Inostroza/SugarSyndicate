@@ -1,11 +1,11 @@
 using System;
-using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class GoalManager : MonoBehaviour
 {
     public event Action<string> OnGoalTextChanged;
+    public event Action OnGoalUiChanged;
 
     public enum BonusObjectiveType
     {
@@ -38,14 +38,6 @@ public class GoalManager : MonoBehaviour
 
     [Header("State")]
     [SerializeField] bool autoCompleteOnTarget = true;
-
-    [Header("UI")]
-    [SerializeField] TMP_Text goalText;
-    [SerializeField] TMP_Text progressText;
-    [SerializeField] TMP_Text secondaryGoalText;
-    [SerializeField] TMP_Text secondaryProgressText;
-    [SerializeField] TMP_Text secondaryGoalText2;
-    [SerializeField] TMP_Text secondaryProgressText2;
 
     int itemsDelivered;
     bool completed;
@@ -95,9 +87,7 @@ public class GoalManager : MonoBehaviour
             bonusCompleted = bonusCount > 0 ? new bool[bonusCount] : null;
             startDayCount = GetCurrentDayCount();
             Debug.Log($"[GoalManager] Level {currentLevel} target: {itemTarget} ({FormatItemType(goalItemType)})");
-            NotifyGoalText();
-            UpdateProgressText();
-            UpdateSecondaryUI();
+            NotifyGoalUiChanged();
             return;
         }
 
@@ -105,9 +95,7 @@ public class GoalManager : MonoBehaviour
         activeBonusObjectives = null;
         bonusCompleted = null;
         Debug.LogWarning($"[GoalManager] No goal configured for level {currentLevel}.");
-        NotifyGoalText();
-        UpdateProgressText();
-        UpdateSecondaryUI();
+        NotifyGoalUiChanged();
     }
 
     void OnItemDelivered(string itemType)
@@ -116,9 +104,8 @@ public class GoalManager : MonoBehaviour
         if (!IsGoalItem(itemType)) return;
         itemsDelivered++;
         Debug.Log($"[GoalManager] Items delivered: {itemsDelivered}/{itemTarget} ({FormatItemType(goalItemType)})");
-        UpdateProgressText();
         UpdateBonusObjectives();
-        UpdateSecondaryUI();
+        NotifyGoalUiChanged();
         if (!completed && autoCompleteOnTarget && itemsDelivered >= itemTarget)
             CompleteGoal();
     }
@@ -129,7 +116,7 @@ public class GoalManager : MonoBehaviour
         completed = true;
         Debug.Log("[GoalManager] Goal complete.");
         EvaluateTimeBonuses();
-        UpdateSecondaryUI();
+        NotifyGoalUiChanged();
         // TODO: hook into your level complete flow.
     }
 
@@ -230,36 +217,10 @@ public class GoalManager : MonoBehaviour
         return string.IsNullOrWhiteSpace(itemType) ? "Any" : itemType.Trim();
     }
 
-    void NotifyGoalText()
+    void NotifyGoalUiChanged()
     {
-        string text = GetGoalText();
-        if (goalText != null) goalText.text = text;
-        OnGoalTextChanged?.Invoke(text);
-    }
-
-    void UpdateProgressText()
-    {
-        if (progressText == null) return;
-        progressText.text = GetProgressText();
-    }
-
-    void UpdateSecondaryUI()
-    {
-        UpdateSecondarySlot(0, secondaryGoalText, secondaryProgressText);
-        UpdateSecondarySlot(1, secondaryGoalText2, secondaryProgressText2);
-    }
-
-    void UpdateSecondarySlot(int index, TMP_Text goal, TMP_Text progress)
-    {
-        if (goal == null && progress == null) return;
-        if (activeBonusObjectives == null || index < 0 || index >= activeBonusObjectives.Length)
-        {
-            if (goal != null) goal.text = string.Empty;
-            if (progress != null) progress.text = string.Empty;
-            return;
-        }
-        if (goal != null) goal.text = GetBonusObjectiveText(index);
-        if (progress != null) progress.text = GetBonusObjectiveProgressText(index);
+        OnGoalTextChanged?.Invoke(GetGoalText());
+        OnGoalUiChanged?.Invoke();
     }
 
     void UpdateBonusObjectives()
@@ -332,7 +293,7 @@ public class GoalManager : MonoBehaviour
     void OnDayCountChanged(int dayCount)
     {
         if (!hasGoal) return;
-        UpdateSecondaryUI();
+        NotifyGoalUiChanged();
     }
 
     public bool IsMainMissionComplete()
