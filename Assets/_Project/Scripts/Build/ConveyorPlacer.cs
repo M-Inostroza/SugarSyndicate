@@ -29,6 +29,15 @@ public class ConveyorPlacer : MonoBehaviour
     [SerializeField, Min(0.1f)] float beltBuildSeconds = 0.4f;
     [SerializeField] bool refundBeltOnDelete = true;
 
+    [Header("Camera Assist")]
+    [SerializeField] bool assistCameraWhileDragging = true;
+    [SerializeField] Camera assistCamera;
+    [Tooltip("Start panning when pointer enters the outer half of the screen (0.5 = center line).")]
+    [SerializeField, Range(0.1f, 0.5f)] float assistEdgeThreshold = 0.5f;
+    [SerializeField, Min(0f)] float assistPanSpeed = 4f;
+    [SerializeField] bool assistConstrainToGrid = true;
+    [SerializeField, Min(0f)] float assistEdgePadding = 0.1f;
+
     Quaternion rotation = Quaternion.identity;
 
     class GhostData { public Color[] spriteColors; public int[] spriteOrders; public int[] spriteMaskInteractions; public RendererColor[] rendererColors; public bool spawnedByPlacer; public int? sortingGroupOrder; public int? sortingGroupLayerId; }
@@ -428,6 +437,8 @@ public class ConveyorPlacer : MonoBehaviour
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             return;
 
+        UpdateCameraAssist();
+
         if (!EnsureGridServiceCached() || miWorldToCell == null) return;
         var world = GetMouseWorld();
         var res = miWorldToCell.Invoke(gridServiceInstance, new object[] { world });
@@ -454,6 +465,68 @@ public class ConveyorPlacer : MonoBehaviour
             // DON'T place a belt here; OnPointerUp handles commit.
             isDragging = false; RestoreGhostVisuals(true); dragStartCell = lastDragCell = new Vector2Int(int.MinValue, int.MinValue); dragStartWorld = Vector3.zero; FlushDeferredRegistrations(); dragPath.Clear();
         }
+    }
+
+    void UpdateCameraAssist()
+    {
+        if (!assistCameraWhileDragging || isDeleting) return;
+        if (!isDragging || !Input.GetMouseButton(0)) return;
+        if (assistCamera == null) assistCamera = Camera.main;
+        if (assistCamera == null) return;
+
+        var vp = assistCamera.ScreenToViewportPoint(Input.mousePosition);
+        float edge = Mathf.Clamp(assistEdgeThreshold, 0.01f, 0.5f);
+        float left = edge;
+        float right = 1f - edge;
+        float bottom = edge;
+        float top = 1f - edge;
+
+        float xDir = 0f;
+        if (vp.x < left) xDir = -Mathf.InverseLerp(left, 0f, vp.x);
+        else if (vp.x > right) xDir = Mathf.InverseLerp(right, 1f, vp.x);
+
+        float yDir = 0f;
+        if (vp.y < bottom) yDir = -Mathf.InverseLerp(bottom, 0f, vp.y);
+        else if (vp.y > top) yDir = Mathf.InverseLerp(top, 1f, vp.y);
+
+        if (Mathf.Approximately(xDir, 0f) && Mathf.Approximately(yDir, 0f)) return;
+
+        var delta = new Vector3(xDir, yDir, 0f) * assistPanSpeed * Time.deltaTime;
+        var pos = assistCamera.transform.position + delta;
+        ClampCameraToGrid(ref pos);
+        assistCamera.transform.position = pos;
+    }
+
+    void ClampCameraToGrid(ref Vector3 pos)
+    {
+        if (!assistConstrainToGrid) return;
+        if (assistCamera == null) return;
+        if (!assistCamera.orthographic) return;
+
+        var grid = GridService.Instance;
+        if (grid == null) return;
+
+        var origin = (Vector2)grid.Origin;
+        var size = grid.GridSize;
+        float cs = grid.CellSize;
+        float minX = origin.x;
+        float minY = origin.y;
+        float maxX = origin.x + size.x * cs;
+        float maxY = origin.y + size.y * cs;
+
+        float halfH = assistCamera.orthographicSize;
+        float halfW = halfH * assistCamera.aspect;
+        float pad = assistEdgePadding;
+
+        float clampMinX = minX + halfW + pad;
+        float clampMaxX = maxX - halfW - pad;
+        float clampMinY = minY + halfH + pad;
+        float clampMaxY = maxY - halfH - pad;
+
+        if (clampMinX > clampMaxX) { pos.x = (minX + maxX) * 0.5f; }
+        else pos.x = Mathf.Clamp(pos.x, clampMinX, clampMaxX);
+        if (clampMinY > clampMaxY) { pos.y = (minY + maxY) * 0.5f; }
+        else pos.y = Mathf.Clamp(pos.y, clampMinY, clampMaxY);
     }
 
     // Rotate the tail belt toward the current pointer position while still inside the same cell

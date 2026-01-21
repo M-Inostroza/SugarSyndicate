@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 // Simple sink that consumes any item. Counts SugarBlock deliveries.
@@ -11,6 +12,14 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
     [Header("State")]
     [SerializeField] bool activeOnStart = false;
+
+    [Header("Docking")]
+    [SerializeField] Sprite truckSprite;
+    [SerializeField] Vector3 truckDockOffset = Vector3.zero;
+    [SerializeField, Min(0.1f)] float approachSpeed = 6f;
+    [SerializeField, Min(0f)] float offscreenViewportPadding = 0.1f;
+    [SerializeField] Camera approachCamera;
+    [SerializeField] bool logDocking;
 
     [Header("Capacity")]
     [SerializeField, Min(0)] int capacity = 30;
@@ -36,14 +45,19 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
     public static event Action<string> OnItemDelivered;
     public static event Action<int> OnSugarBlockDelivered;
     public static event Action<bool> OnTrucksCalledChanged;
+    public static event Action<Truck> OnTruckDocked;
 
     public Vector2Int Cell => cell;
     public Vector2Int InputVec => Vector2Int.zero;
+    public bool IsDocked => isDocked;
 
     Vector2Int cell;
     bool registered;
     int sugarBlocksDelivered;
     bool isActive;
+    bool isDocked;
+    bool isArriving;
+    bool dockedNotified;
     const string SugarBlockType = "SugarBlock";
 
     static bool trucksCalled;
@@ -53,7 +67,9 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
     static RectTransform compassCanvasRect;
     static Plane[] compassFrustumPlanes = new Plane[6];
 
-    Renderer truckRenderer;
+    Renderer dockRenderer;
+    Transform truckVisual;
+    SpriteRenderer truckSpriteRenderer;
     Image compassImage;
     RectTransform compassRect;
 
@@ -61,8 +77,9 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
     {
         if (grid == null) grid = GridService.Instance;
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
-        isActive = trucksCalled || activeOnStart;
-        truckRenderer = GetComponentInChildren<Renderer>();
+        isDocked = activeOnStart;
+        isActive = activeOnStart;
+        dockRenderer = GetDockRenderer();
     }
 
     void OnEnable()
@@ -92,6 +109,21 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
         powerService?.RegisterConsumer(this);
+
+        EnsureTruckVisual();
+        EnsureDockRenderer();
+        if (isDocked)
+        {
+            CompleteDocking(false);
+        }
+        else if (trucksCalled)
+        {
+            BeginArrival();
+        }
+        else
+        {
+            SetTruckVisualVisible(false);
+        }
     }
 
     void OnDestroy()
@@ -119,13 +151,19 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
         UpdateCompassIndicator();
     }
 
+    void Update()
+    {
+        if (!isArriving) return;
+        UpdateArrival();
+    }
+
     public void Activate() => isActive = true;
     public void Deactivate() => isActive = false;
 
     void HandleTrucksCalledChanged(bool called)
     {
-        if (called) Activate();
-        else Deactivate();
+        if (called) BeginArrival();
+        else ResetDocking();
     }
 
     public static void SetTrucksCalled(bool called)
@@ -133,6 +171,211 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
         if (trucksCalled == called) return;
         trucksCalled = called;
         try { OnTrucksCalledChanged?.Invoke(trucksCalled); } catch { }
+    }
+
+    void ResetDocking()
+    {
+        isArriving = false;
+        dockedNotified = false;
+        EnsureTruckVisual();
+        EnsureDockRenderer();
+
+        if (activeOnStart)
+        {
+            CompleteDocking(false);
+        }
+        else
+        {
+            isDocked = false;
+            Deactivate();
+            SetTruckVisualVisible(false);
+        }
+    }
+
+    void BeginArrival()
+    {
+        if (isDocked)
+        {
+            Activate();
+            return;
+        }
+
+        EnsureTruckVisual();
+        EnsureDockRenderer();
+        dockedNotified = false;
+
+        if (!HasTruckSprite())
+        {
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' missing sprite; docking immediately.");
+            CompleteDocking(true);
+            return;
+        }
+
+        isArriving = true;
+        Deactivate();
+
+        if (truckVisual != null)
+        {
+            truckVisual.position = GetArrivalStartPosition();
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' arrival start at {truckVisual.position} -> dock {GetDockedWorldPosition()}");
+        }
+        SetTruckVisualVisible(true);
+    }
+
+    void UpdateArrival()
+    {
+        if (!HasTruckSprite() || truckVisual == null)
+        {
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' arrival aborted; missing sprite or visual.");
+            CompleteDocking(true);
+            return;
+        }
+
+        if (approachSpeed <= 0f)
+        {
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' arrival speed <= 0; docking immediately.");
+            CompleteDocking(true);
+            return;
+        }
+
+        Vector3 target = GetDockedWorldPosition();
+        float step = approachSpeed * Time.deltaTime;
+        truckVisual.position = Vector3.MoveTowards(truckVisual.position, target, step);
+        if ((truckVisual.position - target).sqrMagnitude <= 0.0001f)
+            CompleteDocking(true);
+    }
+
+    void CompleteDocking(bool notify)
+    {
+        isArriving = false;
+        isDocked = true;
+        Activate();
+
+        if (truckVisual != null)
+            truckVisual.position = GetDockedWorldPosition();
+        SetTruckVisualVisible(HasTruckSprite());
+
+        if (notify && !dockedNotified)
+        {
+            dockedNotified = true;
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' docked at {GetDockedWorldPosition()}");
+            try { OnTruckDocked?.Invoke(this); } catch { }
+        }
+    }
+
+    void EnsureTruckVisual()
+    {
+        if (truckVisual == null)
+        {
+            var existing = transform.Find("TruckVisual");
+            if (existing != null) truckVisual = existing;
+        }
+
+        if (truckVisual != null && truckSpriteRenderer == null)
+            truckSpriteRenderer = truckVisual.GetComponent<SpriteRenderer>();
+
+        if (truckVisual == null && truckSprite != null)
+        {
+            var go = new GameObject("TruckVisual");
+            go.transform.SetParent(transform, false);
+            truckVisual = go.transform;
+            truckSpriteRenderer = go.AddComponent<SpriteRenderer>();
+        }
+
+        if (truckVisual != null && truckSpriteRenderer == null && truckSprite != null)
+            truckSpriteRenderer = truckVisual.gameObject.AddComponent<SpriteRenderer>();
+
+        if (truckSpriteRenderer != null)
+        {
+            if (truckSprite != null)
+                truckSpriteRenderer.sprite = truckSprite;
+            SyncTruckVisualSorting();
+        }
+    }
+
+    void EnsureDockRenderer()
+    {
+        if (dockRenderer == null)
+            dockRenderer = GetDockRenderer();
+    }
+
+    Renderer GetDockRenderer()
+    {
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0) return null;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var r = renderers[i];
+            if (r == null) continue;
+            if (truckVisual != null && r.transform.IsChildOf(truckVisual)) continue;
+            return r;
+        }
+        return null;
+    }
+
+    void SyncTruckVisualSorting()
+    {
+        if (truckSpriteRenderer == null) return;
+        if (dockRenderer == null) return;
+
+        if (dockRenderer is SpriteRenderer dockSprite)
+        {
+            truckSpriteRenderer.sortingLayerID = dockSprite.sortingLayerID;
+            truckSpriteRenderer.sortingOrder = dockSprite.sortingOrder + 1;
+            return;
+        }
+
+        var group = dockRenderer.GetComponentInParent<SortingGroup>();
+        if (group != null)
+        {
+            truckSpriteRenderer.sortingLayerID = group.sortingLayerID;
+            truckSpriteRenderer.sortingOrder = group.sortingOrder + 1;
+        }
+    }
+
+    bool HasTruckSprite()
+    {
+        return truckSpriteRenderer != null && truckSpriteRenderer.sprite != null;
+    }
+
+    void SetTruckVisualVisible(bool visible)
+    {
+        if (truckSpriteRenderer != null)
+            truckSpriteRenderer.enabled = visible;
+    }
+
+    Vector3 GetDockedWorldPosition()
+    {
+        return transform.position + truckDockOffset;
+    }
+
+    Vector3 GetArrivalStartPosition()
+    {
+        var dockPos = GetDockedWorldPosition();
+        var cam = approachCamera != null ? approachCamera : Camera.main;
+        if (cam == null)
+        {
+            if (logDocking)
+                Debug.Log($"[Truck] '{name}' no approach camera; using fallback spawn.");
+            return dockPos + Vector3.right * 10f;
+        }
+
+        var viewport = cam.WorldToViewportPoint(dockPos);
+        float z = viewport.z;
+        if (z <= 0f)
+        {
+            z = Vector3.Dot(dockPos - cam.transform.position, cam.transform.forward);
+            if (z <= 0.01f) z = cam.nearClipPlane + 1f;
+        }
+
+        viewport.x = 1f + Mathf.Max(0f, offscreenViewportPadding);
+        var start = cam.ViewportToWorldPoint(new Vector3(viewport.x, viewport.y, z));
+        return start;
     }
 
     public bool CanAcceptFrom(Vector2Int approachFromVec)
@@ -310,10 +553,10 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
     bool IsVisibleInCamera(Camera cam)
     {
         if (cam == null) return false;
-        if (truckRenderer == null) truckRenderer = GetComponentInChildren<Renderer>();
-        if (truckRenderer == null || !truckRenderer.enabled) return false;
+        if (dockRenderer == null) dockRenderer = GetDockRenderer();
+        if (dockRenderer == null || !dockRenderer.enabled) return false;
         GeometryUtility.CalculateFrustumPlanes(cam, compassFrustumPlanes);
-        return GeometryUtility.TestPlanesAABB(compassFrustumPlanes, truckRenderer.bounds);
+        return GeometryUtility.TestPlanesAABB(compassFrustumPlanes, dockRenderer.bounds);
     }
 
     static void EnsureCompassCanvas(int sortingOrder)

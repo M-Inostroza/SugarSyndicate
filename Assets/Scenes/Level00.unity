@@ -5603,8 +5603,16 @@ PrefabInstance:
       value: 72
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: truckSprite
+      value: 
+      objectReference: {fileID: -6461785809725244843, guid: c4ebbeab103af804d98812b3b16e9cb5, type: 3}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: activeOnStart
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: approachSpeed
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: compassSprite
@@ -5761,6 +5769,10 @@ PrefabInstance:
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: activeOnStart
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: approachSpeed
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: compassSprite
@@ -6356,6 +6368,12 @@ MonoBehaviour:
   beltCost: 5
   beltBuildSeconds: 0.4
   refundBeltOnDelete: 1
+  assistCameraWhileDragging: 1
+  assistCamera: {fileID: 0}
+  assistEdgeThreshold: 0.5
+  assistPanSpeed: 4
+  assistConstrainToGrid: 1
+  assistEdgePadding: 0.1
 --- !u!4 &958606651
 Transform:
   m_ObjectHideFlags: 0
@@ -9642,8 +9660,16 @@ PrefabInstance:
       value: 72
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: truckSprite
+      value: 
+      objectReference: {fileID: -6461785809725244843, guid: c4ebbeab103af804d98812b3b16e9cb5, type: 3}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: activeOnStart
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: approachSpeed
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: -6554802817230318098, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: compassSprite

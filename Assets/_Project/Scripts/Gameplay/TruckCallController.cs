@@ -27,7 +27,7 @@ public class TruckCallController : MonoBehaviour
     [Tooltip("Item values used for ShipmentBonus: Σ(value[itemType] * shippedUnits[itemType]).")]
     [SerializeField] ItemValue[] itemValues;
 
-    [Tooltip("Optional: +50 if time to first delivered item < 3 seconds after calling trucks.")]
+    [Tooltip("Optional: +50 if time to first delivered item < 3 seconds after loading starts (trucks docked).")]
     [SerializeField] bool enableFastStartBonus = false;
 
     [Header("UI")]
@@ -41,20 +41,26 @@ public class TruckCallController : MonoBehaviour
     bool hasCalledTrucksThisLevel;
     float calledAtTime = -1f;
     float firstDeliveryAtTime = -1f;
+    int pendingDockCount;
+    bool loadingStarted;
 
     public void CallTrucks()
     {
         if (hasCalledTrucksThisLevel) return;
         hasCalledTrucksThisLevel = true;
 
-        calledAtTime = Time.time;
+        loadingStarted = false;
+        calledAtTime = -1f;
         firstDeliveryAtTime = -1f;
         Truck.OnItemDelivered -= HandleAnyItemDelivered;
         Truck.OnItemDelivered += HandleAnyItemDelivered;
+        Truck.OnTruckDocked -= HandleTruckDocked;
+        Truck.OnTruckDocked += HandleTruckDocked;
 
         if (callTrucksButton != null)
             callTrucksButton.interactable = false;
 
+        pendingDockCount = CountPendingDocks();
         Truck.SetTrucksCalled(true);
 
         if (autoRecallRoutine != null)
@@ -62,7 +68,9 @@ public class TruckCallController : MonoBehaviour
             StopCoroutine(autoRecallRoutine);
             autoRecallRoutine = null;
         }
-        autoRecallRoutine = StartCoroutine(EndAfterWindow());
+
+        if (pendingDockCount <= 0)
+            StartLoadingWindow();
     }
 
     public void RecallTrucks()
@@ -72,6 +80,10 @@ public class TruckCallController : MonoBehaviour
             StopCoroutine(autoRecallRoutine);
             autoRecallRoutine = null;
         }
+        loadingStarted = false;
+        pendingDockCount = 0;
+        Truck.OnTruckDocked -= HandleTruckDocked;
+        Truck.OnItemDelivered -= HandleAnyItemDelivered;
         Truck.SetTrucksCalled(false);
     }
 
@@ -79,6 +91,14 @@ public class TruckCallController : MonoBehaviour
     {
         if (firstDeliveryAtTime >= 0f) return;
         firstDeliveryAtTime = Time.time;
+    }
+
+    void HandleTruckDocked(Truck truck)
+    {
+        if (!hasCalledTrucksThisLevel || loadingStarted) return;
+        if (pendingDockCount > 0) pendingDockCount--;
+        if (pendingDockCount <= 0)
+            StartLoadingWindow();
     }
 
     void OnDisable()
@@ -90,6 +110,41 @@ public class TruckCallController : MonoBehaviour
         }
 
         Truck.OnItemDelivered -= HandleAnyItemDelivered;
+        Truck.OnTruckDocked -= HandleTruckDocked;
+    }
+
+    int CountPendingDocks()
+    {
+        try
+        {
+            var trucks = FindObjectsByType<Truck>(FindObjectsSortMode.None);
+            if (trucks == null || trucks.Length == 0) return 0;
+            int count = 0;
+            for (int i = 0; i < trucks.Length; i++)
+            {
+                var truck = trucks[i];
+                if (truck == null) continue;
+                if (!truck.IsDocked) count++;
+            }
+            return count;
+        }
+        catch { return 0; }
+    }
+
+    void StartLoadingWindow()
+    {
+        if (loadingStarted) return;
+        loadingStarted = true;
+        calledAtTime = Time.time;
+
+        Truck.OnTruckDocked -= HandleTruckDocked;
+
+        if (autoRecallRoutine != null)
+        {
+            StopCoroutine(autoRecallRoutine);
+            autoRecallRoutine = null;
+        }
+        autoRecallRoutine = StartCoroutine(EndAfterWindow());
     }
 
     System.Collections.IEnumerator EndAfterWindow()
