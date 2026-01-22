@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer
+public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer, IMachineJammed, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -27,12 +27,14 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
     [SerializeField] bool enableDebugLogs = false;
 
     [NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => inputCell;
     public int StoredItemCount => stored.Count;
     public int Capacity => Mathf.Max(0, capacity);
+    public bool IsJammed => outputBlocked;
 
     struct StoredEntry
     {
@@ -61,6 +63,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
     Vector2Int outputFootprintCell;
     bool registered;
     FootprintBlocker outputBlocker;
+    bool outputBlocked;
 
     void Awake()
     {
@@ -243,7 +246,12 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
 
     void TryOutputOnce()
     {
-        if (stored.Count == 0) return;
+        if (stored.Count == 0)
+        {
+            outputBlocked = false;
+            return;
+        }
+        outputBlocked = false;
         if (grid == null) grid = GridService.Instance;
         if (belt == null) belt = BeltSimulationService.Instance;
         if (grid == null || belt == null) return;
@@ -278,6 +286,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
             catch { ok = false; }
             if (!ok)
             {
+                outputBlocked = true;
                 entry.item.view = null;
                 if (view != null)
                 {
@@ -298,16 +307,36 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         }
 
         var cellData = grid.GetCell(outCell);
-        if (cellData == null) return;
-        if (cellData.type == GridService.CellType.Machine) return;
-        if (cellData.hasItem) return;
+        if (cellData == null)
+        {
+            outputBlocked = true;
+            return;
+        }
+        if (cellData.type == GridService.CellType.Machine)
+        {
+            outputBlocked = true;
+            return;
+        }
+        if (cellData.hasItem)
+        {
+            outputBlocked = true;
+            return;
+        }
         bool beltLike = !cellData.isBlueprint && !cellData.isBroken
                         && (cellData.type == GridService.CellType.Belt
                             || cellData.type == GridService.CellType.Junction
                             || cellData.hasConveyor
                             || cellData.conveyor != null);
-        if (!beltLike) return;
-        if (belt.IsVisualNearCell(outCell)) return;
+        if (!beltLike)
+        {
+            outputBlocked = true;
+            return;
+        }
+        if (belt.IsVisualNearCell(outCell))
+        {
+            outputBlocked = true;
+            return;
+        }
 
         var beltView = entry.view;
         if (beltView != null)
@@ -321,6 +350,7 @@ public class StorageContainerMachine : MonoBehaviour, IMachine, IMachineStorageW
         bool spawned = belt.TrySpawnItem(outCell, entry.item);
         if (!spawned)
         {
+            outputBlocked = true;
             entry.item.view = null;
             if (beltView != null)
             {

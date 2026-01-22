@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPowerSourceDirectional
+public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPowerSourceDirectional, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -29,6 +29,7 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
     [SerializeField, Min(0f)] float outputRampSeconds = 10f;
 
     [NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     public Vector2Int InputVec => Vector2Int.zero;
     public Vector2Int Cell => baseCell;

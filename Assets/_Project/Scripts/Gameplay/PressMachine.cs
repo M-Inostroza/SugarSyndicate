@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
-public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress, IPowerConsumer
+public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress, IPowerConsumer, IMachineJammed, IMachineStoppable, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -49,12 +49,14 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     [SerializeField] bool enableDebugLogs = false;
 
     [NonSerialized] public bool isGhost = false; // builder sets this before enabling
+    public bool IsGhost => isGhost;
 
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
     public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
     public bool IsStopped => maintenance != null && maintenance.IsStopped;
+    public bool IsJammed => waitingToOutput;
     public int InputsPerProcess => Mathf.Max(1, inputsPerProcess);
     public string OutputItemType => ResolveOutputItemType();
     public string[] AcceptedItemTypes => ResolveAcceptedTypes();

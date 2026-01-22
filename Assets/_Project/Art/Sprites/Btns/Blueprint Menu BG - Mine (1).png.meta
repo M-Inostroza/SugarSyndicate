@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 778078ab9fc0e0441a7eb13f710f108b
+guid: db3bf9bcff0ab9d4484242fedb1db48d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 4290308353415105066
-    second: Spawner 1_0
+      213: -2490680633440378980
+    second: Blueprint Menu BG - Mine (1)_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -122,30 +122,17 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
-    buildTarget: Android
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Spawner 1_0
+      name: Blueprint Menu BG - Mine (1)_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 162
-        height: 162
+        y: 3
+        width: 265
+        height: 259
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: a2ac23667bc3a8b30800000000000000
-      internalID: 4290308353415105066
+      spriteID: c9f57daf8235f6dd0800000000000000
+      internalID: -2490680633440378980
       vertices: []
       indices: 
       edges: []
@@ -173,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Spawner 1_0: 4290308353415105066
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

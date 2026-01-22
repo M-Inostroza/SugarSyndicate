@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 // Simple sink that consumes any item. Counts SugarBlock deliveries.
-public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer
+public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowerConsumer, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -50,6 +50,7 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
     public Vector2Int Cell => cell;
     public Vector2Int InputVec => Vector2Int.zero;
     public bool IsDocked => isDocked;
+    public bool IsGhost => false;
 
     Vector2Int cell;
     bool registered;

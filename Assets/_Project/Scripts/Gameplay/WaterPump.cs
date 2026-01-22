@@ -5,7 +5,7 @@ using UnityEngine;
 /// Simple emitter that draws from a water tile and outputs water items on a cadence.
 /// Registers as an IMachine so belt sim can treat the cell as occupied (but it never accepts input).
 /// </summary>
-public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer
+public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -23,6 +23,7 @@ public class WaterPump : MonoBehaviour, IMachine, IPowerConsumer
     [SerializeField] bool debugLogging = false;
 
     [System.NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     public Vector2Int InputVec => Vector2Int.zero; // does not accept input
     public Vector2Int Cell => cell;

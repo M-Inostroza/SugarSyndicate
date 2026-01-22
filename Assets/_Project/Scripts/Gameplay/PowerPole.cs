@@ -1,11 +1,12 @@
 using UnityEngine;
 
-public class PowerPole : MonoBehaviour
+public class PowerPole : MonoBehaviour, IGhostState
 {
     [SerializeField] GridService grid;
     [SerializeField] PowerService powerService;
 
     [System.NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     Vector2Int cell;
     bool registered;

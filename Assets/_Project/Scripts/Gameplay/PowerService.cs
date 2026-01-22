@@ -587,6 +587,7 @@ public class PowerService : MonoBehaviour
         component.gameObject.AddComponent<MachinePowerDisplay>();
     }
 
+
     float ComputeSmoothedConsumption(float transition, float dt)
     {
         float consumed = 0f;
@@ -1159,17 +1160,7 @@ public class PowerService : MonoBehaviour
     public bool CanPlacePoleAt(Vector2Int cell)
     {
         if (IsCellOccupiedOrBlueprint(cell)) return false;
-        EnsurePlacementDistances();
-        if (IsAdjacentToSourceCell(cell)) return true;
-
-        foreach (var dir in NeighborDirs)
-        {
-            var next = cell + dir;
-            if (placementDistance.TryGetValue(next, out var dist) && dist <= maxCableLength)
-                return true;
-        }
-
-        return false;
+        return true;
     }
 
     struct Step

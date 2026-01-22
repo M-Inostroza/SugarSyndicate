@@ -54,6 +54,8 @@ public class UndergroundViewController : MonoBehaviour
 
     void Awake()
     {
+        tintSurfaceMachines = false;
+        hideSurfaceMachineRenderers = false;
     }
 
     void Start()

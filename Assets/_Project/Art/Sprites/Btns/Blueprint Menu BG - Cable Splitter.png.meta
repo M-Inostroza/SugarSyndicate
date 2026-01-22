@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 43a9043705343eb43a6bf55fa7bf1dbd
+guid: faab3bd40b3e6064ca81c2ad71d1b27f
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -850476667869589839
-    second: Blueprint Menu BG_0
+      213: 2832598090735094491
+    second: Blueprint Menu BG - Cable Splitter_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Blueprint Menu BG_0
+      name: Blueprint Menu BG - Cable Splitter_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 100
-        height: 100
+        y: 3
+        width: 265
+        height: 259
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 1be00e10aff7234f0800000000000000
-      internalID: -850476667869589839
+      spriteID: bda07bda4f86f4720800000000000000
+      internalID: 2832598090735094491
       vertices: []
       indices: 
       edges: []

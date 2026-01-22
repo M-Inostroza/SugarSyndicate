@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class SugarMine : MonoBehaviour, IPowerConsumer
+public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachineStoppable, IGhostState
 {
     public Direction outputDirection = Direction.Right;
 
@@ -45,20 +45,24 @@ public class SugarMine : MonoBehaviour, IPowerConsumer
     [SerializeField] bool debugLogging = false;
 
     [System.NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     bool running;
+    bool outputBlocked;
     int nextItemId = 1;
     float spawnProgress;
     GameTick tickSource;
 
     public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
     public bool IsStopped => maintenance != null && maintenance.IsStopped;
+    public bool IsJammed => outputBlocked;
 
     void OnEnable()
     {
         UndergroundVisibilityRegistry.RegisterOverlay(this);
         if (isGhost) return;
         running = autoStart;
+        outputBlocked = false;
         GameTick.OnTickStart += OnTick;
         if (tickSource == null) tickSource = FindAnyObjectByType<GameTick>();
         if (itemPrefab != null)
@@ -118,6 +122,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer
     {
         if (GridService.Instance == null || BeltSimulationService.Instance == null)
         {
+            outputBlocked = false;
             if (debugLogging) Debug.LogWarning("[SugarMine] Missing GridService or BeltSimulationService.");
             return;
         }
@@ -184,10 +189,12 @@ public class SugarMine : MonoBehaviour, IPowerConsumer
 
         if (!delivered)
         {
+            outputBlocked = true;
             if (debugLogging)
                 Debug.LogWarning($"[SugarMine] Unable to spawn item at {baseCell} or {headCell}");
             return;
         }
+        outputBlocked = false;
 
         if (spawnedOnBelt)
         {

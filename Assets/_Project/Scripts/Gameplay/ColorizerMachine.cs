@@ -5,7 +5,7 @@ using UnityEngine;
 /// Machine that takes an input item, applies a tint, and outputs the same item type.
 /// Uses the shared IMachine contract so belt logic remains generic.
 /// </summary>
-public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowerConsumer
+public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowerConsumer, IMachineJammed, IMachineStoppable, IGhostState
 {
     [Header("Services")]
     [SerializeField] GridService grid;
@@ -33,6 +33,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowe
     [SerializeField, Min(0f)] float powerUsageWatts = 0f;
 
     [System.NonSerialized] public bool isGhost = false;
+    public bool IsGhost => isGhost;
 
     [Header("Maintenance")]
     [SerializeField] MachineMaintenance maintenance = new MachineMaintenance();
@@ -46,6 +47,7 @@ public class ColorizerMachine : MonoBehaviour, IMachine, IMachineProgress, IPowe
     public bool IsProcessing => busy && hasInputThisCycle;
     public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
     public bool IsStopped => maintenance != null && maintenance.IsStopped;
+    public bool IsJammed => waitingToOutput;
     public string[] AcceptedItemTypes => ResolveAcceptedTypes();
     public float Progress01
     {
