@@ -40,8 +40,8 @@ public class ConveyorPlacer : MonoBehaviour
 
     Quaternion rotation = Quaternion.identity;
 
-    class GhostData { public Color[] spriteColors; public int[] spriteOrders; public int[] spriteMaskInteractions; public RendererColor[] rendererColors; public bool spawnedByPlacer; public int? sortingGroupOrder; public int? sortingGroupLayerId; }
-    class RendererColor { public Renderer renderer; public Color color; }
+    class GhostData { public Color[] spriteColors; public int[] spriteOrders; public int[] spriteMaskInteractions; public RendererBlock[] rendererBlocks; public bool spawnedByPlacer; public int? sortingGroupOrder; public int? sortingGroupLayerId; }
+    class RendererBlock { public Renderer renderer; public MaterialPropertyBlock block; }
 
     readonly Dictionary<Conveyor, GhostData> ghostOriginalColors = new Dictionary<Conveyor, GhostData>();
     readonly Dictionary<Vector2Int, Conveyor> ghostByCell = new Dictionary<Vector2Int, Conveyor>();
@@ -49,6 +49,11 @@ public class ConveyorPlacer : MonoBehaviour
     // delete overlays for junctions without a detectable visual
     readonly HashSet<GameObject> deleteOverlayGhosts = new HashSet<GameObject>();
     float cachedCellSize = 1f;
+
+    GridAdapter gridAdapter;
+    GhostVisuals ghostVisuals;
+    DeleteService deleteService;
+    ServiceCache serviceCache;
 
     // delete mode state
     bool isDeleting = false;
@@ -234,8 +239,17 @@ public class ConveyorPlacer : MonoBehaviour
 
     HashSet<Vector2Int> deferredRegistrations = new HashSet<Vector2Int>();
 
+    void EnsureHelpers()
+    {
+        if (gridAdapter == null) gridAdapter = new GridAdapter(this);
+        if (ghostVisuals == null) ghostVisuals = new GhostVisuals(this);
+        if (deleteService == null) deleteService = new DeleteService(this);
+        if (serviceCache == null) serviceCache = new ServiceCache(this);
+    }
+
     void Reset()
     {
+        EnsureHelpers();
         if (gridServiceObject == null)
         {
             var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
@@ -251,27 +265,15 @@ public class ConveyorPlacer : MonoBehaviour
 
     void Awake()
     {
+        EnsureHelpers();
         if (gridServiceObject != null && gridServiceInstance == null)
             CacheGridServiceReflection(gridServiceObject);
     }
 
     void CacheGridServiceReflection(GameObject go)
     {
-        gridServiceInstance = null; miWorldToCell = null; miCellToWorld = null; miSetBeltCell = null; directionType = null;
-        if (go == null) return;
-        foreach (var mb in go.GetComponents<MonoBehaviour>())
-        {
-            if (mb == null) continue; var type = mb.GetType(); if (type.Name != "GridService") continue;
-            gridServiceInstance = mb;
-            miWorldToCell = type.GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
-            miCellToWorld = type.GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
-            miSetBeltCell = type.GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-                .FirstOrDefault(m => m.Name == "SetBeltCell" && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == typeof(Vector2Int));
-            try { var asm = type.Assembly; directionType = asm.GetTypes().FirstOrDefault(tt => tt.IsEnum && tt.Name == "Direction"); } catch { }
-            if (directionType == null) directionType = FindDirectionType();
-            cachedCellSize = SafeGetCellSize(type, mb);
-            break;
-        }
+        EnsureHelpers();
+        gridAdapter.CacheGridServiceReflection(go);
     }
 
     // Called by BuildModeController when entering build mode
@@ -676,725 +678,58 @@ public class ConveyorPlacer : MonoBehaviour
 
     void RemoveGhostAtCell(Vector2Int cell)
     {
-        try
-        {
-            if (ghostByCell.TryGetValue(cell, out var existing) && existing != null)
-            {
-                try { ghostOriginalColors.Remove(existing); } catch { }
-                try { Destroy(existing.gameObject); } catch { }
-                try { ghostByCell.Remove(cell); } catch { }
-            }
-            else if (miCellToWorld != null)
-            {
-                // Fallback: search colliders for any ghost conveyor at this cell
-                var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
-                var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                foreach (var col in cols)
-                {
-                    var c = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
-                    if (c != null && c.isGhost)
-                    {
-                        try { ghostOriginalColors.Remove(c); } catch { }
-                        try { Destroy(c.gameObject); } catch { }
-                    }
-                }
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.RemoveGhostAtCell(cell);
     }
 
     // Restore: delete-mode drag helper to mark cells along drag path
     void TryMarkCellFromDrag(Vector2Int cell)
     {
-        if (lastDragCell.x == int.MinValue)
-        {
-            if (cell == dragStartCell) return;
-            var deltaStart = cell - dragStartCell;
-            Vector2Int stepStart = Mathf.Abs(deltaStart.x) >= Mathf.Abs(deltaStart.y) ? new Vector2Int(Math.Sign(deltaStart.x), 0) : new Vector2Int(0, Math.Sign(deltaStart.y));
-            var next = dragStartCell + stepStart;
-            MarkCellForDeletion(dragStartCell);
-            MarkCellForDeletion(next);
-            lastDragCell = next;
-            return;
-        }
-        if (cell == lastDragCell) return;
-        var delta = cell - lastDragCell;
-        Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
-        var nextCell = lastDragCell + step;
-        MarkCellForDeletion(nextCell);
-        lastDragCell = nextCell;
+        EnsureHelpers();
+        deleteService.TryMarkCellFromDrag(cell);
     }
 
     void MarkCellForDeletion(Vector2Int cell)
     {
-        try
-        {
-            // If already marked, skip
-            if (deleteMarkedCells.Contains(cell)) return;
-
-            if (TryGetBlueprintAtCell(cell, out var blueprint))
-            {
-                deleteMarkedCells.Add(cell);
-                if (blueprint != null && !genericGhostOriginalColors.ContainsKey(blueprint.gameObject))
-                {
-                    ApplyDeleteGhostToGameObject(blueprint.gameObject);
-                }
-                return;
-            }
-
-            Conveyor conv = null;
-            try
-            {
-                var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-                if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-            }
-            catch { }
-
-            bool isLogicalBelt = false;
-            bool isMachine = false;
-            bool isJunction = false;
-            GameObject junctionGo = null;
-            try
-            {
-                var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
-                if (getCell != null)
-                {
-                    var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
-                    if (cellObj != null)
-                    {
-                        var t = cellObj.GetType();
-                        var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (fiHasConv != null)
-                        {
-                            try { isLogicalBelt = (bool)fiHasConv.GetValue(cellObj); } catch { isLogicalBelt = false; }
-                        }
-                        if (!isLogicalBelt && fiType != null)
-                        {
-                            try
-                            {
-                                var typeVal = fiType.GetValue(cellObj);
-                                if (typeVal != null)
-                                {
-                                    var name = typeVal.ToString();
-                                    if (name == "Belt" || name == "Junction") { isLogicalBelt = true; if (name == "Junction") isJunction = true; }
-                                    if (name == "Machine") isMachine = true;
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // If there is no conveyor (belt) and no logical belt/junction and no machine, do not mark this cell for deletion.
-            if (conv == null && !isLogicalBelt && !isMachine && !isJunction)
-            {
-                // Check for a machine visual anyway as a fallback via physics
-                var mg = FindMachineAtCell(cell);
-                if (mg == null) return;
-                isMachine = true;
-            }
-
-            // mark for deletion
-            deleteMarkedCells.Add(cell);
-
-            bool debugApplied = false;
-
-            if (conv != null)
-            {
-                ApplyDeleteGhostToConveyor(conv);
-                try { ghostByCell[cell] = conv; } catch { }
-                debugApplied = true;
-            }
-            else
-            {
-                // Belt visual, machine visual, or junction visual (prefer junction if flagged)
-                GameObject go = null;
-                if (isJunction) go = FindJunctionAtCell(cell);
-                if (go == null && isLogicalBelt) go = FindBeltVisualAtCell(cell);
-                if (go == null && isMachine) go = FindMachineAtCell(cell);
-                if (go == null && isJunction) go = FindJunctionAtCell(cell);
-                if (go != null)
-                {
-                    ApplyDeleteGhostToGameObject(go);
-                    if (isJunction) junctionGo = go;
-                    debugApplied = true;
-                }
-                // Always attempt junction tint as a fallback if no visual found yet
-                if (!debugApplied && (isJunction || true))
-                {
-                    if (ApplyDeleteGhostToJunctionVisualsAtCell(cell))
-                    {
-                        debugApplied = true;
-                    }
-                }
-            }
-
-        }
-        catch { }
+        EnsureHelpers();
+        deleteService.MarkCellForDeletion(cell);
     }
 
     void CommitMarkedDeletions()
     {
-        if (deleteMarkedCells.Count == 0) return;
-        foreach (var cell in new List<Vector2Int>(deleteMarkedCells))
-        {
-            try
-            {
-                bool refundBelt = ShouldRefundBeltAtCell(cell);
-                bool removedSomething = false;
-                if (TryCancelBlueprintAtCell(cell))
-                {
-                    removedSomething = true;
-                    refundBelt = false;
-                }
-                if (!removedSomething)
-                {
-                    Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
-                    if (conv == null)
-                    {
-                        try
-                        {
-                            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) }); if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-                        }
-                        catch { }
-                    }
-                    if (conv == null)
-                    {
-                        try
-                        {
-                            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                            var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                            foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
-                        }
-                        catch { }
-                    }
-                    if (conv != null)
-                    {
-                        try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
-                        try { Destroy(conv.gameObject); } catch { }
-                        try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
-                        removedSomething = true;
-                        ClearLogicalCell(cell); // ensure logical grid data is wiped so simulation stops using this belt
-                    }
-                    else
-                    {
-                        // Try machine visual first
-                        var mg = FindMachineAtCell(cell);
-                        if (mg != null)
-                        {
-                            RefundFullBuildCost(mg);
-                            try { Destroy(mg); } catch { }
-                            removedSomething = true;
-                            // Clear machine flag in grid
-                            try
-                            {
-                                var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
-                                if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
-                            }
-                            catch { }
-                            ClearLogicalCell(cell);
-                        }
-                        else
-                        {
-                            // Try water pipe visual
-                            var pipe = FindPipeAtCell(cell);
-                            if (pipe != null)
-                            {
-                                RefundFullBuildCost(pipe);
-                                try { Destroy(pipe); } catch { }
-                                removedSomething = true;
-                                ClearLogicalCell(cell);
-                            }
-                        }
-
-                        if (!removedSomething)
-                        {
-                            // Try junction visual/object
-                            var jg = FindJunctionAtCell(cell);
-                            if (jg != null)
-                            {
-                                RefundFullBuildCost(jg);
-                                try { Destroy(jg); } catch { }
-                                removedSomething = true;
-                                ClearLogicalCell(cell);
-                            }
-                            else
-                            {
-                                // Try belt visual next
-                                var go = FindBeltVisualAtCell(cell);
-                                if (go != null)
-                                {
-                                    try { genericGhostOriginalColors.Remove(go); } catch { }
-                                    try { Destroy(go); } catch { }
-                                    removedSomething = true;
-                                    ClearLogicalCell(cell);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // If we didn't find any visual, check logical grid for belt/junction/machine and clear them
-                if (!removedSomething)
-                {
-                    try
-                    {
-                        var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
-                        var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
-                        if (getCell != null)
-                        {
-                            var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
-                            if (cellObj != null)
-                            {
-                                var t = cellObj.GetType();
-                                var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                bool wasJunction = false;
-                                if (fiType != null)
-                                {
-                                    var name = fiType.GetValue(cellObj)?.ToString();
-                                    if (name == "Belt" || name == "Junction" || name == "Machine")
-                                    {
-                                        wasJunction = name == "Junction";
-                                        if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
-                                        removedSomething = true;
-                                    }
-                                }
-                                if (wasJunction)
-                                {
-                                    // If junction logical data existed, ensure any visual is destroyed too
-                                    DestroyJunctionVisualsAtCell(cell);
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                    if (removedSomething) ClearLogicalCell(cell);
-                }
-
-                if (removedSomething)
-                {
-                    TryClearItemAtCell(cell);
-                    if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
-                }
-
-                DestroyDeleteOverlayForCell(cell);
-                TryRegisterCellInBeltSim(cell);
-                deleteMarkedCells.Remove(cell);
-            }
-            catch { }
-        }
-        MarkGraphDirtyIfPresent();
-
-        // Ensure belt simulation no longer keeps items moving along removed belts.
-        try
-        {
-            var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-            foreach (var mb in all)
-            {
-                if (mb == null) continue;
-                var t = mb.GetType();
-                if (t.Name == "BeltSimulationService")
-                {
-                    var mi = t.GetMethod("ReseedActiveFromGrid", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (mi != null)
-                    {
-                        mi.Invoke(mb, null);
-                    }
-                    break;
-                }
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        deleteService.CommitMarkedDeletions();
     }
 
     // Public immediate delete at mouse (tap)
     public bool DeleteCellImmediate(Vector2Int cell)
     {
-        try
-        {
-            bool refundBelt = ShouldRefundBeltAtCell(cell);
-            bool removedSomething = false;
-            if (TryCancelBlueprintAtCell(cell))
-            {
-                removedSomething = true;
-                refundBelt = false;
-            }
-            if (!removedSomething)
-            {
-                Conveyor conv = null; try { if (ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
-                if (conv == null)
-                {
-                    var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-                    if (getConv != null) conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-                }
-                if (conv == null)
-                {
-                    var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                    var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                    foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
-                }
-                if (conv != null)
-                {
-                    try { ghostOriginalColors.Remove(conv); } catch { } try { ghostByCell.Remove(cell); } catch { }
-                    try { Destroy(conv.gameObject); } catch { }
-                    try { var setConv = gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(gridServiceInstance, new object[] { cell, null }); } catch { }
-                    removedSomething = true;
-                    ClearLogicalCell(cell);
-                }
-                else
-                {
-                    // Machine visual first
-                    var mg = FindMachineAtCell(cell);
-                    if (mg != null) { RefundFullBuildCost(mg); try { Destroy(mg); } catch { } removedSomething = true; }
-                    // Water pipe
-                    if (!removedSomething)
-                    {
-                        var pipe = FindPipeAtCell(cell);
-                        if (pipe != null)
-                        {
-                            RefundFullBuildCost(pipe);
-                            try { Destroy(pipe); } catch { }
-                            removedSomething = true;
-                        }
-                    }
-                    if (!removedSomething)
-                    {
-                        // Junction visual
-                        var jg = FindJunctionAtCell(cell);
-                        if (jg != null) { RefundFullBuildCost(jg); try { Destroy(jg); } catch { } removedSomething = true; }
-                    }
-                    if (!removedSomething)
-                    {
-                        // Belt visual
-                        var go = FindBeltVisualAtCell(cell); if (go != null) { try { genericGhostOriginalColors.Remove(go); } catch { } try { Destroy(go); } catch { } removedSomething = true; }
-                    }
-                }
-            }
-
-            if (!removedSomething)
-            {
-                try
-                {
-                    var getCell = gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
-                    var clear = gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
-                    if (getCell != null)
-                    {
-                        var cellObj = getCell.Invoke(gridServiceInstance, new object[] { cell });
-                        if (cellObj != null)
-                        {
-                            var t = cellObj.GetType();
-                            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            bool wasJunction = false;
-                            if (fiType != null)
-                            {
-                                var name = fiType.GetValue(cellObj)?.ToString();
-                                if (name == "Belt" || name == "Junction" || name == "Machine")
-                                {
-                                    wasJunction = name == "Junction";
-                                    if (clear != null) clear.Invoke(gridServiceInstance, new object[] { cell });
-                                    removedSomething = true;
-                                }
-                            }
-                            if (wasJunction)
-                            {
-                                DestroyJunctionVisualsAtCell(cell);
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            if (removedSomething)
-            {
-                ClearLogicalCell(cell);
-                TryClearItemAtCell(cell);
-                if (refundBelt) GameManager.Instance?.AddSweetCredits(beltCost);
-            }
-
-            TryRegisterCellInBeltSim(cell);
-            MarkGraphDirtyIfPresent();
-            return removedSomething;
-        }
-        catch { return false; }
+        EnsureHelpers();
+        return deleteService.DeleteCellImmediate(cell);
     }
 
     void ApplyGhostToConveyor(Conveyor conv)
     {
-        if (conv == null) return;
-        
-        // Mark the conveyor as a ghost FIRST so it won't register with GridService or simulation
-        conv.isGhost = true;
-        
-        try
-        {
-            // If the prefab uses a SortingGroup, capture its settings but do not drastically change them
-            var sg = conv.GetComponent<UnityEngine.Rendering.SortingGroup>();
-            int? origOrder = null; int? origLayerId = null;
-            if (sg != null)
-            {
-                origOrder = sg.sortingOrder;
-                origLayerId = sg.sortingLayerID;
-            }
-
-            var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
-            if (srs != null && srs.Length > 0)
-            {
-                var orig = new Color[srs.Length];
-                var orders = new int[srs.Length];
-                var masks = new int[srs.Length];
-                for (int i = 0; i < srs.Length; i++)
-                {
-                    orig[i] = srs[i].color;
-                    orders[i] = srs[i].sortingOrder;
-                    masks[i] = (int)srs[i].maskInteraction;
-
-                    // Apply tint but ensure visible alpha regardless of original
-                    var baseCol = orig[i];
-                    var c = new Color(baseCol.r * ghostTint.r, baseCol.g * ghostTint.g, baseCol.b * ghostTint.b, Mathf.Clamp01(ghostTint.a));
-                    srs[i].color = c;
-
-                    // Make preview ignore SpriteMasks so it remains visible while dragging
-                    srs[i].maskInteraction = SpriteMaskInteraction.None;
-
-                    // Nudge ghosts above by a small sorting order offset
-                    srs[i].sortingOrder = orders[i] + ghostSortingOrderOffset;
-                }
-                ghostOriginalColors[conv] = new GhostData { spriteColors = orig, spriteOrders = orders, spriteMaskInteractions = masks, spawnedByPlacer = true, sortingGroupOrder = origOrder, sortingGroupLayerId = origLayerId }; return;
-            }
-            var rends = conv.GetComponentsInChildren<Renderer>(true);
-            if (rends != null && rends.Length > 0)
-            {
-                var rendList = new List<RendererColor>();
-                foreach (var r in rends)
-                {
-                    if (r.material == null) continue;
-                    
-                    var originalMaterial = r.material;
-                    var ghostMat = new Material(originalMaterial); // Create a new instance
-                    
-                    // Set properties for URP transparency
-                    ghostMat.SetFloat("_Surface", 1); // 1 = Transparent
-                    ghostMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                    ghostMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                    ghostMat.SetInt("_ZWrite", 0);
-                    ghostMat.DisableKeyword("_ALPHATEST_ON");
-                    ghostMat.EnableKeyword("_ALPHABLEND_ON");
-                    ghostMat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-                    ghostMat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-                    
-                    // Apply the tint
-                    var finalColor = ghostTint;
-                    if (ghostMat.HasProperty("_BaseColor"))
-                    {
-                        finalColor.a = Mathf.Clamp01(ghostTint.a);
-                        ghostMat.SetColor("_BaseColor", finalColor);
-                    }
-                    else if (ghostMat.HasProperty("_Color"))
-                    {
-                        finalColor.a = Mathf.Clamp01(ghostTint.a);
-                        ghostMat.SetColor("_Color", finalColor);
-                    }
-
-                    r.material = ghostMat; // Assign the new transparent material
-                    
-                    rendList.Add(new RendererColor { renderer = r, color = originalMaterial.color });
-                }
-                ghostOriginalColors[conv] = new GhostData { rendererColors = rendList.ToArray(), spawnedByPlacer = true, sortingGroupOrder = origOrder, sortingGroupLayerId = origLayerId };
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.ApplyGhostToConveyor(conv);
     }
 
     void ApplyDeleteGhostToConveyor(Conveyor conv)
     {
-        if (conv == null) return; 
-        try
-        {
-            var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
-            if (srs != null && srs.Length > 0)
-            {
-                var orig = new Color[srs.Length]; 
-                for (int i = 0; i < srs.Length; i++) 
-                { 
-                    orig[i] = srs[i].color; 
-                    var c = blockedColor; 
-                    c.a = orig[i].a * blockedColor.a; 
-                    srs[i].color = c; 
-                }
-                ghostOriginalColors[conv] = new GhostData { spriteColors = orig, spawnedByPlacer = false }; 
-                return;
-            }
-            var rends = conv.GetComponentsInChildren<Renderer>(true);
-            if (rends != null && rends.Length > 0)
-            {
-                var rendList = new List<RendererColor>(); 
-                foreach (var r in rends) 
-                { 
-                    try { r.material = new Material(r.material); } catch { } 
-                    var col = r.material != null && r.material.HasProperty("_Color") ? r.material.color : Color.white; 
-                    var c = blockedColor; 
-                    c.a = col.a * blockedColor.a; 
-                    if (r.material != null && r.material.HasProperty("_Color")) r.material.color = c; 
-                    rendList.Add(new RendererColor { renderer = r, color = col }); 
-                }
-                ghostOriginalColors[conv] = new GhostData { rendererColors = rendList.ToArray(), spawnedByPlacer = false };
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.ApplyDeleteGhostToConveyor(conv);
     }
 
     void ApplyDeleteGhostToGameObject(GameObject go)
     {
-        if (go == null) return;
-        try
-        {
-            var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
-            if (srs != null && srs.Length > 0)
-            {
-                var orig = new Color[srs.Length]; 
-                for (int i = 0; i < srs.Length; i++) 
-                { 
-                    orig[i] = srs[i].color; 
-                    var c = blockedColor; 
-                    c.a = orig[i].a * blockedColor.a; 
-                    srs[i].color = c; 
-                }
-                genericGhostOriginalColors[go] = new GhostData { spriteColors = orig }; 
-                return;
-            }
-            var rends = go.GetComponentsInChildren<Renderer>(true);
-            if (rends != null && rends.Length > 0)
-            {
-                var rendList = new List<RendererColor>(); 
-                foreach (var r in rends) 
-                { 
-                    try { r.material = new Material(r.material); } catch { } 
-                    var col = r.material != null && r.material.HasProperty("_Color") ? r.material.color : Color.white; 
-                    var c = blockedColor; 
-                    c.a = col.a * blockedColor.a; 
-                    if (r.material != null && r.material.HasProperty("_Color")) r.material.color = c; 
-                    rendList.Add(new RendererColor { renderer = r, color = col }); 
-                }
-                genericGhostOriginalColors[go] = new GhostData { rendererColors = rendList.ToArray() };
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.ApplyDeleteGhostToGameObject(go);
     }
 
     void RestoreGhostVisuals(bool commitBlueprints)
     {
-        try
-        {
-            foreach (var kv in new List<KeyValuePair<Conveyor, GhostData>>(ghostOriginalColors))
-            {
-                var conv = kv.Key; var data = kv.Value; if (conv == null || data == null) continue;
-                if (data.spawnedByPlacer && conveyorPrefab != null)
-                {
-                    try
-                    {
-                        var pos = conv.transform.position;
-                        var cell = (Vector2Int)miWorldToCell.Invoke(gridServiceInstance, new object[] { pos });
-
-                        if (!commitBlueprints || IsCellBlockedForBelt(cell))
-                        {
-                            try { Destroy(conv.gameObject); } catch { }
-                            try
-                            {
-                                var keys = new List<Vector2Int>();
-                                foreach (var gk in ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
-                                foreach (var k in keys) ghostByCell.Remove(k);
-                            }
-                            catch { }
-                            continue;
-                        }
-                        
-                        if (!commitBlueprints || !TrySpendBeltCost(cell))
-                        {
-                            try { Destroy(conv.gameObject); } catch { }
-                            try
-                            {
-                                var keys = new List<Vector2Int>();
-                                foreach (var gk in ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
-                                foreach (var k in keys) ghostByCell.Remove(k);
-                            }
-                            catch { }
-                            continue;
-                        }
-
-                        CreateBeltBlueprintFromGhost(conv, cell);
-                        try { var keys = new List<Vector2Int>(); foreach (var gk in ghostByCell) if (gk.Value == conv) keys.Add(gk.Key); foreach (var k in keys) ghostByCell.Remove(k); } catch { }
-                        continue;
-                    }
-                    catch { }
-                }
-                // For non-spawned-by-placer ghosts (existing belts that were tinted), restore their original colors and orders
-                if (data.spriteColors != null)
-                {
-                    var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
-                    if (srs != null && srs.Length > 0)
-                    {
-                        for (int i = 0; i < srs.Length && i < data.spriteColors.Length; i++) if (srs[i] != null) srs[i].color = data.spriteColors[Math.Min(i, data.spriteColors.Length-1)];
-                        if (data.spriteOrders != null)
-                        {
-                            for (int i = 0; i < srs.Length && i < data.spriteOrders.Length; i++) if (srs[i] != null) srs[i].sortingOrder = data.spriteOrders[Math.Min(i, data.spriteOrders.Length-1)];
-                        }
-                        if (data.spriteMaskInteractions != null)
-                        {
-                            for (int i = 0; i < srs.Length && i < data.spriteMaskInteractions.Length; i++) if (srs[i] != null) srs[i].maskInteraction = (SpriteMaskInteraction)data.spriteMaskInteractions[Math.Min(i, data.spriteMaskInteractions.Length-1)];
-                        }
-                    }
-                }
-                if (data.rendererColors != null)
-                {
-                    foreach (var rc in data.rendererColors)
-                    {
-                        if (rc?.renderer == null) continue; try { if (rc.renderer.material != null && rc.renderer.material.HasProperty("_Color")) rc.renderer.material.color = rc.color; } catch { }
-                    }
-                }
-                // restore SortingGroup for tinted existing belts
-                try
-                {
-                    var sgroup = conv.GetComponent<UnityEngine.Rendering.SortingGroup>();
-                    if (sgroup != null && data.sortingGroupOrder.HasValue)
-                    {
-                        sgroup.sortingOrder = data.sortingGroupOrder.Value;
-                        if (data.sortingGroupLayerId.HasValue) sgroup.sortingLayerID = data.sortingGroupLayerId.Value;
-                    }
-                }
-                catch { }
-            }
-            foreach (var kv in new List<KeyValuePair<GameObject, GhostData>>(genericGhostOriginalColors))
-            {
-                var go = kv.Key; var data = kv.Value; if (go == null || data == null) continue;
-                if (data.spriteColors != null)
-                {
-                    var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
-                    if (srs != null && srs.Length > 0)
-                    {
-                        for (int i = 0; i < srs.Length && i < data.spriteColors.Length; i++) if (srs[i] != null) srs[i].color = data.spriteColors[Math.Min(i, data.spriteColors.Length-1)];
-                        if (data.spriteMaskInteractions != null)
-                        {
-                            for (int i = 0; i < srs.Length && i < data.spriteMaskInteractions.Length; i++) if (srs[i] != null) srs[i].maskInteraction = (SpriteMaskInteraction)data.spriteMaskInteractions[Math.Min(i, data.spriteMaskInteractions.Length-1)];
-                        }
-                    }
-                }
-                if (data.rendererColors != null)
-                {
-                    foreach (var rc in data.rendererColors)
-                    {
-                        if (rc?.renderer == null) continue; try { if (rc.renderer.material != null && rc.renderer.material.HasProperty("_Color")) rc.renderer.material.color = rc.color; } catch { }
-                    }
-                }
-            }
-        }
-        catch { }
-        DestroyDeleteOverlays();
-        ghostOriginalColors.Clear(); genericGhostOriginalColors.Clear(); ghostByCell.Clear();
+        EnsureHelpers();
+        ghostVisuals.RestoreGhostVisuals(commitBlueprints);
     }
 
     void CreateBeltBlueprintFromGhost(Conveyor conv, Vector2Int cell)
@@ -1411,58 +746,8 @@ public class ConveyorPlacer : MonoBehaviour
     // Copy sorting layer from existing conveyor at cell so ghost draws in the same layer
     void MatchGhostSortingLayer(Conveyor ghost, Vector2Int cell)
     {
-        if (ghost == null || gridServiceInstance == null) return;
-        try
-        {
-            Conveyor existing = null;
-            try
-            {
-                var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
-                if (getConv != null) existing = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
-            }
-            catch { }
-            if (existing == null && miCellToWorld != null)
-            {
-                try
-                {
-                    var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
-                    var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-                    var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
-                    foreach (var col in cols)
-                    {
-                        var c = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
-                        if (c != null && !c.isGhost) { existing = c; break; }
-                    }
-                }
-                catch { }
-            }
-            if (existing == null) return;
-
-            int layerId = 0;
-            try
-            {
-                var exSg = existing.GetComponentInParent<UnityEngine.Rendering.SortingGroup>();
-                if (exSg != null) layerId = exSg.sortingLayerID;
-                else
-                {
-                    var exSr = existing.GetComponentsInChildren<SpriteRenderer>(true);
-                    if (exSr != null && exSr.Length > 0) layerId = exSr[0].sortingLayerID;
-                }
-            }
-            catch { }
-
-            if (layerId == 0) return;
-
-            try
-            {
-                var sg = ghost.GetComponentInParent<UnityEngine.Rendering.SortingGroup>();
-                if (sg != null) sg.sortingLayerID = layerId;
-                var srs = ghost.GetComponentsInChildren<SpriteRenderer>(true);
-                foreach (var sr in srs) { try { sr.sortingLayerID = layerId; } catch { } }
-            }
-            catch { }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.MatchGhostSortingLayer(ghost, cell);
     }
 
     bool PlaceBeltAtCell(Vector2Int cell2, string outDirName)
@@ -1616,16 +901,16 @@ public class ConveyorPlacer : MonoBehaviour
     void TryRegisterCellInBeltSim(Vector2Int cell)
     {
         if (GameManager.Instance != null && GameManager.Instance.State == GameState.Build && BuildModeController.IsDragging) return;
-        var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-        foreach (var mb in all) { if (mb == null) continue; var t = mb.GetType(); if (t.Name == "BeltSimulationService") { var mi = t.GetMethod("RegisterCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); if (mi != null) mi.Invoke(mb, new object[] { cell }); break; } }
+        EnsureHelpers();
+        serviceCache.RegisterCell(cell);
     }
 
     public void RefreshPreviewAfterPlace() { }
 
     void MarkGraphDirtyIfPresent()
     {
-        var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-        foreach (var mb in all) { if (mb == null) continue; var t = mb.GetType(); if (t.Name == "BeltGraphService") { var mi = t.GetMethod("MarkDirty", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); if (mi != null) mi.Invoke(mb, null); break; } }
+        EnsureHelpers();
+        serviceCache.MarkGraphDirty();
     }
 
     Vector3 GetMouseWorld()
@@ -1635,11 +920,8 @@ public class ConveyorPlacer : MonoBehaviour
 
     bool EnsureGridServiceCached()
     {
-        if (gridServiceInstance != null && miWorldToCell != null && miCellToWorld != null) return true;
-        if (gridServiceObject != null) { CacheGridServiceReflection(gridServiceObject); return gridServiceInstance != null && miWorldToCell != null && miCellToWorld != null; }
-        var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
-        foreach (var mb in all) { if (mb == null) continue; var t = mb.GetType(); if (t.Name == "GridService") { gridServiceObject = mb.gameObject; CacheGridServiceReflection(gridServiceObject); break; } }
-        return gridServiceInstance != null && miWorldToCell != null && miCellToWorld != null;
+        EnsureHelpers();
+        return gridAdapter.EnsureGridServiceCached();
     }
 
     bool TrySpendBeltCost(Vector2Int cell)
@@ -1826,7 +1108,8 @@ public class ConveyorPlacer : MonoBehaviour
 
     Type FindDirectionType()
     {
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies()) { try { var t = asm.GetTypes().FirstOrDefault(tt => tt.IsEnum && tt.Name == "Direction"); if (t != null) return t; } catch { } } return null;
+        EnsureHelpers();
+        return gridAdapter.FindDirectionType();
     }
 
     GameObject FindBeltVisualAtCell(Vector2Int cell)
@@ -2138,70 +1421,26 @@ public class ConveyorPlacer : MonoBehaviour
 
     void SpawnDeleteOverlayAtCell(Vector2Int cell)
     {
-        try
-        {
-            if (miCellToWorld == null || gridServiceInstance == null) return;
-            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
-            var center = worldObj is Vector3 vv ? vv : Vector3.zero;
-            var go = new GameObject("JunctionDeleteOverlay");
-            go.transform.position = center;
-            var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0,0,Texture2D.whiteTexture.width, Texture2D.whiteTexture.height), new Vector2(0.5f,0.5f));
-            var col = blockedColor;
-            col.a = Mathf.Clamp01(col.a);
-            sr.color = col;
-            sr.sortingOrder = 5000;
-            deleteOverlayGhosts.Add(go);
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.SpawnDeleteOverlayAtCell(cell);
     }
 
     void DestroyDeleteOverlayForCell(Vector2Int cell)
     {
-        try
-        {
-            Vector3 center = Vector3.zero;
-            if (miCellToWorld != null && gridServiceInstance != null)
-            {
-                var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
-                center = worldObj is Vector3 vv ? vv : Vector3.zero;
-            }
-            foreach (var go in new List<GameObject>(deleteOverlayGhosts))
-            {
-                if (go == null) { deleteOverlayGhosts.Remove(go); continue; }
-                if (center == Vector3.zero || (Vector2)go.transform.position == (Vector2)center)
-                {
-                    try { Destroy(go); } catch { }
-                    deleteOverlayGhosts.Remove(go);
-                }
-            }
-        }
-        catch { }
+        EnsureHelpers();
+        ghostVisuals.DestroyDeleteOverlayForCell(cell);
     }
 
     float SafeGetCellSize(Type gridType = null, object gridInstance = null)
     {
-        try
-        {
-            object inst = gridInstance ?? gridServiceInstance;
-            var type = gridType ?? inst?.GetType();
-            if (type == null) return cachedCellSize;
-            var pi = type.GetProperty("CellSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (pi != null) return Mathf.Max(0.01f, Convert.ToSingle(pi.GetValue(inst)));
-            var fi = type.GetField("cellSize", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (fi != null) return Mathf.Max(0.01f, Convert.ToSingle(fi.GetValue(inst)));
-        }
-        catch { }
-        return cachedCellSize;
+        EnsureHelpers();
+        return gridAdapter.SafeGetCellSize(gridType, gridInstance);
     }
 
     void DestroyDeleteOverlays()
     {
-        foreach (var go in new List<GameObject>(deleteOverlayGhosts))
-        {
-            if (go != null) { try { Destroy(go); } catch { } }
-        }
-        deleteOverlayGhosts.Clear();
+        EnsureHelpers();
+        ghostVisuals.DestroyDeleteOverlays();
     }
 
     void TryClearItemAtCell(Vector2Int cell)
@@ -2392,5 +1631,898 @@ public class ConveyorPlacer : MonoBehaviour
             MarkGraphDirtyIfPresent();
         }
         catch { }
+    }
+
+    class GridAdapter
+    {
+        readonly ConveyorPlacer owner;
+
+        public GridAdapter(ConveyorPlacer owner)
+        {
+            this.owner = owner;
+        }
+
+        public void CacheGridServiceReflection(GameObject go)
+        {
+            owner.gridServiceInstance = null;
+            owner.miWorldToCell = null;
+            owner.miCellToWorld = null;
+            owner.miSetBeltCell = null;
+            owner.directionType = null;
+            if (go == null) return;
+            foreach (var mb in go.GetComponents<MonoBehaviour>())
+            {
+                if (mb == null) continue;
+                var type = mb.GetType();
+                if (type.Name != "GridService") continue;
+                owner.gridServiceInstance = mb;
+                owner.miWorldToCell = type.GetMethod("WorldToCell", new Type[] { typeof(Vector3) });
+                owner.miCellToWorld = type.GetMethod("CellToWorld", new Type[] { typeof(Vector2Int), typeof(float) });
+                owner.miSetBeltCell = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .FirstOrDefault(m => m.Name == "SetBeltCell" && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == typeof(Vector2Int));
+                try { var asm = type.Assembly; owner.directionType = asm.GetTypes().FirstOrDefault(tt => tt.IsEnum && tt.Name == "Direction"); } catch { }
+                if (owner.directionType == null) owner.directionType = FindDirectionType();
+                owner.cachedCellSize = SafeGetCellSize(type, mb);
+                break;
+            }
+        }
+
+        public bool EnsureGridServiceCached()
+        {
+            if (owner.gridServiceInstance != null && owner.miWorldToCell != null && owner.miCellToWorld != null) return true;
+            if (owner.gridServiceObject != null)
+            {
+                CacheGridServiceReflection(owner.gridServiceObject);
+                return owner.gridServiceInstance != null && owner.miWorldToCell != null && owner.miCellToWorld != null;
+            }
+            var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            foreach (var mb in all)
+            {
+                if (mb == null) continue;
+                var t = mb.GetType();
+                if (t.Name == "GridService")
+                {
+                    owner.gridServiceObject = mb.gameObject;
+                    CacheGridServiceReflection(owner.gridServiceObject);
+                    break;
+                }
+            }
+            return owner.gridServiceInstance != null && owner.miWorldToCell != null && owner.miCellToWorld != null;
+        }
+
+        public float SafeGetCellSize(Type gridType = null, object gridInstance = null)
+        {
+            try
+            {
+                object inst = gridInstance ?? owner.gridServiceInstance;
+                var type = gridType ?? inst?.GetType();
+                if (type == null) return owner.cachedCellSize;
+                var pi = type.GetProperty("CellSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (pi != null) return Mathf.Max(0.01f, Convert.ToSingle(pi.GetValue(inst)));
+                var fi = type.GetField("cellSize", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (fi != null) return Mathf.Max(0.01f, Convert.ToSingle(fi.GetValue(inst)));
+            }
+            catch { }
+            return owner.cachedCellSize;
+        }
+
+        public Type FindDirectionType()
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var t = asm.GetTypes().FirstOrDefault(tt => tt.IsEnum && tt.Name == "Direction");
+                    if (t != null) return t;
+                }
+                catch { }
+            }
+            return null;
+        }
+    }
+
+    class GhostVisuals
+    {
+        readonly ConveyorPlacer owner;
+        readonly int baseColorId;
+        readonly int colorId;
+
+        public GhostVisuals(ConveyorPlacer owner)
+        {
+            this.owner = owner;
+            baseColorId = Shader.PropertyToID("_BaseColor");
+            colorId = Shader.PropertyToID("_Color");
+        }
+
+        RendererBlock TryApplyRendererTint(Renderer renderer, Color tint, bool multiplyAlphaFromMaterial)
+        {
+            if (renderer == null) return null;
+            var mat = renderer.sharedMaterial;
+            if (mat == null) return null;
+
+            int propId;
+            Color baseColor;
+            if (mat.HasProperty("_BaseColor"))
+            {
+                propId = baseColorId;
+                baseColor = mat.GetColor("_BaseColor");
+            }
+            else if (mat.HasProperty("_Color"))
+            {
+                propId = colorId;
+                baseColor = mat.GetColor("_Color");
+            }
+            else
+            {
+                return null;
+            }
+
+            var originalBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(originalBlock);
+            var tintedBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(tintedBlock);
+
+            var final = tint;
+            final.a = multiplyAlphaFromMaterial ? baseColor.a * tint.a : Mathf.Clamp01(tint.a);
+            tintedBlock.SetColor(propId, final);
+            renderer.SetPropertyBlock(tintedBlock);
+
+            return new RendererBlock { renderer = renderer, block = originalBlock };
+        }
+
+        void RestoreRendererBlocks(RendererBlock[] blocks)
+        {
+            if (blocks == null) return;
+            foreach (var rb in blocks)
+            {
+                if (rb == null || rb.renderer == null) continue;
+                try { rb.renderer.SetPropertyBlock(rb.block); } catch { }
+            }
+        }
+
+        public void ApplyGhostToConveyor(Conveyor conv)
+        {
+            if (conv == null) return;
+
+            conv.isGhost = true;
+            try
+            {
+                var sg = conv.GetComponent<UnityEngine.Rendering.SortingGroup>();
+                int? origOrder = null;
+                int? origLayerId = null;
+                if (sg != null)
+                {
+                    origOrder = sg.sortingOrder;
+                    origLayerId = sg.sortingLayerID;
+                }
+
+                var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
+                if (srs != null && srs.Length > 0)
+                {
+                    var orig = new Color[srs.Length];
+                    var orders = new int[srs.Length];
+                    var masks = new int[srs.Length];
+                    for (int i = 0; i < srs.Length; i++)
+                    {
+                        orig[i] = srs[i].color;
+                        orders[i] = srs[i].sortingOrder;
+                        masks[i] = (int)srs[i].maskInteraction;
+
+                        var baseCol = orig[i];
+                        var c = new Color(baseCol.r * owner.ghostTint.r, baseCol.g * owner.ghostTint.g, baseCol.b * owner.ghostTint.b, Mathf.Clamp01(owner.ghostTint.a));
+                        srs[i].color = c;
+
+                        srs[i].maskInteraction = SpriteMaskInteraction.None;
+                        srs[i].sortingOrder = orders[i] + owner.ghostSortingOrderOffset;
+                    }
+                    owner.ghostOriginalColors[conv] = new GhostData { spriteColors = orig, spriteOrders = orders, spriteMaskInteractions = masks, spawnedByPlacer = true, sortingGroupOrder = origOrder, sortingGroupLayerId = origLayerId };
+                    return;
+                }
+
+                var rends = conv.GetComponentsInChildren<Renderer>(true);
+                if (rends != null && rends.Length > 0)
+                {
+                    var blocks = new List<RendererBlock>();
+                    foreach (var r in rends)
+                    {
+                        if (r == null) continue;
+                        var block = TryApplyRendererTint(r, owner.ghostTint, false);
+                        if (block != null) blocks.Add(block);
+                    }
+                    if (blocks.Count > 0)
+                    {
+                        owner.ghostOriginalColors[conv] = new GhostData { rendererBlocks = blocks.ToArray(), spawnedByPlacer = true, sortingGroupOrder = origOrder, sortingGroupLayerId = origLayerId };
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void ApplyDeleteGhostToConveyor(Conveyor conv)
+        {
+            if (conv == null) return;
+            try
+            {
+                var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
+                if (srs != null && srs.Length > 0)
+                {
+                    var orig = new Color[srs.Length];
+                    for (int i = 0; i < srs.Length; i++)
+                    {
+                        orig[i] = srs[i].color;
+                        var c = owner.blockedColor;
+                        c.a = orig[i].a * owner.blockedColor.a;
+                        srs[i].color = c;
+                    }
+                    owner.ghostOriginalColors[conv] = new GhostData { spriteColors = orig, spawnedByPlacer = false };
+                    return;
+                }
+
+                var rends = conv.GetComponentsInChildren<Renderer>(true);
+                if (rends != null && rends.Length > 0)
+                {
+                    var blocks = new List<RendererBlock>();
+                    foreach (var r in rends)
+                    {
+                        if (r == null) continue;
+                        var block = TryApplyRendererTint(r, owner.blockedColor, true);
+                        if (block != null) blocks.Add(block);
+                    }
+                    if (blocks.Count > 0)
+                        owner.ghostOriginalColors[conv] = new GhostData { rendererBlocks = blocks.ToArray(), spawnedByPlacer = false };
+                }
+            }
+            catch { }
+        }
+
+        public void ApplyDeleteGhostToGameObject(GameObject go)
+        {
+            if (go == null) return;
+            try
+            {
+                var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+                if (srs != null && srs.Length > 0)
+                {
+                    var orig = new Color[srs.Length];
+                    for (int i = 0; i < srs.Length; i++)
+                    {
+                        orig[i] = srs[i].color;
+                        var c = owner.blockedColor;
+                        c.a = orig[i].a * owner.blockedColor.a;
+                        srs[i].color = c;
+                    }
+                    owner.genericGhostOriginalColors[go] = new GhostData { spriteColors = orig };
+                    return;
+                }
+
+                var rends = go.GetComponentsInChildren<Renderer>(true);
+                if (rends != null && rends.Length > 0)
+                {
+                    var blocks = new List<RendererBlock>();
+                    foreach (var r in rends)
+                    {
+                        if (r == null) continue;
+                        var block = TryApplyRendererTint(r, owner.blockedColor, true);
+                        if (block != null) blocks.Add(block);
+                    }
+                    if (blocks.Count > 0)
+                        owner.genericGhostOriginalColors[go] = new GhostData { rendererBlocks = blocks.ToArray() };
+                }
+            }
+            catch { }
+        }
+
+        public void RestoreGhostVisuals(bool commitBlueprints)
+        {
+            try
+            {
+                foreach (var kv in new List<KeyValuePair<Conveyor, GhostData>>(owner.ghostOriginalColors))
+                {
+                    var conv = kv.Key;
+                    var data = kv.Value;
+                    if (conv == null || data == null) continue;
+                    if (data.spawnedByPlacer && owner.conveyorPrefab != null)
+                    {
+                        try
+                        {
+                            var pos = conv.transform.position;
+                            var cell = (Vector2Int)owner.miWorldToCell.Invoke(owner.gridServiceInstance, new object[] { pos });
+
+                            if (!commitBlueprints || owner.IsCellBlockedForBelt(cell))
+                            {
+                                try { UnityEngine.Object.Destroy(conv.gameObject); } catch { }
+                                try
+                                {
+                                    var keys = new List<Vector2Int>();
+                                    foreach (var gk in owner.ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
+                                    foreach (var k in keys) owner.ghostByCell.Remove(k);
+                                }
+                                catch { }
+                                continue;
+                            }
+
+                            if (!commitBlueprints || !owner.TrySpendBeltCost(cell))
+                            {
+                                try { UnityEngine.Object.Destroy(conv.gameObject); } catch { }
+                                try
+                                {
+                                    var keys = new List<Vector2Int>();
+                                    foreach (var gk in owner.ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
+                                    foreach (var k in keys) owner.ghostByCell.Remove(k);
+                                }
+                                catch { }
+                                continue;
+                            }
+
+                            owner.CreateBeltBlueprintFromGhost(conv, cell);
+                            try
+                            {
+                                var keys = new List<Vector2Int>();
+                                foreach (var gk in owner.ghostByCell) if (gk.Value == conv) keys.Add(gk.Key);
+                                foreach (var k in keys) owner.ghostByCell.Remove(k);
+                            }
+                            catch { }
+                            continue;
+                        }
+                        catch { }
+                    }
+                    if (data.spriteColors != null)
+                    {
+                        var srs = conv.GetComponentsInChildren<SpriteRenderer>(true);
+                        if (srs != null && srs.Length > 0)
+                        {
+                            for (int i = 0; i < srs.Length && i < data.spriteColors.Length; i++)
+                                if (srs[i] != null) srs[i].color = data.spriteColors[Math.Min(i, data.spriteColors.Length - 1)];
+                            if (data.spriteOrders != null)
+                            {
+                                for (int i = 0; i < srs.Length && i < data.spriteOrders.Length; i++)
+                                    if (srs[i] != null) srs[i].sortingOrder = data.spriteOrders[Math.Min(i, data.spriteOrders.Length - 1)];
+                            }
+                            if (data.spriteMaskInteractions != null)
+                            {
+                                for (int i = 0; i < srs.Length && i < data.spriteMaskInteractions.Length; i++)
+                                    if (srs[i] != null) srs[i].maskInteraction = (SpriteMaskInteraction)data.spriteMaskInteractions[Math.Min(i, data.spriteMaskInteractions.Length - 1)];
+                            }
+                        }
+                    }
+                    if (data.rendererBlocks != null)
+                        RestoreRendererBlocks(data.rendererBlocks);
+                    try
+                    {
+                        var sgroup = conv.GetComponent<UnityEngine.Rendering.SortingGroup>();
+                        if (sgroup != null && data.sortingGroupOrder.HasValue)
+                        {
+                            sgroup.sortingOrder = data.sortingGroupOrder.Value;
+                            if (data.sortingGroupLayerId.HasValue) sgroup.sortingLayerID = data.sortingGroupLayerId.Value;
+                        }
+                    }
+                    catch { }
+                }
+                foreach (var kv in new List<KeyValuePair<GameObject, GhostData>>(owner.genericGhostOriginalColors))
+                {
+                    var go = kv.Key;
+                    var data = kv.Value;
+                    if (go == null || data == null) continue;
+                    if (data.spriteColors != null)
+                    {
+                        var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+                        if (srs != null && srs.Length > 0)
+                        {
+                            for (int i = 0; i < srs.Length && i < data.spriteColors.Length; i++)
+                                if (srs[i] != null) srs[i].color = data.spriteColors[Math.Min(i, data.spriteColors.Length - 1)];
+                            if (data.spriteMaskInteractions != null)
+                            {
+                                for (int i = 0; i < srs.Length && i < data.spriteMaskInteractions.Length; i++)
+                                    if (srs[i] != null) srs[i].maskInteraction = (SpriteMaskInteraction)data.spriteMaskInteractions[Math.Min(i, data.spriteMaskInteractions.Length - 1)];
+                            }
+                        }
+                    }
+                    if (data.rendererBlocks != null)
+                        RestoreRendererBlocks(data.rendererBlocks);
+                }
+            }
+            catch { }
+            DestroyDeleteOverlays();
+            owner.ghostOriginalColors.Clear();
+            owner.genericGhostOriginalColors.Clear();
+            owner.ghostByCell.Clear();
+        }
+
+        public void MatchGhostSortingLayer(Conveyor ghost, Vector2Int cell)
+        {
+            if (ghost == null || owner.gridServiceInstance == null) return;
+            try
+            {
+                Conveyor existing = null;
+                try
+                {
+                    var getConv = owner.gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+                    if (getConv != null) existing = getConv.Invoke(owner.gridServiceInstance, new object[] { cell }) as Conveyor;
+                }
+                catch { }
+                if (existing == null && owner.miCellToWorld != null)
+                {
+                    try
+                    {
+                        var worldObj = owner.miCellToWorld.Invoke(owner.gridServiceInstance, new object[] { cell, 0f });
+                        var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                        var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                        foreach (var col in cols)
+                        {
+                            var c = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
+                            if (c != null && !c.isGhost) { existing = c; break; }
+                        }
+                    }
+                    catch { }
+                }
+                if (existing == null) return;
+
+                int layerId = 0;
+                try
+                {
+                    var exSg = existing.GetComponentInParent<UnityEngine.Rendering.SortingGroup>();
+                    if (exSg != null) layerId = exSg.sortingLayerID;
+                    else
+                    {
+                        var exSr = existing.GetComponentsInChildren<SpriteRenderer>(true);
+                        if (exSr != null && exSr.Length > 0) layerId = exSr[0].sortingLayerID;
+                    }
+                }
+                catch { }
+
+                if (layerId == 0) return;
+
+                try
+                {
+                    var sg = ghost.GetComponentInParent<UnityEngine.Rendering.SortingGroup>();
+                    if (sg != null) sg.sortingLayerID = layerId;
+                    var srs = ghost.GetComponentsInChildren<SpriteRenderer>(true);
+                    foreach (var sr in srs) { try { sr.sortingLayerID = layerId; } catch { } }
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        public void RemoveGhostAtCell(Vector2Int cell)
+        {
+            try
+            {
+                if (owner.ghostByCell.TryGetValue(cell, out var existing) && existing != null)
+                {
+                    try { owner.ghostOriginalColors.Remove(existing); } catch { }
+                    try { UnityEngine.Object.Destroy(existing.gameObject); } catch { }
+                    try { owner.ghostByCell.Remove(cell); } catch { }
+                }
+                else if (owner.miCellToWorld != null)
+                {
+                    var worldObj = owner.miCellToWorld.Invoke(owner.gridServiceInstance, new object[] { cell, 0f });
+                    var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                    var cols = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                    foreach (var col in cols)
+                    {
+                        var c = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
+                        if (c != null && c.isGhost)
+                        {
+                            try { owner.ghostOriginalColors.Remove(c); } catch { }
+                            try { UnityEngine.Object.Destroy(c.gameObject); } catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void SpawnDeleteOverlayAtCell(Vector2Int cell)
+        {
+            try
+            {
+                if (owner.miCellToWorld == null || owner.gridServiceInstance == null) return;
+                var worldObj = owner.miCellToWorld.Invoke(owner.gridServiceInstance, new object[] { cell, 0f });
+                var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                var go = new GameObject("JunctionDeleteOverlay");
+                go.transform.position = center;
+                var sr = go.AddComponent<SpriteRenderer>();
+                sr.sprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, Texture2D.whiteTexture.width, Texture2D.whiteTexture.height), new Vector2(0.5f, 0.5f));
+                var col = owner.blockedColor;
+                col.a = Mathf.Clamp01(col.a);
+                sr.color = col;
+                sr.sortingOrder = 5000;
+                owner.deleteOverlayGhosts.Add(go);
+            }
+            catch { }
+        }
+
+        public void DestroyDeleteOverlayForCell(Vector2Int cell)
+        {
+            try
+            {
+                Vector3 center = Vector3.zero;
+                if (owner.miCellToWorld != null && owner.gridServiceInstance != null)
+                {
+                    var worldObj = owner.miCellToWorld.Invoke(owner.gridServiceInstance, new object[] { cell, 0f });
+                    center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                }
+                foreach (var go in new List<GameObject>(owner.deleteOverlayGhosts))
+                {
+                    if (go == null) { owner.deleteOverlayGhosts.Remove(go); continue; }
+                    if (center == Vector3.zero || (Vector2)go.transform.position == (Vector2)center)
+                    {
+                        try { UnityEngine.Object.Destroy(go); } catch { }
+                        owner.deleteOverlayGhosts.Remove(go);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void DestroyDeleteOverlays()
+        {
+            foreach (var go in new List<GameObject>(owner.deleteOverlayGhosts))
+            {
+                if (go != null) { try { UnityEngine.Object.Destroy(go); } catch { } }
+            }
+            owner.deleteOverlayGhosts.Clear();
+        }
+    }
+
+    class DeleteService
+    {
+        readonly ConveyorPlacer owner;
+
+        public DeleteService(ConveyorPlacer owner)
+        {
+            this.owner = owner;
+        }
+
+        public void TryMarkCellFromDrag(Vector2Int cell)
+        {
+            if (owner.lastDragCell.x == int.MinValue)
+            {
+                if (cell == owner.dragStartCell) return;
+                var deltaStart = cell - owner.dragStartCell;
+                Vector2Int stepStart = Mathf.Abs(deltaStart.x) >= Mathf.Abs(deltaStart.y) ? new Vector2Int(Math.Sign(deltaStart.x), 0) : new Vector2Int(0, Math.Sign(deltaStart.y));
+                var next = owner.dragStartCell + stepStart;
+                MarkCellForDeletion(owner.dragStartCell);
+                MarkCellForDeletion(next);
+                owner.lastDragCell = next;
+                return;
+            }
+            if (cell == owner.lastDragCell) return;
+            var delta = cell - owner.lastDragCell;
+            Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
+            var nextCell = owner.lastDragCell + step;
+            MarkCellForDeletion(nextCell);
+            owner.lastDragCell = nextCell;
+        }
+
+        public void MarkCellForDeletion(Vector2Int cell)
+        {
+            try
+            {
+                if (owner.deleteMarkedCells.Contains(cell)) return;
+
+                if (owner.TryGetBlueprintAtCell(cell, out var blueprint))
+                {
+                    owner.deleteMarkedCells.Add(cell);
+                    if (blueprint != null && !owner.genericGhostOriginalColors.ContainsKey(blueprint.gameObject))
+                    {
+                        owner.ApplyDeleteGhostToGameObject(blueprint.gameObject);
+                    }
+                    return;
+                }
+
+                Conveyor conv = null;
+                try
+                {
+                    var getConv = owner.gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+                    if (getConv != null) conv = getConv.Invoke(owner.gridServiceInstance, new object[] { cell }) as Conveyor;
+                }
+                catch { }
+
+                bool isLogicalBelt = false;
+                bool isMachine = false;
+                bool isJunction = false;
+                try
+                {
+                    var getCell = owner.gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
+                    if (getCell != null)
+                    {
+                        var cellObj = getCell.Invoke(owner.gridServiceInstance, new object[] { cell });
+                        if (cellObj != null)
+                        {
+                            var t = cellObj.GetType();
+                            var fiHasConv = t.GetField("hasConveyor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            if (fiHasConv != null)
+                            {
+                                try { isLogicalBelt = (bool)fiHasConv.GetValue(cellObj); } catch { isLogicalBelt = false; }
+                            }
+                            if (!isLogicalBelt && fiType != null)
+                            {
+                                try
+                                {
+                                    var typeVal = fiType.GetValue(cellObj);
+                                    if (typeVal != null)
+                                    {
+                                        var name = typeVal.ToString();
+                                        if (name == "Belt" || name == "Junction") { isLogicalBelt = true; if (name == "Junction") isJunction = true; }
+                                        if (name == "Machine") isMachine = true;
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                if (conv == null && !isLogicalBelt && !isMachine && !isJunction)
+                {
+                    var mg = owner.FindMachineAtCell(cell);
+                    if (mg == null) return;
+                    isMachine = true;
+                }
+
+                owner.deleteMarkedCells.Add(cell);
+
+                bool debugApplied = false;
+
+                if (conv != null)
+                {
+                    owner.ApplyDeleteGhostToConveyor(conv);
+                    try { owner.ghostByCell[cell] = conv; } catch { }
+                    debugApplied = true;
+                }
+                else
+                {
+                    GameObject go = null;
+                    if (isJunction) go = owner.FindJunctionAtCell(cell);
+                    if (go == null && isLogicalBelt) go = owner.FindBeltVisualAtCell(cell);
+                    if (go == null && isMachine) go = owner.FindMachineAtCell(cell);
+                    if (go == null && isJunction) go = owner.FindJunctionAtCell(cell);
+                    if (go != null)
+                    {
+                        owner.ApplyDeleteGhostToGameObject(go);
+                        debugApplied = true;
+                    }
+                    if (!debugApplied && (isJunction || true))
+                    {
+                        if (owner.ApplyDeleteGhostToJunctionVisualsAtCell(cell))
+                        {
+                            debugApplied = true;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void CommitMarkedDeletions()
+        {
+            if (owner.deleteMarkedCells.Count == 0) return;
+            foreach (var cell in new List<Vector2Int>(owner.deleteMarkedCells))
+            {
+                try
+                {
+                    bool refundBelt = owner.ShouldRefundBeltAtCell(cell);
+                    DeleteCellInternal(cell, refundBelt, true);
+                    owner.deleteMarkedCells.Remove(cell);
+                }
+                catch { }
+            }
+            owner.MarkGraphDirtyIfPresent();
+            owner.serviceCache.ReseedFromGrid();
+        }
+
+        public bool DeleteCellImmediate(Vector2Int cell)
+        {
+            try
+            {
+                bool refundBelt = owner.ShouldRefundBeltAtCell(cell);
+                bool removedSomething = DeleteCellInternal(cell, refundBelt, false);
+                owner.MarkGraphDirtyIfPresent();
+                return removedSomething;
+            }
+            catch { return false; }
+        }
+
+        bool DeleteCellInternal(Vector2Int cell, bool refundBelt, bool destroyOverlay)
+        {
+            bool removedSomething = false;
+            if (owner.TryCancelBlueprintAtCell(cell))
+            {
+                removedSomething = true;
+                refundBelt = false;
+            }
+            if (!removedSomething)
+            {
+                Conveyor conv = null;
+                try { if (owner.ghostByCell.TryGetValue(cell, out var g) && g != null) conv = g; } catch { }
+                if (conv == null)
+                {
+                    try
+                    {
+                        var getConv = owner.gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+                        if (getConv != null) conv = getConv.Invoke(owner.gridServiceInstance, new object[] { cell }) as Conveyor;
+                    }
+                    catch { }
+                }
+                if (conv == null)
+                {
+                    try
+                    {
+                        var worldObj = owner.miCellToWorld.Invoke(owner.gridServiceInstance, new object[] { cell, 0f });
+                        var center = worldObj is Vector3 vv ? vv : Vector3.zero;
+                        var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+                        foreach (var col in colliders) { var c = col.gameObject.GetComponent<Conveyor>(); if (c != null) { conv = c; break; } }
+                    }
+                    catch { }
+                }
+                if (conv != null)
+                {
+                    try { owner.ghostOriginalColors.Remove(conv); } catch { }
+                    try { owner.ghostByCell.Remove(cell); } catch { }
+                    try { UnityEngine.Object.Destroy(conv.gameObject); } catch { }
+                    try { var setConv = owner.gridServiceInstance.GetType().GetMethod("SetConveyor", new Type[] { typeof(Vector2Int), typeof(Conveyor) }); if (setConv != null) setConv.Invoke(owner.gridServiceInstance, new object[] { cell, null }); } catch { }
+                    removedSomething = true;
+                }
+                else
+                {
+                    var mg = owner.FindMachineAtCell(cell);
+                    if (mg != null)
+                    {
+                        owner.RefundFullBuildCost(mg);
+                        try { UnityEngine.Object.Destroy(mg); } catch { }
+                        removedSomething = true;
+                        try
+                        {
+                            var clear = owner.gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+                            if (clear != null) clear.Invoke(owner.gridServiceInstance, new object[] { cell });
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        var pipe = owner.FindPipeAtCell(cell);
+                        if (pipe != null)
+                        {
+                            owner.RefundFullBuildCost(pipe);
+                            try { UnityEngine.Object.Destroy(pipe); } catch { }
+                            removedSomething = true;
+                        }
+                    }
+
+                    if (!removedSomething)
+                    {
+                        var jg = owner.FindJunctionAtCell(cell);
+                        if (jg != null)
+                        {
+                            owner.RefundFullBuildCost(jg);
+                            try { UnityEngine.Object.Destroy(jg); } catch { }
+                            removedSomething = true;
+                        }
+                        else
+                        {
+                            var go = owner.FindBeltVisualAtCell(cell);
+                            if (go != null)
+                            {
+                                try { owner.genericGhostOriginalColors.Remove(go); } catch { }
+                                try { UnityEngine.Object.Destroy(go); } catch { }
+                                removedSomething = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!removedSomething)
+            {
+                try
+                {
+                    var getCell = owner.gridServiceInstance.GetType().GetMethod("GetCell", new Type[] { typeof(Vector2Int) });
+                    var clear = owner.gridServiceInstance.GetType().GetMethod("ClearCell", new Type[] { typeof(Vector2Int) });
+                    if (getCell != null)
+                    {
+                        var cellObj = getCell.Invoke(owner.gridServiceInstance, new object[] { cell });
+                        if (cellObj != null)
+                        {
+                            var t = cellObj.GetType();
+                            var fiType = t.GetField("type", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            bool wasJunction = false;
+                            if (fiType != null)
+                            {
+                                var name = fiType.GetValue(cellObj)?.ToString();
+                                if (name == "Belt" || name == "Junction" || name == "Machine")
+                                {
+                                    wasJunction = name == "Junction";
+                                    if (clear != null) clear.Invoke(owner.gridServiceInstance, new object[] { cell });
+                                    removedSomething = true;
+                                }
+                            }
+                            if (wasJunction)
+                            {
+                                owner.DestroyJunctionVisualsAtCell(cell);
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (removedSomething)
+            {
+                owner.ClearLogicalCell(cell);
+                owner.TryClearItemAtCell(cell);
+                if (refundBelt) GameManager.Instance?.AddSweetCredits(owner.beltCost);
+            }
+
+            if (destroyOverlay) owner.DestroyDeleteOverlayForCell(cell);
+            owner.TryRegisterCellInBeltSim(cell);
+            return removedSomething;
+        }
+    }
+
+    class ServiceCache
+    {
+        readonly ConveyorPlacer owner;
+        MonoBehaviour cachedBeltSimulation;
+        MethodInfo miRegisterCell;
+        MethodInfo miReseed;
+        MonoBehaviour cachedBeltGraph;
+        MethodInfo miMarkDirty;
+        int lastBeltSimulationSearchFrame = -9999;
+        int lastBeltGraphSearchFrame = -9999;
+
+        public ServiceCache(ConveyorPlacer owner)
+        {
+            this.owner = owner;
+        }
+
+        MonoBehaviour FindServiceByName(ref MonoBehaviour cached, ref int lastSearchFrame, string name)
+        {
+            if (cached != null) return cached;
+            if (Time.frameCount - lastSearchFrame < 30) return null;
+            lastSearchFrame = Time.frameCount;
+            var all = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            foreach (var mb in all)
+            {
+                if (mb == null) continue;
+                var t = mb.GetType();
+                if (t.Name == name)
+                {
+                    cached = mb;
+                    break;
+                }
+            }
+            return cached;
+        }
+
+        public void RegisterCell(Vector2Int cell)
+        {
+            var svc = FindServiceByName(ref cachedBeltSimulation, ref lastBeltSimulationSearchFrame, "BeltSimulationService");
+            if (svc == null) return;
+            if (miRegisterCell == null)
+                miRegisterCell = svc.GetType().GetMethod("RegisterCell", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            try { miRegisterCell?.Invoke(svc, new object[] { cell }); } catch { }
+        }
+
+        public void ReseedFromGrid()
+        {
+            var svc = FindServiceByName(ref cachedBeltSimulation, ref lastBeltSimulationSearchFrame, "BeltSimulationService");
+            if (svc == null) return;
+            if (miReseed == null)
+                miReseed = svc.GetType().GetMethod("ReseedActiveFromGrid", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            try { miReseed?.Invoke(svc, null); } catch { }
+        }
+
+        public void MarkGraphDirty()
+        {
+            var svc = FindServiceByName(ref cachedBeltGraph, ref lastBeltGraphSearchFrame, "BeltGraphService");
+            if (svc == null) return;
+            if (miMarkDirty == null)
+                miMarkDirty = svc.GetType().GetMethod("MarkDirty", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            try { miMarkDirty?.Invoke(svc, null); } catch { }
+        }
     }
 }
