@@ -102,3 +102,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   direction: 1
   ticksPerCell: 10
+  spriteRenderer: {fileID: 4201051881256447682}
+  straightSprite: {fileID: 2673543848797807974, guid: d74c74c3b2e63e64cb03fd79e92db32f, type: 3}
+  curveSprite: {fileID: 2815252332296440868, guid: a2813cd1bcc59dc408bebd14f8da21ac, type: 3}
+  curveBaseCorner: 2

@@ -629,7 +629,7 @@ public class ConveyorPlacer : MonoBehaviour
                 RemoveGhostAtCell(tail);
                 dragPath.RemoveAt(dragPath.Count - 1);
                 // Orient the new tail toward the direction we're moving (optional for visual feedback)
-                UpdateBeltDirectionFast(prevCell, dirNameNext);
+            UpdateBeltDirectionFast(prevCell, dirNameNext);
                 lastDragCell = prevCell;
                 return;
             }
@@ -651,7 +651,13 @@ public class ConveyorPlacer : MonoBehaviour
         }
 
         // Ensure the previous belt now points toward this next step (rotate second-to-last)
-        UpdateBeltDirectionFast(lastDragCell, dirNameNext);
+        Direction? incomingDirection = null;
+        if (dragPath.Count >= 2)
+        {
+            var prevCell = dragPath[dragPath.Count - 2];
+            incomingDirection = DirectionFromDelta(lastDragCell - prevCell);
+        }
+        UpdateBeltDirectionFast(lastDragCell, dirNameNext, incomingDirection);
 
         if (IsCellBlockedForBelt(nextCellMove)) return;
 
@@ -1398,6 +1404,8 @@ public class ConveyorPlacer : MonoBehaviour
         var task = conv.GetComponent<BlueprintTask>();
         if (task == null) task = conv.gameObject.AddComponent<BlueprintTask>();
         task.InitializeBelt(cell, conv.direction, conv.transform.rotation, conveyorPrefab, beltCost, GetBeltBuildSeconds());
+        if (conv.IsCurve)
+            task.UpdateBeltCurve(conv.CurveFrom, conv.CurveTo, conv.transform.rotation);
     }
 
     // Copy sorting layer from existing conveyor at cell so ghost draws in the same layer
@@ -1530,7 +1538,8 @@ public class ConveyorPlacer : MonoBehaviour
                 var conv = go.GetComponent<Conveyor>() ?? go.GetComponentInChildren<Conveyor>(true);
                 if (conv != null)
                 {
-                    switch (outDirName) { case "Right": conv.direction = Direction.Right; break; case "Left": conv.direction = Direction.Left; break; case "Up": conv.direction = Direction.Up; break; case "Down": conv.direction = Direction.Down; break; default: conv.direction = Direction.Right; break; }
+                    var outDir = DirectionFromName(outDirName);
+                    conv.SetStraight(outDir, visualRotationOffset);
 
                     if (isDragging || BuildModeController.IsDragging)
                     {
@@ -1581,8 +1590,11 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 try
                 {
-                    switch (outDirName) { case "Right": conv.direction = Direction.Right; break; case "Left": conv.direction = Direction.Left; break; case "Up": conv.direction = Direction.Up; break; case "Down": conv.direction = Direction.Down; break; }
-                    float z = outDirName switch { "Right" => 0f, "Up" => 90f, "Left" => 180f, "Down" => 270f, _ => 0f } + visualRotationOffset; conv.transform.rotation = Quaternion.Euler(0,0,z);
+                    var outDir = DirectionFromName(outDirName);
+                    conv.SetStraight(outDir, visualRotationOffset);
+                    var task = conv.GetComponent<BlueprintTask>();
+                    if (task != null)
+                        task.UpdateBeltDirection(outDir, conv.transform.rotation);
                 }
                 catch { }
             }
@@ -1795,6 +1807,15 @@ public class ConveyorPlacer : MonoBehaviour
     string DirectionNameFromDelta(Vector2Int delta)
     {
         if (delta.x > 0) return "Right"; if (delta.x < 0) return "Left"; if (delta.y > 0) return "Up"; if (delta.y < 0) return "Down"; return null;
+    }
+
+    static Direction DirectionFromDelta(Vector2Int delta)
+    {
+        if (delta.x > 0) return Direction.Right;
+        if (delta.x < 0) return Direction.Left;
+        if (delta.y > 0) return Direction.Up;
+        if (delta.y < 0) return Direction.Down;
+        return Direction.None;
     }
 
     string RotationToDirectionName(Quaternion q)
@@ -2300,7 +2321,7 @@ public class ConveyorPlacer : MonoBehaviour
         catch { }
     }
 
-    void UpdateBeltDirectionFast(Vector2Int cell, string outDirName)
+    void UpdateBeltDirectionFast(Vector2Int cell, string outDirName, Direction? incomingDirection = null)
     {
         try
         {
@@ -2330,8 +2351,23 @@ public class ConveyorPlacer : MonoBehaviour
             {
                 try
                 {
-                    switch (outDirName) { case "Right": conv.direction = Direction.Right; break; case "Left": conv.direction = Direction.Left; break; case "Up": conv.direction = Direction.Up; break; case "Down": conv.direction = Direction.Down; break; }
-                    float z = outDirName switch { "Right" => 0f, "Up" => 90f, "Left" => 180f, "Down" => 270f, _ => 0f } + visualRotationOffset; conv.transform.rotation = Quaternion.Euler(0,0,z);
+                    var outDir = DirectionFromName(outDirName);
+                    bool shouldCurve = incomingDirection.HasValue && incomingDirection.Value != Direction.None && incomingDirection.Value != outDir;
+                    if (shouldCurve)
+                    {
+                        var fromSide = DirectionUtil.Opposite(incomingDirection.Value);
+                        conv.SetCurve(fromSide, outDir, visualRotationOffset);
+                        var task = conv.GetComponent<BlueprintTask>();
+                        if (task != null)
+                            task.UpdateBeltCurve(fromSide, outDir, conv.transform.rotation);
+                    }
+                    else
+                    {
+                        conv.SetStraight(outDir, visualRotationOffset);
+                        var task = conv.GetComponent<BlueprintTask>();
+                        if (task != null)
+                            task.UpdateBeltDirection(outDir, conv.transform.rotation);
+                    }
                 }
                 catch { }
             }

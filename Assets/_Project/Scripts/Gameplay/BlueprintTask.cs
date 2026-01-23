@@ -13,6 +13,9 @@ public class BlueprintTask : DroneTaskTarget
     [SerializeField] GameObject buildPrefab;
     [SerializeField] Vector2Int[] footprintCells = new Vector2Int[0];
     [SerializeField] Direction beltDirection = Direction.Right;
+    [SerializeField] bool beltIsCurve = false;
+    [SerializeField] Direction beltCurveFrom = Direction.Right;
+    [SerializeField] Direction beltCurveTo = Direction.Right;
     [SerializeField] Direction cableDirection = Direction.Right;
     [SerializeField] bool cableIsCurve = false;
     [SerializeField] Direction cableCurveFrom = Direction.Right;
@@ -44,6 +47,9 @@ public class BlueprintTask : DroneTaskTarget
         blueprintType = BlueprintType.Belt;
         footprintCells = new[] { cell };
         beltDirection = outDir;
+        beltIsCurve = false;
+        beltCurveFrom = outDir;
+        beltCurveTo = outDir;
         buildRotation = rotation;
         buildPrefab = prefab;
         buildCost = cost;
@@ -158,6 +164,17 @@ public class BlueprintTask : DroneTaskTarget
     {
         if (blueprintType != BlueprintType.Belt) return;
         beltDirection = newDirection;
+        beltIsCurve = false;
+        buildRotation = rotation;
+    }
+
+    public void UpdateBeltCurve(Direction fromDirection, Direction toDirection, Quaternion rotation)
+    {
+        if (blueprintType != BlueprintType.Belt) return;
+        beltIsCurve = true;
+        beltCurveFrom = fromDirection;
+        beltCurveTo = toDirection;
+        beltDirection = toDirection;
         buildRotation = rotation;
     }
 
@@ -330,7 +347,10 @@ public class BlueprintTask : DroneTaskTarget
         var conv = go.GetComponent<Conveyor>();
         if (conv != null)
         {
-            conv.direction = beltDirection;
+            if (beltIsCurve)
+                conv.ApplyCurveSprite(beltCurveFrom, beltCurveTo);
+            else
+                conv.ApplyStraightSprite(beltDirection);
             conv.isGhost = false;
         }
 

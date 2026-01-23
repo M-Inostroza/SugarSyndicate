@@ -23,6 +23,7 @@ public class BuildManager : MonoBehaviour
     bool isMouseDown = false;
     Vector2Int lastPlacedCell;
     Conveyor lastPlacedConveyor;
+    Direction? lastMoveDirection;
 
     void Awake()
     {
@@ -119,18 +120,28 @@ public class BuildManager : MonoBehaviour
                     // update previous conveyor's direction to point to the next cell
                     if (lastPlacedConveyor != null)
                     {
-                        lastPlacedConveyor.direction = dir;
-                        // rotate visual to match
-                        RotateTransformToDirection(lastPlacedConveyor.transform, dir);
-                        var task = lastPlacedConveyor.GetComponent<BlueprintTask>();
-                        if (task != null)
-                            task.UpdateBeltDirection(dir, lastPlacedConveyor.transform.rotation);
+                        if (lastMoveDirection.HasValue && lastMoveDirection.Value != dir)
+                        {
+                            var fromSide = DirectionUtil.Opposite(lastMoveDirection.Value);
+                            lastPlacedConveyor.SetCurve(fromSide, dir);
+                            var task = lastPlacedConveyor.GetComponent<BlueprintTask>();
+                            if (task != null)
+                                task.UpdateBeltCurve(fromSide, dir, lastPlacedConveyor.transform.rotation);
+                        }
+                        else
+                        {
+                            lastPlacedConveyor.SetStraight(dir);
+                            var task = lastPlacedConveyor.GetComponent<BlueprintTask>();
+                            if (task != null)
+                                task.UpdateBeltDirection(dir, lastPlacedConveyor.transform.rotation);
+                        }
                         // ensure belt graph sees the updated direction immediately
                         BeltSimulationService.Instance?.RegisterConveyor(lastPlacedConveyor);
                     }
 
                     // place conveyor at next cell and set its direction
                     PlaceConveyorAtCell(next, dir);
+                    lastMoveDirection = dir;
 
                     // advance
                     from = next;
@@ -147,6 +158,7 @@ public class BuildManager : MonoBehaviour
         {
             isMouseDown = false;
             lastPlacedConveyor = null;
+            lastMoveDirection = null;
         }
     }
 
@@ -165,6 +177,7 @@ public class BuildManager : MonoBehaviour
         isPlacingConveyor = false;
         isMouseDown = false;
         lastPlacedConveyor = null;
+        lastMoveDirection = null;
         Debug.Log("BuildManager: Exiting placement mode.");
         // restore global state to Play if GameManager exists
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Play);
@@ -205,8 +218,7 @@ public class BuildManager : MonoBehaviour
         {
             if (setDirection.HasValue)
             {
-                conv.direction = setDirection.Value;
-                RotateTransformToDirection(conv.transform, setDirection.Value);
+                conv.SetStraight(setDirection.Value);
             }
 
             conv.isGhost = true;

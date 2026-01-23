@@ -6,6 +6,14 @@ public class Conveyor : MonoBehaviour, IConveyor
 {
     public Direction direction = Direction.Right;
     [Min(1)] public int ticksPerCell = 4;
+    [SerializeField] SpriteRenderer spriteRenderer;
+    [SerializeField] Sprite straightSprite;
+    [SerializeField] Sprite curveSprite;
+    [SerializeField] CurveCorner curveBaseCorner = CurveCorner.LeftUp;
+
+    [System.NonSerialized] bool isCurve;
+    [System.NonSerialized] Direction curveFrom = Direction.None;
+    [System.NonSerialized] Direction curveTo = Direction.None;
 
     Vector2Int lastCell;
     GridService grid;
@@ -15,9 +23,25 @@ public class Conveyor : MonoBehaviour, IConveyor
     public bool isGhost = false;
 
     public Vector2Int DirVec() => DirectionUtil.DirVec(direction);
+    public bool IsCurve => isCurve;
+    public Direction CurveFrom => curveFrom;
+    public Direction CurveTo => curveTo;
+
+    public enum CurveCorner
+    {
+        UpRight,
+        RightDown,
+        DownLeft,
+        LeftUp,
+    }
 
     void Awake()
     {
+        if (spriteRenderer == null)
+            spriteRenderer = GetComponentInChildren<SpriteRenderer>(true);
+        if (straightSprite == null && spriteRenderer != null)
+            straightSprite = spriteRenderer.sprite;
+
         // Don't do any registration work if this is a ghost conveyor
         if (isGhost) return;
         
@@ -25,6 +49,97 @@ public class Conveyor : MonoBehaviour, IConveyor
         lastCell = GetCellForPosition(transform.position);
         // Do NOT touch GridService here; its Awake may not have warmed the grid yet when scene loads
         // Registration is done in Start to avoid race with GridService.Awake
+    }
+
+    public void SetStraight(Direction newDirection, float rotationOffset = 0f)
+    {
+        ApplyStraightSprite(newDirection);
+        ApplyRotation(rotationOffset);
+    }
+
+    public void SetCurve(Direction fromDirection, Direction toDirection, float rotationOffset = 0f)
+    {
+        if (curveSprite == null || spriteRenderer == null)
+        {
+            ApplyStraightSprite(toDirection);
+            ApplyRotation(rotationOffset);
+            return;
+        }
+        ApplyCurveSprite(fromDirection, toDirection);
+        ApplyCurveRotation(fromDirection, toDirection, rotationOffset);
+    }
+
+    public void ApplyStraightSprite(Direction newDirection)
+    {
+        direction = newDirection;
+        isCurve = false;
+        curveFrom = Direction.None;
+        curveTo = Direction.None;
+        if (spriteRenderer != null && straightSprite != null)
+            spriteRenderer.sprite = straightSprite;
+    }
+
+    public void ApplyCurveSprite(Direction fromDirection, Direction toDirection)
+    {
+        if (curveSprite == null || spriteRenderer == null)
+        {
+            ApplyStraightSprite(toDirection);
+            return;
+        }
+
+        direction = toDirection;
+        isCurve = true;
+        curveFrom = fromDirection;
+        curveTo = toDirection;
+        spriteRenderer.sprite = curveSprite;
+    }
+
+    void ApplyRotation(float rotationOffset)
+    {
+        float angle = direction switch
+        {
+            Direction.Right => 0f,
+            Direction.Up => 90f,
+            Direction.Left => 180f,
+            Direction.Down => 270f,
+            _ => 0f,
+        };
+        angle = Mathf.Repeat(angle + rotationOffset, 360f);
+        transform.rotation = Quaternion.Euler(0f, 0f, angle);
+    }
+
+    void ApplyCurveRotation(Direction fromDirection, Direction toDirection, float rotationOffset)
+    {
+        float angle;
+        if (IsCurvePair(fromDirection, toDirection, Direction.Up, Direction.Right)) angle = 0f;
+        else if (IsCurvePair(fromDirection, toDirection, Direction.Right, Direction.Down)) angle = 270f;
+        else if (IsCurvePair(fromDirection, toDirection, Direction.Down, Direction.Left)) angle = 180f;
+        else if (IsCurvePair(fromDirection, toDirection, Direction.Left, Direction.Up)) angle = 90f;
+        else
+        {
+            ApplyStraightSprite(toDirection);
+            ApplyRotation(rotationOffset);
+            return;
+        }
+
+        angle = Mathf.Repeat(angle + GetCurveBaseOffset() + rotationOffset, 360f);
+        transform.rotation = Quaternion.Euler(0f, 0f, angle);
+    }
+
+    static bool IsCurvePair(Direction a, Direction b, Direction d1, Direction d2)
+        => (a == d1 && b == d2) || (a == d2 && b == d1);
+
+    float GetCurveBaseOffset()
+    {
+        float baseAngle = curveBaseCorner switch
+        {
+            CurveCorner.UpRight => 0f,
+            CurveCorner.RightDown => 270f,
+            CurveCorner.DownLeft => 180f,
+            CurveCorner.LeftUp => 90f,
+            _ => 0f,
+        };
+        return Mathf.Repeat(360f - baseAngle, 360f);
     }
 
     void Start()
