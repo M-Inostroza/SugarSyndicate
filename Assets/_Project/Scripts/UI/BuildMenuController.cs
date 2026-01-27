@@ -34,9 +34,12 @@ public class BuildMenuController : MonoBehaviour
     [SerializeField] bool hideButtonsWhileOpen = true;
 
     string activeCategory;
+    readonly Dictionary<Category, bool> cachedButtonActive = new Dictionary<Category, bool>();
+    readonly Dictionary<Category, bool> cachedButtonInteractable = new Dictionary<Category, bool>();
 
     void OnEnable()
     {
+        CacheInitialStates();
         RegisterButtons();
         // Always start with panels hidden, then optionally show the first category
         HideAll();
@@ -72,6 +75,7 @@ public class BuildMenuController : MonoBehaviour
     void OnCategoryClicked(Category cat)
     {
         if (cat == null) return;
+        if (cat.button != null && !cat.button.interactable) return;
         if (activeCategory == cat.name && toggleOffActive)
         {
             HideAll();
@@ -105,6 +109,84 @@ public class BuildMenuController : MonoBehaviour
         }
         activeCategory = null;
         if (hideButtonsWhileOpen && buttonContainer != null) buttonContainer.SetActive(true);
+    }
+
+    public void SetAllowedCategories(IReadOnlyList<string> allowed, bool hideDisallowed, bool disableDisallowed)
+    {
+        if (allowed == null || allowed.Count == 0) return;
+        foreach (var cat in categories)
+        {
+            if (cat == null) continue;
+            bool isAllowed = ContainsName(allowed, cat.name);
+            if (isAllowed)
+            {
+                SetCategoryVisible(cat, true);
+                SetCategoryEnabled(cat, true);
+            }
+            else
+            {
+                if (hideDisallowed) SetCategoryVisible(cat, false);
+                if (disableDisallowed) SetCategoryEnabled(cat, false);
+            }
+        }
+    }
+
+    public void ResetCategoryStates()
+    {
+        foreach (var cat in categories)
+        {
+            if (cat == null || cat.button == null) continue;
+            if (cachedButtonActive.TryGetValue(cat, out var active))
+                cat.button.gameObject.SetActive(active);
+            if (cachedButtonInteractable.TryGetValue(cat, out var interactable))
+                cat.button.interactable = interactable;
+        }
+    }
+
+    void SetCategoryVisible(Category cat, bool visible)
+    {
+        if (cat?.button == null) return;
+        cat.button.gameObject.SetActive(visible);
+        if (!visible)
+        {
+            var target = ResolveToggleTarget(cat);
+            if (target != null) target.SetActive(false);
+        }
+    }
+
+    void SetCategoryEnabled(Category cat, bool enabled)
+    {
+        if (cat?.button == null) return;
+        cat.button.interactable = enabled;
+        if (!enabled)
+        {
+            var target = ResolveToggleTarget(cat);
+            if (target != null) target.SetActive(false);
+        }
+    }
+
+    void CacheInitialStates()
+    {
+        if (cachedButtonActive.Count > 0 || cachedButtonInteractable.Count > 0) return;
+        foreach (var cat in categories)
+        {
+            if (cat?.button == null) continue;
+            cachedButtonActive[cat] = cat.button.gameObject.activeSelf;
+            cachedButtonInteractable[cat] = cat.button.interactable;
+        }
+    }
+
+    static bool ContainsName(IReadOnlyList<string> list, string name)
+    {
+        if (list == null || string.IsNullOrWhiteSpace(name)) return false;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var entry = list[i];
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+            if (string.Equals(entry.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     // UI hook for "Back" buttons: hide panels and clear the active build tool.
