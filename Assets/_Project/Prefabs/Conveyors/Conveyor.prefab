@@ -77,7 +77,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 4
-  m_Sprite: {fileID: 2673543848797807974, guid: d74c74c3b2e63e64cb03fd79e92db32f, type: 3}
+  m_Sprite: {fileID: 5387056471704118933, guid: ca14ebe1b49a15e489d8987271beb8eb, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -104,5 +104,5 @@ MonoBehaviour:
   ticksPerCell: 10
   spriteRenderer: {fileID: 4201051881256447682}
   straightSprite: {fileID: 2673543848797807974, guid: d74c74c3b2e63e64cb03fd79e92db32f, type: 3}
-  curveSprite: {fileID: 2815252332296440868, guid: a2813cd1bcc59dc408bebd14f8da21ac, type: 3}
+  curveSprite: {fileID: -3032575952981420478, guid: af58a6fb7e4e8234ca253465a17df83d, type: 3}
   curveBaseCorner: 2
