@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -7,6 +8,8 @@ public class BlueprintTask : DroneTaskTarget
     public enum BlueprintType { Belt, Machine, Junction, Pipe, DroneHQ, Cable, Pole }
 
     static int hqBlueprintCount;
+    public static event Action<BlueprintType, BlueprintTask> BlueprintPlaced;
+    public static event Action<BlueprintType, BlueprintTask> BlueprintCompleted;
 
     [Header("Setup")]
     [SerializeField] BlueprintType blueprintType = BlueprintType.Belt;
@@ -41,6 +44,7 @@ public class BlueprintTask : DroneTaskTarget
     public static bool HasHqBlueprint => hqBlueprintCount > 0;
     public BlueprintType Type => blueprintType;
     public bool IsHqBlueprint => blueprintType == BlueprintType.DroneHQ;
+    public GameObject BuildPrefab => buildPrefab;
 
     public void InitializeBelt(Vector2Int cell, Direction outDir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
     {
@@ -155,6 +159,7 @@ public class BlueprintTask : DroneTaskTarget
         MarkBlueprintCells(true);
         CacheOriginalColors();
         ApplyBlueprintTint();
+        try { BlueprintPlaced?.Invoke(blueprintType, this); } catch { }
 
         var workPos = ComputeFootprintCenter();
         BeginTask(DroneTaskType.Build, buildSeconds, DroneTaskPriority.Normal, workPos);
@@ -314,6 +319,8 @@ public class BlueprintTask : DroneTaskTarget
                 CompletePole();
                 break;
         }
+
+        try { BlueprintCompleted?.Invoke(blueprintType, this); } catch { }
 
         if (keepVisualOnComplete)
         {

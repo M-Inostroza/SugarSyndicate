@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: a2813cd1bcc59dc408bebd14f8da21ac
+guid: d4775f1066e0fbe49a11fb6c5fa56ef5
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 2815252332296440868
-    second: New Belt Curve_0
+      213: 8642437555667725648
+    second: Pig boss avatar_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,7 +97,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: Android
+    buildTarget: WebGL
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -122,30 +122,17 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
-    buildTarget: WebGL
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: New Belt Curve_0
+      name: Pig boss avatar_0
       rect:
         serializedVersion: 2
-        x: 0
-        y: 0
-        width: 92
-        height: 92
+        x: 2
+        y: 8
+        width: 1022
+        height: 1518
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 42c8e939419c11720800000000000000
-      internalID: 2815252332296440868
+      spriteID: 05de113da2b10f770800000000000000
+      internalID: 8642437555667725648
       vertices: []
       indices: 
       edges: []
@@ -173,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      New Belt Curve_0: 2815252332296440868
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
