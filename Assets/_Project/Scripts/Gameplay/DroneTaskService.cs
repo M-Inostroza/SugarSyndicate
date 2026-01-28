@@ -43,6 +43,7 @@ public class DroneTaskService : MonoBehaviour
     public bool CanAddCrawler => TotalCrawlers < MaxCrawlers;
 
     public event System.Action<int> OnDroneCountChanged;
+    public event System.Action<int> OnCrawlerCountChanged;
 
     public int IdleDrones
     {
@@ -295,6 +296,7 @@ public class DroneTaskService : MonoBehaviour
             crawler = go.AddComponent<CrawlerWorker>();
         }
         if (crawler != null) crawlers.Add(crawler);
+        OnCrawlerCountChanged?.Invoke(crawlers.Count);
     }
 
     public bool TryBuyDrone(int cost)

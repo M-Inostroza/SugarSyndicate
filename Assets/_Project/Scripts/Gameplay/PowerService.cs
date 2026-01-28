@@ -521,6 +521,14 @@ public class PowerService : MonoBehaviour
         return $"{watts:0.##} W";
     }
 
+    public static string FormatPowerOneDecimal(float watts)
+    {
+        float abs = Mathf.Abs(watts);
+        if (abs >= 1000000f) return $"{watts / 1000000f:0.#} MW";
+        if (abs >= 1000f) return $"{watts / 1000f:0.#} kW";
+        return $"{watts:0.#} W";
+    }
+
     void UpdatePowerSmoothing()
     {
         float dt = Time.deltaTime;

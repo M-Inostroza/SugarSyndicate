@@ -12,6 +12,8 @@ public class CameraDragPan : MonoBehaviour
 {
     public enum MouseButton { Left = 0, Right = 1, Middle = 2 }
 
+    public static event System.Action CameraDragged;
+
     [Header("Target")]
     [SerializeField] Camera targetCamera; // defaults to Camera.main
     [SerializeField] GridService gridService;
@@ -23,6 +25,8 @@ public class CameraDragPan : MonoBehaviour
     [Header("Behavior")]
     [Tooltip("Multiplier for drag amount. 1 means exact 1:1 world drag distance.")]
     [SerializeField, Min(0.01f)] float dragSensitivity = 1f;
+    [Tooltip("World-space distance required during a drag before we notify listeners.")]
+    [SerializeField, Min(0.01f)] float notifyDistance = 0.1f;
 
     [Header("Bounds")]
     [SerializeField] bool constrainToGrid = true;
@@ -39,6 +43,7 @@ public class CameraDragPan : MonoBehaviour
 
     // State
     bool dragging;
+    bool notifiedDrag;
     Vector3 smoothVelocity;   // for SmoothDamp
 
     void Awake()
@@ -70,6 +75,7 @@ public class CameraDragPan : MonoBehaviour
         if (Input.GetMouseButtonDown(btn))
         {
             dragging = true;
+            notifiedDrag = false;
             dragOriginWorld = GetMouseWorldOnPlane(targetCamera);
             camOriginPos = targetCamera.transform.position;
             smoothVelocity = Vector3.zero; // reset smoothing for a crisp start
@@ -82,6 +88,12 @@ public class CameraDragPan : MonoBehaviour
                 camOriginPos.x - delta.x * dragSensitivity,
                 camOriginPos.y - delta.y * dragSensitivity,
                 camOriginPos.z);
+
+            if (!notifiedDrag && delta.sqrMagnitude >= notifyDistance * notifyDistance)
+            {
+                notifiedDrag = true;
+                CameraDragged?.Invoke();
+            }
 
             if (smooth)
             {

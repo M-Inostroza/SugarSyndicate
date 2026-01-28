@@ -137,7 +137,7 @@ public class MachinePowerDisplay : MonoBehaviour
         }
 
         if (!text.gameObject.activeSelf) text.gameObject.SetActive(true);
-        text.text = PowerService.FormatPower(value);
+        text.text = PowerService.FormatPowerOneDecimal(value);
     }
 
     void ApplySorting(TextMeshPro target)

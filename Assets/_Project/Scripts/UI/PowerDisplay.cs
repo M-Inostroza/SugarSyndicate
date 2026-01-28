@@ -65,7 +65,7 @@ public class PowerDisplay : MonoBehaviour
             }
             return;
         }
-        string netText = PowerService.FormatPower(watts);
+        string netText = PowerService.FormatPowerOneDecimal(watts);
         string text = $"{prefix}{netText}{suffix}";
         if (powerText != null) powerText.text = text;
         if (legacyText != null) legacyText.text = text;

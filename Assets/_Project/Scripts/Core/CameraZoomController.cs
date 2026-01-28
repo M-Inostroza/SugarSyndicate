@@ -7,6 +7,9 @@ using DG.Tweening;
 /// </summary>
 public class CameraZoomController : MonoBehaviour
 {
+    public static event System.Action ZoomedIn;
+    public static event System.Action ZoomedOut;
+
     [Header("Zoom Sizes (Orthographic)")]
     [SerializeField] float closeSize = 2.8f;   // all in
     [SerializeField] float neutralSize = 3.6f; // middle
@@ -64,16 +67,17 @@ public class CameraZoomController : MonoBehaviour
         }
     }
 
-    void TweenTo(float size)
+    bool TweenTo(float size)
     {
-        if (cam == null) return;
-        if (Mathf.Approximately(targetSize, size)) return; // already targeting
+        if (cam == null) return false;
+        if (Mathf.Approximately(targetSize, size)) return false; // already targeting
         targetSize = size;
         currentTween?.Kill();
         currentTween = DOTween.To(() => cam.orthographicSize, s => cam.orthographicSize = s, size, zoomDuration)
             .SetEase(ease)
             .SetUpdate(false) // normal time scale
             .SetTarget(this);
+        return true;
     }
 
     /// <summary>
@@ -81,20 +85,22 @@ public class CameraZoomController : MonoBehaviour
     /// </summary>
     public void ZoomOut()
     {
+        bool changed = false;
         switch (CurrentLevel)
         {
             case ZoomLevel.Close:
-                TweenTo(neutralSize);
+                changed = TweenTo(neutralSize);
                 break;
             case ZoomLevel.Neutral:
-                TweenTo(farSize);
+                changed = TweenTo(farSize);
                 break;
             case ZoomLevel.Far:
-                TweenTo(farthestSize);
+                changed = TweenTo(farthestSize);
                 break;
             case ZoomLevel.Farthest:
                 break; // already max
         }
+        if (changed) ZoomedOut?.Invoke();
     }
 
     /// <summary>
@@ -102,19 +108,21 @@ public class CameraZoomController : MonoBehaviour
     /// </summary>
     public void ZoomIn()
     {
+        bool changed = false;
         switch (CurrentLevel)
         {
             case ZoomLevel.Farthest:
-                TweenTo(farSize);
+                changed = TweenTo(farSize);
                 break;
             case ZoomLevel.Far:
-                TweenTo(neutralSize);
+                changed = TweenTo(neutralSize);
                 break;
             case ZoomLevel.Neutral:
-                TweenTo(closeSize);
+                changed = TweenTo(closeSize);
                 break;
             case ZoomLevel.Close:
                 break; // already min
         }
+        if (changed) ZoomedIn?.Invoke();
     }
 }
