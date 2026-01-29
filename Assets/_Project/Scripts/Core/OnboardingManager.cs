@@ -2,21 +2,26 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DisallowMultipleComponent]
 public class OnboardingManager : MonoBehaviour
 {
     public enum StepTrigger
     {
-        None,
-        DroneHqBlueprintPlaced,
-        DroneHqBuilt,
-        SolarPanelBuilt,
-        BuyDrones,
-        SugarMineBuilt,
-        MinesPowered,
-        PressBuilt,
-        CameraMoveZoom
+        None = 0,
+        DroneHqBlueprintPlaced = 1,
+        DroneHqBuilt = 2,
+        SolarPanelBuilt = 3,
+        BuyDrones = 4,
+        SugarMineBuilt = 5,
+        MinesPowered = 6,
+        PressBuilt = 7,
+        CameraMoveZoom = 8,
+        MinesConnectedToPresses = 9,
+        PressesPowered = 10
     }
 
     [System.Serializable]
@@ -64,7 +69,8 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField] TutorialGoalUI goalUi;
 
     [Header("Steps")]
-    [SerializeField] List<Step> steps = new List<Step>();
+    [SerializeField] TutorialStepsAsset stepsAsset;
+    [SerializeField, HideInInspector] List<Step> steps = new List<Step>();
 
     int currentStepIndex = -1;
     readonly HashSet<string> completedSteps = new HashSet<string>();
@@ -73,6 +79,7 @@ public class OnboardingManager : MonoBehaviour
     int completionIndex;
     DialogueMode dialogueMode = DialogueMode.None;
     readonly List<SugarMine> trackedMines = new List<SugarMine>();
+    readonly List<PressMachine> trackedPresses = new List<PressMachine>();
     bool cameraMoved;
     bool zoomedIn;
     bool zoomedOut;
@@ -93,17 +100,123 @@ public class OnboardingManager : MonoBehaviour
         }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        EnsureStepsInitialized();
     }
 
-    void Reset()
+    List<Step> GetSteps()
     {
-        FillDefaultSteps();
+        if (stepsAsset != null)
+        {
+            if (stepsAsset.steps == null)
+                stepsAsset.steps = new List<Step>();
+            return stepsAsset.steps;
+        }
+        if (steps == null)
+            steps = new List<Step>();
+        return steps;
     }
 
-    [ContextMenu("Fill Default Steps")]
-    void FillDefaultSteps()
+    void EnsureStepsInitialized()
     {
-        steps = new List<Step>
+        var list = GetSteps();
+        if (list == null || list.Count == 0)
+        {
+            var defaults = BuildDefaultSteps();
+            if (stepsAsset != null)
+                stepsAsset.steps = defaults;
+            else
+                steps = defaults;
+            list = GetSteps();
+        }
+        EnsureRequiredSteps(list);
+    }
+
+    void EnsureRequiredSteps(List<Step> list)
+    {
+        if (list == null) return;
+        if (!HasStepId(list, "power-presses"))
+        {
+            var insertIndex = FindStepIndex(list, "connect-mines-presses");
+            if (insertIndex < 0) insertIndex = list.Count - 1;
+            if (insertIndex < 0) insertIndex = 0;
+            list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), CreatePressesPoweredStep());
+        }
+    }
+
+    static bool HasStepId(List<Step> list, string id)
+    {
+        if (list == null || string.IsNullOrWhiteSpace(id)) return false;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var step = list[i];
+            if (step == null || string.IsNullOrWhiteSpace(step.id)) continue;
+            if (step.id == id) return true;
+        }
+        return false;
+    }
+
+    static int FindStepIndex(List<Step> list, string id)
+    {
+        if (list == null || string.IsNullOrWhiteSpace(id)) return -1;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var step = list[i];
+            if (step == null || string.IsNullOrWhiteSpace(step.id)) continue;
+            if (step.id == id) return i;
+        }
+        return -1;
+    }
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        if (Application.isPlaying) return;
+        TryAutoCreateStepsAsset();
+    }
+
+    void TryAutoCreateStepsAsset()
+    {
+        if (stepsAsset != null) return;
+
+        const string assetPath = "Assets/_Project/Data/TutorialSteps.asset";
+        var existing = AssetDatabase.LoadAssetAtPath<TutorialStepsAsset>(assetPath);
+        if (existing == null)
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/_Project/Data"))
+            {
+                if (!AssetDatabase.IsValidFolder("Assets/_Project"))
+                    AssetDatabase.CreateFolder("Assets", "_Project");
+                AssetDatabase.CreateFolder("Assets/_Project", "Data");
+            }
+
+            existing = ScriptableObject.CreateInstance<TutorialStepsAsset>();
+            var source = (steps != null && steps.Count > 0) ? steps : BuildDefaultSteps();
+            existing.steps = new List<Step>(source);
+            AssetDatabase.CreateAsset(existing, assetPath);
+            AssetDatabase.SaveAssets();
+        }
+        else if ((existing.steps == null || existing.steps.Count == 0) && steps != null && steps.Count > 0)
+        {
+            existing.steps = new List<Step>(steps);
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssets();
+        }
+
+        if (existing != null)
+        {
+            EnsureRequiredSteps(existing.steps);
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssets();
+        }
+
+        stepsAsset = existing;
+        EditorUtility.SetDirty(this);
+    }
+#endif
+
+    static List<Step> BuildDefaultSteps()
+    {
+        return new List<Step>
         {
             new Step
             {
@@ -231,7 +344,46 @@ public class OnboardingManager : MonoBehaviour
                 requiredPressCount = 2,
                 openCategory = "Processing",
                 allowedCategories = new List<string> { "Essential", "Processing" }
-            }
+            },
+            new Step
+            {
+                id = "connect-mines-presses",
+                speaker = "Pig Boss",
+                messages = new List<string>
+                {
+                    "Now connect your mines to the presses with conveyor belts.",
+                    "Every mine should connect to every press."
+                },
+                completionMessages = new List<string>
+                {
+                    "Perfect. The presses can finally chew through sugar."
+                },
+                trigger = StepTrigger.MinesConnectedToPresses,
+                openCategory = "Essential",
+                allowedCategories = new List<string> { "Essential" }
+            },
+            CreatePressesPoweredStep()
+        };
+    }
+
+    static Step CreatePressesPoweredStep()
+    {
+        return new Step
+        {
+            id = "power-presses",
+            speaker = "Pig Boss",
+            messages = new List<string>
+            {
+                "Now provide electricity to your presses.",
+                "All current presses need power."
+            },
+            completionMessages = new List<string>
+            {
+                "Great. The presses are powered."
+            },
+            trigger = StepTrigger.PressesPowered,
+            openCategory = "Power",
+            allowedCategories = new List<string> { "Essential", "Power" }
         };
     }
 
@@ -407,7 +559,8 @@ public class OnboardingManager : MonoBehaviour
 
     void AdvanceToFirstIncompleteStep()
     {
-        if (!isActive || steps == null || steps.Count == 0)
+        var list = GetSteps();
+        if (!isActive || list == null || list.Count == 0)
         {
             HideUi();
             if (goalUi != null) goalUi.Hide();
@@ -427,9 +580,11 @@ public class OnboardingManager : MonoBehaviour
 
     int FindNextIncompleteIndex(int startIndex)
     {
-        for (int i = Mathf.Max(0, startIndex); i < steps.Count; i++)
+        var list = GetSteps();
+        if (list == null) return -1;
+        for (int i = Mathf.Max(0, startIndex); i < list.Count; i++)
         {
-            var step = steps[i];
+            var step = list[i];
             if (step == null) continue;
             if (IsStepComplete(step)) continue;
             return i;
@@ -459,6 +614,10 @@ public class OnboardingManager : MonoBehaviour
                 return AreAllMinesPowered(GetCurrentMines(), true);
             case StepTrigger.PressBuilt:
                 return GetPressCount() >= Mathf.Max(0, step.requiredPressCount);
+            case StepTrigger.MinesConnectedToPresses:
+                return AreAllMinesConnectedToPresses(GetCurrentMines(), GetCurrentPresses(), true);
+            case StepTrigger.PressesPowered:
+                return AreAllPressesPowered(GetCurrentPresses(), true);
             case StepTrigger.CameraMoveZoom:
                 return IsCameraStepComplete(step);
             case StepTrigger.None:
@@ -469,14 +628,19 @@ public class OnboardingManager : MonoBehaviour
 
     void StartStep(int index)
     {
-        if (index < 0 || steps == null || index >= steps.Count) return;
+        var list = GetSteps();
+        if (index < 0 || list == null || index >= list.Count) return;
         currentStepIndex = index;
-        var step = steps[index];
+        var step = list[index];
         messageIndex = 0;
         completionIndex = 0;
         dialogueMode = DialogueMode.Intro;
         if (step.trigger == StepTrigger.MinesPowered)
             CaptureTrackedMines();
+        if (step.trigger == StepTrigger.MinesConnectedToPresses)
+            CaptureTrackedMinesAndPresses();
+        if (step.trigger == StepTrigger.PressesPowered)
+            CaptureTrackedPresses();
         if (step.trigger == StepTrigger.CameraMoveZoom)
             ResetCameraStepState(step);
         ShowIntroMessage(step, messageIndex);
@@ -492,6 +656,10 @@ public class OnboardingManager : MonoBehaviour
         }
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.MinesConnectedToPresses)
+            TryCompleteMinesConnected(step);
+        if (step.trigger == StepTrigger.PressesPowered)
+            TryCompletePressesPowered(step);
     }
 
     void CompleteCurrentStep()
@@ -577,9 +745,10 @@ public class OnboardingManager : MonoBehaviour
 
     Step GetCurrentStep()
     {
-        if (currentStepIndex < 0 || steps == null || currentStepIndex >= steps.Count)
+        var list = GetSteps();
+        if (currentStepIndex < 0 || list == null || currentStepIndex >= list.Count)
             return null;
-        return steps[currentStepIndex];
+        return list[currentStepIndex];
     }
 
     void HandleBlueprintPlaced(BlueprintTask.BlueprintType type, BlueprintTask task)
@@ -609,6 +778,15 @@ public class OnboardingManager : MonoBehaviour
         {
             if (GetPressCount() >= Mathf.Max(0, step.requiredPressCount))
                 CompleteCurrentStep();
+        }
+        else if (step.trigger == StepTrigger.MinesConnectedToPresses)
+        {
+            if (type == BlueprintTask.BlueprintType.Belt
+                || type == BlueprintTask.BlueprintType.Junction
+                || (type == BlueprintTask.BlueprintType.Machine && IsPressTask(task)))
+            {
+                TryCompleteMinesConnected(step);
+            }
         }
         else if (step.trigger == StepTrigger.MinesPowered)
         {
@@ -644,6 +822,8 @@ public class OnboardingManager : MonoBehaviour
         if (step == null) return;
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.PressesPowered)
+            TryCompletePressesPowered(step);
         UpdateGoalUi(step);
     }
 
@@ -654,6 +834,8 @@ public class OnboardingManager : MonoBehaviour
         if (step == null) return;
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.PressesPowered)
+            TryCompletePressesPowered(step);
         UpdateGoalUi(step);
     }
 
@@ -850,6 +1032,19 @@ public class OnboardingManager : MonoBehaviour
         return list;
     }
 
+    List<PressMachine> GetCurrentPresses()
+    {
+        var presses = FindObjectsByType<PressMachine>(FindObjectsSortMode.None);
+        var list = new List<PressMachine>();
+        if (presses == null || presses.Length == 0) return list;
+        for (int i = 0; i < presses.Length; i++)
+        {
+            var press = presses[i];
+            if (press != null && !press.isGhost) list.Add(press);
+        }
+        return list;
+    }
+
     int GetDroneCount()
     {
         if (droneService == null && autoFindReferences)
@@ -941,6 +1136,24 @@ public class OnboardingManager : MonoBehaviour
                     items.Add(new TutorialGoalUI.ChecklistItem(label, required <= 0 || current >= required));
                 }
                 break;
+            case StepTrigger.MinesConnectedToPresses:
+                {
+                    GetMinePressConnectionProgress(trackedMines, trackedPresses, out var connected, out var total);
+                    string label = total > 0
+                        ? $"Connect mines to presses ({connected}/{total})"
+                        : "Connect mines to presses";
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && connected >= total));
+                }
+                break;
+            case StepTrigger.PressesPowered:
+                {
+                    GetPressPowerProgress(trackedPresses, out var powered, out var total);
+                    string label = total > 0
+                        ? $"Power all current presses ({powered}/{total})"
+                        : "Power all current presses";
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && powered >= total));
+                }
+                break;
         }
 
         return items;
@@ -964,11 +1177,41 @@ public class OnboardingManager : MonoBehaviour
         trackedMines.AddRange(GetCurrentMines());
     }
 
+    void CaptureTrackedMinesAndPresses()
+    {
+        trackedMines.Clear();
+        trackedPresses.Clear();
+        trackedMines.AddRange(GetCurrentMines());
+        trackedPresses.AddRange(GetCurrentPresses());
+    }
+
+    void CaptureTrackedPresses()
+    {
+        trackedPresses.Clear();
+        trackedPresses.AddRange(GetCurrentPresses());
+    }
+
     void TryCompleteMinesPowered(Step step)
     {
         if (step == null || step.trigger != StepTrigger.MinesPowered) return;
         if (trackedMines.Count == 0) return;
         if (AreAllMinesPowered(trackedMines, true))
+            CompleteCurrentStep();
+    }
+
+    void TryCompleteMinesConnected(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.MinesConnectedToPresses) return;
+        if (trackedMines.Count == 0 || trackedPresses.Count == 0) return;
+        if (AreAllMinesConnectedToPresses(trackedMines, trackedPresses, true))
+            CompleteCurrentStep();
+    }
+
+    void TryCompletePressesPowered(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.PressesPowered) return;
+        if (trackedPresses.Count == 0) return;
+        if (AreAllPressesPowered(trackedPresses, true))
             CompleteCurrentStep();
     }
 
@@ -1003,6 +1246,20 @@ public class OnboardingManager : MonoBehaviour
         return powered >= total;
     }
 
+    bool AreAllMinesConnectedToPresses(List<SugarMine> mines, List<PressMachine> presses, bool requireAny)
+    {
+        GetMinePressConnectionProgress(mines, presses, out var connected, out var total);
+        if (total == 0) return !requireAny;
+        return connected >= total;
+    }
+
+    bool AreAllPressesPowered(List<PressMachine> presses, bool requireAny)
+    {
+        GetPressPowerProgress(presses, out var powered, out var total);
+        if (total == 0) return !requireAny;
+        return powered >= total;
+    }
+
     void GetMinePowerProgress(List<SugarMine> mines, out int powered, out int total)
     {
         powered = 0;
@@ -1020,6 +1277,141 @@ public class OnboardingManager : MonoBehaviour
             if (power.IsCellPoweredOrAdjacent(cell))
                 powered++;
         }
+    }
+
+    void GetPressPowerProgress(List<PressMachine> presses, out int powered, out int total)
+    {
+        powered = 0;
+        total = 0;
+        if (presses == null || presses.Count == 0) return;
+        var grid = GridService.Instance;
+        var power = PowerService.Instance;
+        if (grid == null || power == null) return;
+        for (int i = 0; i < presses.Count; i++)
+        {
+            var press = presses[i];
+            if (press == null || press.isGhost) continue;
+            total++;
+            if (power.IsCellPoweredOrAdjacent(press.Cell))
+                powered++;
+        }
+    }
+
+    void GetMinePressConnectionProgress(List<SugarMine> mines, List<PressMachine> presses, out int connected, out int total)
+    {
+        connected = 0;
+        total = 0;
+        if (mines == null || presses == null || mines.Count == 0 || presses.Count == 0) return;
+        var grid = GridService.Instance;
+        if (grid == null) return;
+
+        var pressByCell = BuildPressLookup(presses);
+        if (pressByCell.Count == 0) return;
+
+        int mineCount = 0;
+        for (int i = 0; i < mines.Count; i++)
+        {
+            var mine = mines[i];
+            if (mine == null || mine.isGhost) continue;
+            mineCount++;
+        }
+
+        total = mineCount * pressByCell.Count;
+        if (total == 0) return;
+
+        for (int i = 0; i < mines.Count; i++)
+        {
+            var mine = mines[i];
+            if (mine == null || mine.isGhost) continue;
+            connected += CountReachablePresses(grid, mine, pressByCell);
+        }
+    }
+
+    Dictionary<Vector2Int, PressMachine> BuildPressLookup(List<PressMachine> presses)
+    {
+        var lookup = new Dictionary<Vector2Int, PressMachine>();
+        if (presses == null) return lookup;
+        for (int i = 0; i < presses.Count; i++)
+        {
+            var press = presses[i];
+            if (press == null || press.isGhost) continue;
+            lookup[press.Cell] = press;
+        }
+        return lookup;
+    }
+
+    static Direction DirectionFromVecOrNone(Vector2Int dir)
+    {
+        if (dir == Vector2Int.up) return Direction.Up;
+        if (dir == Vector2Int.right) return Direction.Right;
+        if (dir == Vector2Int.down) return Direction.Down;
+        if (dir == Vector2Int.left) return Direction.Left;
+        return Direction.None;
+    }
+
+    static bool IsBeltLike(GridService.Cell c)
+        => c != null && !c.isBlueprint && !c.isBroken
+           && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
+
+    int CountReachablePresses(GridService grid, SugarMine mine, Dictionary<Vector2Int, PressMachine> pressByCell)
+    {
+        if (grid == null || mine == null || pressByCell == null || pressByCell.Count == 0) return 0;
+        var baseCell = grid.WorldToCell(mine.transform.position);
+        var startCell = baseCell + DirectionUtil.DirVec(mine.outputDirection);
+        var start = grid.GetCell(startCell);
+        if (!IsBeltLike(start)) return 0;
+
+        var visited = new HashSet<Vector2Int>();
+        var queue = new Queue<Vector2Int>();
+        visited.Add(startCell);
+        queue.Enqueue(startCell);
+        var reached = new HashSet<Vector2Int>();
+
+        bool TryStep(Vector2Int cellPos, Direction dir)
+        {
+            if (!DirectionUtil.IsCardinal(dir)) return false;
+            var nextPos = cellPos + DirectionUtil.DirVec(dir);
+            if (!grid.InBounds(nextPos)) return false;
+
+            if (pressByCell.TryGetValue(nextPos, out var press) && press != null && !press.isGhost)
+            {
+                var approachFromVec = cellPos - nextPos;
+                if (approachFromVec == press.InputVec)
+                {
+                    reached.Add(nextPos);
+                    if (reached.Count == pressByCell.Count) return true;
+                }
+            }
+
+            var nextCell = grid.GetCell(nextPos);
+            if (IsBeltLike(nextCell) && visited.Add(nextPos))
+                queue.Enqueue(nextPos);
+            return false;
+        }
+
+        while (queue.Count > 0)
+        {
+            var cellPos = queue.Dequeue();
+            var cell = grid.GetCell(cellPos);
+            if (cell == null) continue;
+
+            if (cell.type == GridService.CellType.Belt)
+            {
+                if (TryStep(cellPos, cell.outA)) break;
+            }
+            else if (cell.type == GridService.CellType.Junction)
+            {
+                if (TryStep(cellPos, cell.outA)) break;
+                if (TryStep(cellPos, cell.outB)) break;
+            }
+            else if (cell.conveyor != null)
+            {
+                var dir = DirectionFromVecOrNone(cell.conveyor.DirVec());
+                if (TryStep(cellPos, dir)) break;
+            }
+        }
+
+        return reached.Count;
     }
 
 

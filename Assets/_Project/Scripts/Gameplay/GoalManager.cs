@@ -25,7 +25,7 @@ public class GoalManager : MonoBehaviour
     class LevelGoal
     {
         [Min(0)] public int levelIndex;
-        public string itemType = "SugarBlock";
+        public string itemType = "Cubes";
         [Min(1)] public int itemTarget = 40;
         public BonusObjective[] bonusObjectives;
     }
@@ -33,11 +33,13 @@ public class GoalManager : MonoBehaviour
     [Header("Goal")]
     [SerializeField] LevelGoal[] levelGoals =
     {
-        new LevelGoal { levelIndex = 0, itemType = "SugarBlock", itemTarget = 40 }
+        new LevelGoal { levelIndex = 0, itemType = "Cubes", itemTarget = 40 }
     };
 
     [Header("State")]
     [SerializeField] bool autoCompleteOnTarget = true;
+    [SerializeField] bool disableBonusObjectivesInTutorial = true;
+    [SerializeField] int tutorialSceneBuildIndex = 0;
 
     int itemsDelivered;
     bool completed;
@@ -83,6 +85,8 @@ public class GoalManager : MonoBehaviour
             completed = false;
             hasGoal = true;
             activeBonusObjectives = goal.bonusObjectives;
+            if (disableBonusObjectivesInTutorial && currentLevel == tutorialSceneBuildIndex)
+                activeBonusObjectives = null;
             int bonusCount = activeBonusObjectives != null ? activeBonusObjectives.Length : 0;
             bonusCompleted = bonusCount > 0 ? new bool[bonusCount] : null;
             startDayCount = GetCurrentDayCount();

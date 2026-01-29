@@ -1,0 +1,233 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 582e40b8bfe553147b03fffa00e02ece, type: 3}
+  m_Name: TutorialSteps
+  m_EditorClassIdentifier: 
+  steps:
+  - id: camera-move-zoom
+    speaker: Pig Boss
+    trigger: 8
+    hideUiAfterCompletion: 0
+    messages:
+    - Hey kid, glad you're here. The last engineer had a few issues and we had to
+      get rid of h... I mean, he found a better opportunity.
+    - Anyway, I'm Pig Boss. I'll teach you the basics.
+    - First, learn to move the camera.
+    - Drag with your finger to pan around, then use the zoom buttons to zoom in and
+      out.
+    completionMessages:
+    - Good. Now you can move around.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 1
+    requireZoomIn: 1
+    requireZoomOut: 1
+    highlightTargets: []
+    openCategory: 
+    allowedCategories: []
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: place-drone-hq
+    speaker: Pig Boss
+    trigger: 2
+    hideUiAfterCompletion: 0
+    messages:
+    - To build machines you need drones, place your Drone HQ. First one is on me.
+    - Drop it anywhere on the grid so the crew has a home base.
+    completionMessages:
+    - Nice. HQ online and drones are ready.
+    - They will handle construction from here.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Essential
+    allowedCategories:
+    - Essential
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: buy-drones
+    speaker: Pig Boss
+    trigger: 4
+    hideUiAfterCompletion: 0
+    messages:
+    - Good. Now we need more hands.
+    - Select the Drone HQ and buy three drones and three crawlers.
+    completionMessages:
+    - Perfect. That should keep the place running.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 3
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: 
+    allowedCategories:
+    - Essential
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: place-solar-panel
+    speaker: Pig Boss
+    trigger: 3
+    hideUiAfterCompletion: 0
+    messages:
+    - Now we need power.
+    - Open the Power category and place a Solar Panel.
+    completionMessages:
+    - Great. You can build more power sources later.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Power
+    allowedCategories:
+    - Essential
+    - Power
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: place-sugar-mine
+    speaker: Pig Boss
+    trigger: 5
+    hideUiAfterCompletion: 0
+    messages:
+    - Now we need a steady sugar supply.
+    - Open the Extraction category and place a Sugar Mine.
+    - Sugar Mines can only be placed on sugar deposits.
+    completionMessages:
+    - Nice. That'll keep the sweets flowing.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 2
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Extraction
+    allowedCategories:
+    - Essential
+    - Extraction
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: power-mines
+    speaker: Pig Boss
+    trigger: 6
+    hideUiAfterCompletion: 0
+    messages:
+    - Now connect the generator to your mines with power cables.
+    - All current mines need electricity.
+    completionMessages:
+    - Good. The mines are powered.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Power
+    allowedCategories:
+    - Essential
+    - Power
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: build-presses
+    speaker: Pig Boss
+    trigger: 7
+    hideUiAfterCompletion: 0
+    messages:
+    - Time to make sugar cubes.
+    - Build two Presses.
+    completionMessages:
+    - Nice. You're ready to scale production.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 2
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Processing
+    allowedCategories:
+    - Essential
+    - Processing
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: connect-mines-presses
+    speaker: Pig Boss
+    trigger: 9
+    hideUiAfterCompletion: 0
+    messages:
+    - Now connect your mines to the presses with conveyor belts.
+    - Every mine should connect to every press.
+    completionMessages:
+    - Perfect. The presses can finally chew through sugar.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Essential
+    allowedCategories:
+    - Essential
+    - Transport
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []

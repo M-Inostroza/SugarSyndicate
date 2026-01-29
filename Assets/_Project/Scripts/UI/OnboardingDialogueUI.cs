@@ -36,17 +36,13 @@ public class OnboardingDialogueUI : MonoBehaviour
     public void Show(string speaker, string message)
     {
         CacheReferences();
-        if (!warnedMissing && (speakerText == null || messageText == null))
+        if (!warnedMissing && messageText == null)
         {
             warnedMissing = true;
-            Debug.LogWarning("[OnboardingDialogueUI] Assign speakerText and messageText in the inspector.");
+            Debug.LogWarning("[OnboardingDialogueUI] Assign messageText in the inspector.");
         }
         if (speakerText != null)
-        {
-            var finalSpeaker = string.IsNullOrWhiteSpace(speaker) ? defaultSpeaker : speaker;
-            speakerText.text = finalSpeaker ?? string.Empty;
-            speakerText.gameObject.SetActive(!string.IsNullOrWhiteSpace(speakerText.text));
-        }
+            speakerText.gameObject.SetActive(false);
         if (messageText != null)
         {
             messageText.text = message ?? string.Empty;
