@@ -48,7 +48,8 @@ MonoBehaviour:
     hideUiAfterCompletion: 0
     messages:
     - To build machines you need drones, place your Drone HQ. First one is on me.
-    - Drop it anywhere on the grid so the crew has a home base.
+    - Drop it on the highlighted area so the crew has a home base.
+    - My drone will get to it as soon as the build mode is closed
     completionMessages:
     - Nice. HQ online and drones are ready.
     - They will handle construction from here.
@@ -225,6 +226,33 @@ MonoBehaviour:
     allowedCategories:
     - Essential
     - Transport
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: power-presses
+    speaker: Pig Boss
+    trigger: 10
+    hideUiAfterCompletion: 0
+    messages:
+    - Now provide electricity to your presses.
+    - All current presses need power.
+    completionMessages:
+    - Great. The presses are powered.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Power
+    allowedCategories:
+    - Essential
+    - Power
     hideDisallowedCategories: 1
     disableDisallowedCategories: 1
     enableSelectables: []

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -72,6 +73,17 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField] TutorialStepsAsset stepsAsset;
     [SerializeField, HideInInspector] List<Step> steps = new List<Step>();
 
+    [Header("Tutorial Overrides")]
+    [SerializeField] bool forceDroneHqPlacement = true;
+    [SerializeField] string droneHqRequiredCell = "O7";
+    [SerializeField, TextArea(2, 4)] string droneHqWrongCellMessage =
+        "Can you follow orders or do I need to find another engineer? Place it where I tell you, you'll have more freedom later on to play around.";
+    [SerializeField] bool highlightDroneHqCell = true;
+    [SerializeField] bool forceSolarPanelPlacement = true;
+    [SerializeField] string solarPanelRequiredCells = "O8,N8";
+    [SerializeField] bool highlightSolarPanelCells = true;
+    [SerializeField] TutorialCellOverlay cellOverlay;
+
     int currentStepIndex = -1;
     readonly HashSet<string> completedSteps = new HashSet<string>();
     bool isActive;
@@ -83,6 +95,7 @@ public class OnboardingManager : MonoBehaviour
     bool cameraMoved;
     bool zoomedIn;
     bool zoomedOut;
+    bool oneOffDialogueActive;
 
     enum DialogueMode
     {
@@ -245,7 +258,7 @@ public class OnboardingManager : MonoBehaviour
                     "Glad you're here. The last engineer had a few issues and we had to get rid of h... I mean, he found a better opportunity.",
                     "Anyway, I'm Pig Boss. I'll teach you the basics.",
                     "First task: place your Drone HQ. It's on me.",
-                    "Drop it anywhere on the grid so the crew has a home base."
+                    "Drop it on O7 so the crew has a home base."
                 },
                 completionMessages = new List<string>
                 {
@@ -466,6 +479,7 @@ public class OnboardingManager : MonoBehaviour
         zoomedIn = false;
         zoomedOut = false;
         if (goalUi != null) goalUi.Hide();
+        HidePlacementHighlight();
         HideUi();
     }
 
@@ -557,6 +571,20 @@ public class OnboardingManager : MonoBehaviour
             highlighter = FindAnyObjectByType<TutorialHighlighter>();
     }
 
+    void EnsureCellOverlay()
+    {
+        if (cellOverlay == null && autoFindReferences)
+        {
+            cellOverlay = FindAnyObjectByType<TutorialCellOverlay>();
+            if (cellOverlay == null)
+            {
+                var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+                if (grid != null)
+                    cellOverlay = TutorialCellOverlay.FindOrCreate(grid);
+            }
+        }
+    }
+
     void AdvanceToFirstIncompleteStep()
     {
         var list = GetSteps();
@@ -564,6 +592,7 @@ public class OnboardingManager : MonoBehaviour
         {
             HideUi();
             if (goalUi != null) goalUi.Hide();
+            HidePlacementHighlight();
             return;
         }
 
@@ -572,6 +601,7 @@ public class OnboardingManager : MonoBehaviour
         {
             HideUi();
             if (goalUi != null) goalUi.Hide();
+            HidePlacementHighlight();
             return;
         }
 
@@ -672,6 +702,8 @@ public class OnboardingManager : MonoBehaviour
 
         if (highlighter != null)
             highlighter.ClearTargets();
+        if (IsDroneHqPlacementStep(step) || IsSolarPanelPlacementStep(step))
+            HidePlacementHighlight();
         if (goalUi != null) goalUi.Hide();
         var completion = GetCompletionMessages(step);
         if (completion.Count > 0)
@@ -698,6 +730,7 @@ public class OnboardingManager : MonoBehaviour
             else
                 highlighter.ClearTargets();
         }
+        UpdatePlacementHighlight(step);
 
         if (buildMenu == null)
             buildMenu = FindAnyObjectByType<BuildMenuController>();
@@ -741,6 +774,162 @@ public class OnboardingManager : MonoBehaviour
                 if (go != null) go.SetActive(false);
             }
         }
+    }
+
+    void UpdatePlacementHighlight(Step step)
+    {
+        if (IsDroneHqPlacementStep(step) && highlightDroneHqCell && forceDroneHqPlacement)
+        {
+            if (TryGetDroneHqRequiredCell(out var cell))
+            {
+                ShowPlacementHighlight(new[] { cell });
+                return;
+            }
+        }
+
+        if (IsSolarPanelPlacementStep(step) && highlightSolarPanelCells && forceSolarPanelPlacement)
+        {
+            if (TryGetSolarPanelRequiredCells(out var cells))
+            {
+                ShowPlacementHighlight(cells);
+                return;
+            }
+        }
+
+        HidePlacementHighlight();
+    }
+
+    void ShowPlacementHighlight(System.Collections.Generic.IReadOnlyList<Vector2Int> cells)
+    {
+        EnsureCellOverlay();
+        if (cellOverlay != null)
+            cellOverlay.ShowCells(cells);
+    }
+
+    void HidePlacementHighlight()
+    {
+        if (cellOverlay != null)
+            cellOverlay.Hide();
+    }
+
+    bool IsDroneHqPlacementStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.DroneHqBuilt;
+    }
+
+    bool IsSolarPanelPlacementStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.SolarPanelBuilt;
+    }
+
+    bool TryGetDroneHqRequiredCell(out Vector2Int cell)
+    {
+        cell = default;
+        if (!forceDroneHqPlacement) return false;
+        if (!TryParseCellLabel(droneHqRequiredCell, out cell)) return false;
+
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid != null && !grid.InBounds(cell)) return false;
+        return true;
+    }
+
+    bool TryGetSolarPanelRequiredCells(out List<Vector2Int> cells)
+    {
+        cells = null;
+        if (!forceSolarPanelPlacement) return false;
+        if (!TryParseCellList(solarPanelRequiredCells, out cells)) return false;
+
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid != null)
+        {
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (!grid.InBounds(cells[i])) return false;
+            }
+        }
+        return cells != null && cells.Count > 0;
+    }
+
+    static bool TryParseCellLabel(string label, out Vector2Int cell)
+    {
+        cell = default;
+        if (string.IsNullOrWhiteSpace(label)) return false;
+
+        label = label.Trim().ToUpperInvariant();
+        int i = 0;
+        int col = 0;
+        while (i < label.Length && char.IsLetter(label[i]))
+        {
+            int value = label[i] - 'A' + 1;
+            if (value < 1 || value > 26) return false;
+            col = col * 26 + value;
+            i++;
+        }
+        if (i == 0) return false;
+        if (i >= label.Length) return false;
+        if (!int.TryParse(label.Substring(i), out int row)) return false;
+        if (row < 1) return false;
+
+        cell = new Vector2Int(col - 1, row - 1);
+        return true;
+    }
+
+    public bool ShouldBlockDroneHqPlacement(Vector2Int cell)
+    {
+        if (!isActive || !forceDroneHqPlacement) return false;
+        var step = GetCurrentStep();
+        if (!IsDroneHqPlacementStep(step)) return false;
+        if (!TryGetDroneHqRequiredCell(out var requiredCell)) return false;
+        if (cell == requiredCell) return false;
+
+        ShowOneOffMessage(droneHqWrongCellMessage);
+        if (highlightDroneHqCell)
+            ShowPlacementHighlight(new[] { requiredCell });
+        return true;
+    }
+
+    public bool ShouldBlockSolarPanelPlacement(IReadOnlyList<Vector2Int> footprint)
+    {
+        if (!isActive || !forceSolarPanelPlacement) return false;
+        var step = GetCurrentStep();
+        if (!IsSolarPanelPlacementStep(step)) return false;
+        if (footprint == null || footprint.Count == 0) return false;
+        if (!TryGetSolarPanelRequiredCells(out var requiredCells)) return false;
+        if (MatchesRequiredCells(footprint, requiredCells)) return false;
+
+        ShowOneOffMessage(droneHqWrongCellMessage);
+        if (highlightSolarPanelCells)
+            ShowPlacementHighlight(requiredCells);
+        return true;
+    }
+
+    static bool TryParseCellList(string value, out List<Vector2Int> cells)
+    {
+        cells = new List<Vector2Int>();
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var parts = value.Split(new[] { ',', ';', ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!TryParseCellLabel(parts[i], out var cell)) continue;
+            if (!cells.Contains(cell))
+                cells.Add(cell);
+        }
+        return cells.Count > 0;
+    }
+
+    static bool MatchesRequiredCells(IReadOnlyList<Vector2Int> footprint, List<Vector2Int> required)
+    {
+        if (required == null || required.Count == 0) return false;
+        if (footprint == null || footprint.Count != required.Count) return false;
+
+        var remaining = new HashSet<Vector2Int>(required);
+        for (int i = 0; i < footprint.Count; i++)
+        {
+            if (!remaining.Remove(footprint[i]))
+                return false;
+        }
+        return remaining.Count == 0;
     }
 
     Step GetCurrentStep()
@@ -884,6 +1073,14 @@ public class OnboardingManager : MonoBehaviour
         var step = GetCurrentStep();
         if (step == null) return;
 
+        if (oneOffDialogueActive)
+        {
+            oneOffDialogueActive = false;
+            dialogueMode = DialogueMode.None;
+            StartCoroutine(ResetDialogueAutoHideNextFrame());
+            return;
+        }
+
         if (dialogueMode == DialogueMode.Intro)
         {
             var intro = GetIntroMessages(step);
@@ -937,6 +1134,7 @@ public class OnboardingManager : MonoBehaviour
             var step = GetCurrentStep();
             if (step != null && step.hideUiAfterCompletion) HideUi();
             if (goalUi != null) goalUi.Hide();
+            HidePlacementHighlight();
         }
     }
 
@@ -961,6 +1159,26 @@ public class OnboardingManager : MonoBehaviour
             return;
         }
         ShowMessage(step.speaker, intro[index]);
+    }
+
+    void ShowOneOffMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        EnsureDialogue();
+        if (dialogueUi == null) return;
+
+        if (!oneOffDialogueActive)
+            oneOffDialogueActive = true;
+
+        dialogueUi.SetAutoHideOnClick(true);
+        dialogueUi.ShowMessage(message);
+    }
+
+    IEnumerator ResetDialogueAutoHideNextFrame()
+    {
+        yield return null;
+        if (dialogueUi != null)
+            dialogueUi.SetAutoHideOnClick(false);
     }
 
     bool IsSolarPanelTask(BlueprintTask task)
@@ -1424,8 +1642,15 @@ public class OnboardingManager : MonoBehaviour
     void HideUi()
     {
         if (dialogueUi != null)
+        {
+            dialogueUi.SetAutoHideOnClick(false);
             dialogueUi.Hide();
+        }
         if (highlighter != null)
             highlighter.ClearTargets();
+        if (oneOffDialogueActive)
+        {
+            oneOffDialogueActive = false;
+        }
     }
 }

@@ -33,6 +33,8 @@ public class GoalPanelUI : MonoBehaviour
     [SerializeField] Image goalItemImage;
     [SerializeField] Sprite defaultItemSprite;
     [SerializeField] ItemSprite[] itemSprites;
+    [SerializeField] bool overrideGoalText = true;
+    [SerializeField] string overrideGoalTextValue = "confidential";
 
     [Header("Behavior")]
     [SerializeField] bool startOpen = false;
@@ -134,7 +136,7 @@ public class GoalPanelUI : MonoBehaviour
             return;
         }
 
-        SetText(goalText, goalManager.GetGoalText());
+        SetText(goalText, overrideGoalText ? overrideGoalTextValue : goalManager.GetGoalText());
         SetText(progressText, goalManager.GetProgressText());
         SetText(secondaryGoalText, goalManager.GetBonusObjectiveText(0));
         SetText(secondaryProgressText, goalManager.GetBonusObjectiveProgressText(0));

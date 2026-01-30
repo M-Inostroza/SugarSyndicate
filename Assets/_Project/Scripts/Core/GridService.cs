@@ -329,6 +329,7 @@ public class GridService : MonoBehaviour, IGridService
     [SerializeField] bool showSugarZones = true;
     [SerializeField] bool showItemMarkers = true;
     [SerializeField] bool showIndices = false;
+    [SerializeField] bool showCoordinateLabels = false;
     [SerializeField] Color gridLineColor = new Color(1f, 1f, 1f, 0.2f);
     [SerializeField] Color boundsColor = new Color(1f, 1f, 1f, 0.6f);
     [SerializeField] Color beltColor = new Color(1f, 0.85f, 0.2f, 0.35f);
@@ -376,8 +377,19 @@ public class GridService : MonoBehaviour, IGridService
         Gizmos.DrawLine(tl, bl);
 
         // Overlay cell content highlights
-        if (showCellTypes || showItemMarkers)
+        if (showCellTypes || showItemMarkers || showIndices || showCoordinateLabels)
         {
+#if UNITY_EDITOR
+            GUIStyle labelStyle = null;
+            if (showIndices || showCoordinateLabels)
+            {
+                labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+                {
+                    alignment = TextAnchor.MiddleCenter
+                };
+                labelStyle.normal.textColor = Color.white;
+            }
+#endif
             foreach (var kv in cells)
             {
                 var c = kv.Key;
@@ -434,11 +446,11 @@ public class GridService : MonoBehaviour, IGridService
                 }
 
 #if UNITY_EDITOR
-                if (showIndices)
+                if (showIndices || showCoordinateLabels)
                 {
                     Handles.color = Color.white;
-                    var style = new GUIStyle(EditorStyles.miniBoldLabel) { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
-                    Handles.Label(center, $"{c.x},{c.y}", style);
+                    var label = showCoordinateLabels ? FormatCoordinateLabel(c) : $"{c.x},{c.y}";
+                    Handles.Label(center, label, labelStyle);
                 }
 #endif
             }
@@ -461,6 +473,25 @@ public class GridService : MonoBehaviour, IGridService
     static bool IsBeltLike(Cell c)
         => c != null && !c.isBlueprint && !c.isBroken
            && (c.type == CellType.Belt || c.type == CellType.Junction || c.hasConveyor || c.conveyor != null);
+
+    static string FormatCoordinateLabel(Vector2Int cell)
+    {
+        return $"{IndexToLetters(cell.x)}{cell.y + 1}";
+    }
+
+    static string IndexToLetters(int index)
+    {
+        if (index < 0) return "?";
+        string result = string.Empty;
+        int n = index;
+        while (n >= 0)
+        {
+            int rem = n % 26;
+            result = (char)('A' + rem) + result;
+            n = (n / 26) - 1;
+        }
+        return result;
+    }
 
     bool NeighborHasOutputTowards(Cell neighbor, Direction toward)
     {

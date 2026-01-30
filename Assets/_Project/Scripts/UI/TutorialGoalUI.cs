@@ -27,10 +27,12 @@ public class TutorialGoalUI : MonoBehaviour
 
     [Header("Content")]
     [SerializeField] string prefix = "Goal: ";
-    [SerializeField] string title = "Goal";
+    [SerializeField] string title = "confidential";
     [SerializeField] bool includeTitleInChecklist = true;
     [SerializeField] string checkedPrefix = "[x] ";
     [SerializeField] string uncheckedPrefix = "[ ] ";
+    [SerializeField] bool tintCompletedItems = true;
+    [SerializeField] Color completedItemColor = new Color(0.35f, 0.9f, 0.35f, 1f);
     [SerializeField] bool toggleRootActive = false;
     [SerializeField] bool blockRaycastsWhenVisible = false;
 
@@ -119,6 +121,8 @@ public class TutorialGoalUI : MonoBehaviour
         if (items == null || items.Count == 0) return string.Empty;
 
         var sb = new StringBuilder();
+        string completeColorTag = tintCompletedItems ? $"<color=#{ColorUtility.ToHtmlStringRGBA(completedItemColor)}>" : string.Empty;
+        string colorClose = tintCompletedItems ? "</color>" : string.Empty;
         if (includeTitleInChecklist && !string.IsNullOrWhiteSpace(title))
         {
             sb.Append(title);
@@ -129,8 +133,10 @@ public class TutorialGoalUI : MonoBehaviour
         for (int i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            sb.Append(item.complete ? checkedPrefix : uncheckedPrefix);
-            sb.Append(item.label ?? string.Empty);
+            string line = $"{(item.complete ? checkedPrefix : uncheckedPrefix)}{item.label ?? string.Empty}";
+            if (tintCompletedItems && item.complete)
+                line = $"{completeColorTag}{line}{colorClose}";
+            sb.Append(line);
             if (i < items.Count - 1) sb.Append('\n');
         }
 

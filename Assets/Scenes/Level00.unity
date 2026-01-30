@@ -1484,7 +1484,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &184707828
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2497,7 +2497,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Main Goal
+  m_text: Confidential
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 060d847152b4c3b4f9a6577281e14b34, type: 2}
   m_sharedMaterial: {fileID: -8402580978905325525, guid: 060d847152b4c3b4f9a6577281e14b34, type: 2}
@@ -6426,6 +6426,12 @@ MonoBehaviour:
     disableSelectables: []
     showObjects: []
     hideObjects: []
+  forceDroneHqPlacement: 1
+  droneHqRequiredCell: O7
+  droneHqWrongCellMessage: Can you follow orders or do I need to find another engineer?
+    Place it where I tell you, you'll have more freedom later on to play around.
+  highlightDroneHqCell: 1
+  cellOverlay: {fileID: 888585948}
 --- !u!4 &860314671
 Transform:
   m_ObjectHideFlags: 0
@@ -6679,6 +6685,7 @@ GameObject:
   m_Component:
   - component: {fileID: 888585947}
   - component: {fileID: 888585946}
+  - component: {fileID: 888585948}
   m_Layer: 0
   m_Name: Onboarding highlighter
   m_TagString: Untagged
@@ -6724,6 +6731,29 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &888585948
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 888585945}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 38206c264aa58d14391b9bed7b801b4e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  grid: {fileID: 1021027029}
+  matchGridLayer: 1
+  highlightColor: {r: 0.96981126, g: 0.92877454, b: 0.6349519, a: 0.19215687}
+  padding: 0.05
+  zOffset: 0.1
+  sortingLayerName: Default
+  sortingOrder: 1200
+  pulse: 1
+  pulseSpeed: 3
+  pulseScale: 1.08
+  useUnscaledTime: 1
 --- !u!1 &935178578
 GameObject:
   m_ObjectHideFlags: 0
@@ -6757,13 +6787,7 @@ MonoBehaviour:
   - levelIndex: 0
     itemType: Cubes
     itemTarget: 40
-    bonusObjectives:
-    - type: 0
-      extraItemCount: 15
-      maxDays: 0
-    - type: 1
-      extraItemCount: 1
-      maxDays: 5
+    bonusObjectives: []
   autoCompleteOnTarget: 1
   disableBonusObjectivesInTutorial: 1
   tutorialSceneBuildIndex: 0
@@ -7531,11 +7555,12 @@ MonoBehaviour:
   sugarNoiseScale: 84.8
   sugarNoiseSeed: 1372
   showGridGizmos: 1
-  onlyWhenSelected: 0
+  onlyWhenSelected: 1
   showCellTypes: 1
   showSugarZones: 1
   showItemMarkers: 1
-  showIndices: 0
+  showIndices: 1
+  showCoordinateLabels: 1
   gridLineColor: {r: 1, g: 1, b: 1, a: 0.39607844}
   boundsColor: {r: 0.81886786, g: 0.81886786, b: 0.81886786, a: 0.6}
   beltColor: {r: 1, g: 0.85, b: 0.2, a: 0.35}
@@ -11221,6 +11246,8 @@ MonoBehaviour:
     sprite: {fileID: -5164422850836677277, guid: ee99baf0388261843aad79a4c8263aed, type: 3}
   - itemType: Cubes
     sprite: {fileID: 5972226045577036095, guid: 48812b9a162a153489153969c6b93536, type: 3}
+  overrideGoalText: 1
+  overrideGoalTextValue: confidential
   startOpen: 0
   closeOnBackdrop: 1
   setRootActive: 0
@@ -15253,7 +15280,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1991102204
 RectTransform:
   m_ObjectHideFlags: 0
@@ -17255,6 +17282,8 @@ MonoBehaviour:
   includeTitleInChecklist: 1
   checkedPrefix: '[x] '
   uncheckedPrefix: '[ ] '
+  tintCompletedItems: 1
+  completedItemColor: {r: 0.35, g: 0.9, b: 0.35, a: 1}
   toggleRootActive: 0
   blockRaycastsWhenVisible: 0
 --- !u!1 &2109001010

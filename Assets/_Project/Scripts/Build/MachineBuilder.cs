@@ -877,6 +877,17 @@ public class MachineBuilder : MonoBehaviour
     {
         Debug.Log($"[MachineBuilder] Committing {activeName} at cell {cell} facing {outputDir}");
 
+        if (activeName == "DroneHQ")
+        {
+            var onboarding = OnboardingManager.Instance;
+            if (onboarding != null && onboarding.ShouldBlockDroneHqPlacement(cell))
+            {
+                if (ghostGO != null) Destroy(ghostGO);
+                ClearPreviewState(clearActiveSelection: false);
+                return;
+            }
+        }
+
         if (RequiresWaterCell() && !IsWaterCell(cell))
         {
             Debug.LogWarning("[MachineBuilder] Water pump must be placed on water.");
@@ -900,6 +911,16 @@ public class MachineBuilder : MonoBehaviour
         }
 
         var footprint = GetFootprintCells(cell, outputDir);
+        if (activeName == "SolarPanel")
+        {
+            var onboarding = OnboardingManager.Instance;
+            if (onboarding != null && onboarding.ShouldBlockSolarPanelPlacement(footprint))
+            {
+                if (ghostGO != null) Destroy(ghostGO);
+                ClearPreviewState(clearActiveSelection: false);
+                return;
+            }
+        }
         if (IsAnyBlocked(footprint))
         {
             Debug.LogWarning($"[MachineBuilder] Cannot place {activeName}: footprint blocked.");
