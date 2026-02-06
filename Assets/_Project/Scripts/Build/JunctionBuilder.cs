@@ -283,6 +283,8 @@ public class JunctionBuilder : MonoBehaviour
             return;
         }
 
+        TryRemovePowerAtCell(cell);
+
         // Compute junction IOs based on mode and forward orientation (Right=0,Up=90,Left=180,Down=270)
         var outForward = forward;
         var right = new Vector2Int(forward.y, -forward.x); // rotate cw
@@ -346,6 +348,68 @@ public class JunctionBuilder : MonoBehaviour
         if (gm.TrySpendSweetCredits(amount)) return true;
         Debug.LogWarning($"[JunctionBuilder] Not enough money to place {label}. Cost: {amount}.");
         return false;
+    }
+
+    void TryRemovePowerAtCell(Vector2Int cell)
+    {
+        TryRemoveCableAtCell(cell);
+        TryRemovePoleAtCell(cell);
+    }
+
+    void TryRemoveCableAtCell(Vector2Int cell)
+    {
+        var cable = FindPowerCableAtCell(cell);
+        if (cable == null) return;
+        DeletePowerObject(cable.gameObject);
+    }
+
+    void TryRemovePoleAtCell(Vector2Int cell)
+    {
+        var pole = FindPowerPoleAtCell(cell);
+        if (pole == null) return;
+        DeletePowerObject(pole.gameObject);
+    }
+
+    PowerCable FindPowerCableAtCell(Vector2Int cell)
+    {
+        if (PowerCable.TryGetAtCell(cell, out var cached))
+            return cached;
+        var gs = GridService.Instance;
+        if (gs == null) return null;
+        var all = FindObjectsByType<PowerCable>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var cable in all)
+        {
+            if (cable == null) continue;
+            if (gs.WorldToCell(cable.transform.position) == cell)
+                return cable;
+        }
+        return null;
+    }
+
+    PowerPole FindPowerPoleAtCell(Vector2Int cell)
+    {
+        var gs = GridService.Instance;
+        if (gs == null) return null;
+        var all = FindObjectsByType<PowerPole>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var pole in all)
+        {
+            if (pole == null) continue;
+            if (gs.WorldToCell(pole.transform.position) == cell)
+                return pole;
+        }
+        return null;
+    }
+
+    void DeletePowerObject(GameObject go)
+    {
+        if (go == null) return;
+        var task = go.GetComponent<BlueprintTask>();
+        if (task != null)
+        {
+            task.CancelFromDelete();
+            return;
+        }
+        Destroy(go);
     }
 
     // End conveyor tool without altering global state (replaces old TryCancelConveyorBuildMode)

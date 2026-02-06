@@ -186,6 +186,7 @@ public class MachineBuilder : MonoBehaviour
                     if (RequiresSugarCell() && !IsSugarCell(baseCell))
                     {
                         Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+                        OnboardingManager.Instance?.NotifyMinePlacementInvalid(baseCell);
                         return;
                     }
                     TrySetBuildToolActive(true);
@@ -532,6 +533,7 @@ public class MachineBuilder : MonoBehaviour
         {
             var cell = pipePath[i];
             TryRemoveBeltAtCell(cell);
+            TryRemovePowerAtCell(cell);
             var pos = (Vector3)miCellToWorld.Invoke(grid, new object[] { cell, 0f });
             var rot = RotationForPipeCell(cell);
 
@@ -623,6 +625,7 @@ public class MachineBuilder : MonoBehaviour
         NotifySelectionChanged(activeName);
         HideWaterOverlay();
         ShowSugarOverlay();
+        OnboardingManager.Instance?.HandleMineBuildSelected();
     }
 
     public void BuildStorageContainer()
@@ -898,6 +901,7 @@ public class MachineBuilder : MonoBehaviour
         if (RequiresSugarCell() && !IsSugarCell(cell))
         {
             Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+            OnboardingManager.Instance?.NotifyMinePlacementInvalid(cell);
             if (ghostGO != null) Destroy(ghostGO);
             ClearPreviewState(clearActiveSelection: false);
             return;
@@ -940,7 +944,11 @@ public class MachineBuilder : MonoBehaviour
         }
 
         // Ensure the target footprint cells are not belts anymore
-        foreach (var fp in footprint) TryRemoveBeltAtCell(fp);
+        foreach (var fp in footprint)
+        {
+            TryRemoveBeltAtCell(fp);
+            TryRemovePowerAtCell(fp);
+        }
 
         if (ghostGO == null)
         {
@@ -995,6 +1003,68 @@ public class MachineBuilder : MonoBehaviour
             }
         }
         catch { }
+    }
+
+    void TryRemovePowerAtCell(Vector2Int cell)
+    {
+        TryRemoveCableAtCell(cell);
+        TryRemovePoleAtCell(cell);
+    }
+
+    void TryRemoveCableAtCell(Vector2Int cell)
+    {
+        var cable = FindPowerCableAtCell(cell);
+        if (cable == null) return;
+        DeletePowerObject(cable.gameObject);
+    }
+
+    void TryRemovePoleAtCell(Vector2Int cell)
+    {
+        var pole = FindPowerPoleAtCell(cell);
+        if (pole == null) return;
+        DeletePowerObject(pole.gameObject);
+    }
+
+    PowerCable FindPowerCableAtCell(Vector2Int cell)
+    {
+        if (PowerCable.TryGetAtCell(cell, out var cached))
+            return cached;
+        var gs = GridService.Instance;
+        if (gs == null) return null;
+        var all = FindObjectsByType<PowerCable>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var cable in all)
+        {
+            if (cable == null) continue;
+            if (gs.WorldToCell(cable.transform.position) == cell)
+                return cable;
+        }
+        return null;
+    }
+
+    PowerPole FindPowerPoleAtCell(Vector2Int cell)
+    {
+        var gs = GridService.Instance;
+        if (gs == null) return null;
+        var all = FindObjectsByType<PowerPole>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        foreach (var pole in all)
+        {
+            if (pole == null) continue;
+            if (gs.WorldToCell(pole.transform.position) == cell)
+                return pole;
+        }
+        return null;
+    }
+
+    void DeletePowerObject(GameObject go)
+    {
+        if (go == null) return;
+        var task = go.GetComponent<BlueprintTask>();
+        if (task != null)
+        {
+            task.CancelFromDelete();
+            return;
+        }
+        Destroy(go);
     }
 
     void TryMarkMachineFootprint(List<Vector2Int> cells)

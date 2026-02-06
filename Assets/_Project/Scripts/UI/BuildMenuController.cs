@@ -99,6 +99,12 @@ public class BuildMenuController : MonoBehaviour
         }
     }
 
+    public void ShowCategoryIfNoneOpen(string categoryName)
+    {
+        if (!string.IsNullOrWhiteSpace(activeCategory)) return;
+        ShowCategory(categoryName);
+    }
+
     public void HideAll()
     {
         foreach (var cat in categories)

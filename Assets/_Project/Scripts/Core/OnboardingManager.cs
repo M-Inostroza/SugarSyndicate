@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using DG.Tweening;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -82,6 +83,11 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField] bool forceSolarPanelPlacement = true;
     [SerializeField] string solarPanelRequiredCells = "O8,N8";
     [SerializeField] bool highlightSolarPanelCells = true;
+    [SerializeField] bool focusCameraOnMineSelection = true;
+    [SerializeField, Min(0.05f)] float mineFocusDuration = 0.6f;
+    [SerializeField] Ease mineFocusEase = Ease.InOutSine;
+    [SerializeField, TextArea(2, 4)] string mineWrongCellMessage =
+        "Sugar Mines can only be placed on sugar deposits.";
     [SerializeField] TutorialCellOverlay cellOverlay;
 
     int currentStepIndex = -1;
@@ -92,10 +98,12 @@ public class OnboardingManager : MonoBehaviour
     DialogueMode dialogueMode = DialogueMode.None;
     readonly List<SugarMine> trackedMines = new List<SugarMine>();
     readonly List<PressMachine> trackedPresses = new List<PressMachine>();
+    readonly HashSet<string> unlockedCategories = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
     bool cameraMoved;
     bool zoomedIn;
     bool zoomedOut;
     bool oneOffDialogueActive;
+    Tweener mineFocusTween;
 
     enum DialogueMode
     {
@@ -475,6 +483,9 @@ public class OnboardingManager : MonoBehaviour
         currentStepIndex = -1;
         dialogueMode = DialogueMode.None;
         trackedMines.Clear();
+        unlockedCategories.Clear();
+        mineFocusTween?.Kill();
+        mineFocusTween = null;
         cameraMoved = false;
         zoomedIn = false;
         zoomedOut = false;
@@ -737,9 +748,11 @@ public class OnboardingManager : MonoBehaviour
         if (buildMenu != null)
         {
             if (step.allowedCategories != null && step.allowedCategories.Count > 0)
-                buildMenu.SetAllowedCategories(step.allowedCategories, step.hideDisallowedCategories, step.disableDisallowedCategories);
+                UnlockCategories(step.allowedCategories);
+            if (unlockedCategories.Count > 0)
+                buildMenu.SetAllowedCategories(GetUnlockedCategoryList(), step.hideDisallowedCategories, step.disableDisallowedCategories);
             if (!string.IsNullOrWhiteSpace(step.openCategory))
-                buildMenu.ShowCategory(step.openCategory);
+                buildMenu.ShowCategoryIfNoneOpen(step.openCategory);
         }
 
         if (step.enableSelectables != null)
@@ -822,6 +835,30 @@ public class OnboardingManager : MonoBehaviour
         return step != null && step.trigger == StepTrigger.SolarPanelBuilt;
     }
 
+    void UnlockCategories(IReadOnlyList<string> categories)
+    {
+        if (categories == null) return;
+        for (int i = 0; i < categories.Count; i++)
+        {
+            var name = categories[i];
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            unlockedCategories.Add(name.Trim());
+        }
+    }
+
+    List<string> GetUnlockedCategoryList()
+    {
+        var list = new List<string>();
+        foreach (var name in unlockedCategories)
+            list.Add(name);
+        return list;
+    }
+
+    bool IsSugarMinePlacementStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.SugarMineBuilt;
+    }
+
     bool TryGetDroneHqRequiredCell(out Vector2Int cell)
     {
         cell = default;
@@ -900,6 +937,59 @@ public class OnboardingManager : MonoBehaviour
         ShowOneOffMessage(droneHqWrongCellMessage);
         if (highlightSolarPanelCells)
             ShowPlacementHighlight(requiredCells);
+        return true;
+    }
+
+    public void HandleMineBuildSelected()
+    {
+        if (!isActive || !focusCameraOnMineSelection) return;
+        var step = GetCurrentStep();
+        if (!IsSugarMinePlacementStep(step)) return;
+        if (step != null && GetMineCount() >= Mathf.Max(0, step.requiredMineCount)) return;
+        TryFocusCameraOnSugarDeposit();
+    }
+
+    public void NotifyMinePlacementInvalid(Vector2Int cell)
+    {
+        if (!isActive) return;
+        var step = GetCurrentStep();
+        if (!IsSugarMinePlacementStep(step)) return;
+        ShowOneOffMessage(mineWrongCellMessage);
+    }
+
+    bool TryFocusCameraOnSugarDeposit()
+    {
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid == null) return false;
+        var zones = grid.SugarZones;
+        if (zones == null || zones.Count == 0) return false;
+        var cam = Camera.main;
+        if (cam == null) cam = FindAnyObjectByType<Camera>();
+        if (cam == null) return false;
+
+        var camPos = cam.transform.position;
+        Vector2Int bestCell = zones[0].center;
+        float bestDist = float.MaxValue;
+        for (int i = 0; i < zones.Count; i++)
+        {
+            var world = grid.CellToWorld(zones[i].center, camPos.z);
+            var dx = world.x - camPos.x;
+            var dy = world.y - camPos.y;
+            float d = dx * dx + dy * dy;
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestCell = zones[i].center;
+            }
+        }
+
+        var targetWorld = grid.CellToWorld(bestCell, camPos.z);
+        var targetPos = new Vector3(targetWorld.x, targetWorld.y, camPos.z);
+        mineFocusTween?.Kill();
+        mineFocusTween = cam.transform.DOMove(targetPos, mineFocusDuration)
+            .SetEase(mineFocusEase)
+            .SetUpdate(true)
+            .SetTarget(this);
         return true;
     }
 
