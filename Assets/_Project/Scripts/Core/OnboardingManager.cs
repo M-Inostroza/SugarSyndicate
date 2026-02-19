@@ -11,6 +11,10 @@ using UnityEditor;
 [DisallowMultipleComponent]
 public class OnboardingManager : MonoBehaviour
 {
+    const string DefaultBuildControlUnlockStepId = "camera-move-zoom";
+    const string DefaultBuildButtonName = "Build Btn";
+    const string DefaultDeleteButtonName = "Delete btn";
+
     public enum StepTrigger
     {
         None = 0,
@@ -90,8 +94,24 @@ public class OnboardingManager : MonoBehaviour
         "Sugar Mines can only be placed on sugar deposits.";
     [SerializeField] TutorialCellOverlay cellOverlay;
 
+    [Header("Tutorial UI Locks")]
+    [Tooltip("If enabled, build/delete controls stay hidden until the configured tutorial step is completed.")]
+    [SerializeField] bool gateBuildControlsDuringTutorial = true;
+    [Tooltip("Step id that unlocks build/delete controls after completion.")]
+    [SerializeField] string unlockBuildControlsAfterStepId = DefaultBuildControlUnlockStepId;
+    [Tooltip("Optional explicit reference. If empty, fallback name lookup is used.")]
+    [SerializeField] GameObject buildButtonObject;
+    [Tooltip("Optional explicit highlight target for the Build button. Falls back to Build button RectTransform.")]
+    [SerializeField] RectTransform buildButtonHighlightTarget;
+    [Tooltip("Optional explicit reference. If empty, fallback name lookup is used.")]
+    [SerializeField] GameObject deleteButtonObject;
+    [Tooltip("Fallback scene object name used when Build Button reference is not set.")]
+    [SerializeField] string buildButtonFallbackName = DefaultBuildButtonName;
+    [Tooltip("Fallback scene object name used when Delete Button reference is not set.")]
+    [SerializeField] string deleteButtonFallbackName = DefaultDeleteButtonName;
+
     int currentStepIndex = -1;
-    readonly HashSet<string> completedSteps = new HashSet<string>();
+    readonly HashSet<string> completedSteps = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
     bool isActive;
     int messageIndex;
     int completionIndex;
@@ -104,6 +124,7 @@ public class OnboardingManager : MonoBehaviour
     bool zoomedOut;
     bool oneOffDialogueActive;
     Tweener mineFocusTween;
+    readonly List<RectTransform> resolvedHighlightTargets = new List<RectTransform>(4);
 
     enum DialogueMode
     {
@@ -465,6 +486,7 @@ public class OnboardingManager : MonoBehaviour
         if (autoFindReferences) EnsurePowerService();
         if (autoFindReferences) EnsureGoalUi();
         isActive = true;
+        ApplyTutorialUiLocks();
         AdvanceToFirstIncompleteStep();
     }
 
@@ -492,6 +514,7 @@ public class OnboardingManager : MonoBehaviour
         if (goalUi != null) goalUi.Hide();
         HidePlacementHighlight();
         HideUi();
+        ApplyTutorialUiLocks();
     }
 
     void EnsureDialogue()
@@ -604,6 +627,7 @@ public class OnboardingManager : MonoBehaviour
             HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplyTutorialUiLocks();
             return;
         }
 
@@ -613,6 +637,7 @@ public class OnboardingManager : MonoBehaviour
             HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplyTutorialUiLocks();
             return;
         }
 
@@ -701,6 +726,7 @@ public class OnboardingManager : MonoBehaviour
             TryCompleteMinesConnected(step);
         if (step.trigger == StepTrigger.PressesPowered)
             TryCompletePressesPowered(step);
+        ApplyTutorialUiLocks();
     }
 
     void CompleteCurrentStep()
@@ -710,6 +736,7 @@ public class OnboardingManager : MonoBehaviour
 
         if (!string.IsNullOrWhiteSpace(step.id))
             completedSteps.Add(step.id);
+        ApplyTutorialUiLocks();
 
         if (highlighter != null)
             highlighter.ClearTargets();
@@ -734,13 +761,7 @@ public class OnboardingManager : MonoBehaviour
         if (step == null) return;
 
         EnsureHighlighter();
-        if (highlighter != null)
-        {
-            if (step.highlightTargets != null && step.highlightTargets.Count > 0)
-                highlighter.SetTargets(step.highlightTargets);
-            else
-                highlighter.ClearTargets();
-        }
+        ApplyHighlighterTargets(step);
         UpdatePlacementHighlight(step);
 
         if (buildMenu == null)
@@ -755,37 +776,97 @@ public class OnboardingManager : MonoBehaviour
                 buildMenu.ShowCategoryIfNoneOpen(step.openCategory);
         }
 
-        if (step.enableSelectables != null)
+        SetSelectablesInteractable(step.enableSelectables, true);
+        SetSelectablesInteractable(step.disableSelectables, false);
+        SetObjectsActive(step.showObjects, true);
+        SetObjectsActive(step.hideObjects, false);
+        ApplyTutorialUiLocks();
+    }
+
+    void ApplyHighlighterTargets(Step step)
+    {
+        if (highlighter == null)
+            return;
+
+        resolvedHighlightTargets.Clear();
+        AddHighlightTargets(resolvedHighlightTargets, step.highlightTargets);
+
+        if (ShouldHighlightBuildButton(step) && TryGetBuildButtonHighlightTarget(out var buildTarget) && !resolvedHighlightTargets.Contains(buildTarget))
+            resolvedHighlightTargets.Add(buildTarget);
+
+        if (resolvedHighlightTargets.Count > 0)
+            highlighter.SetTargets(resolvedHighlightTargets);
+        else
+            highlighter.ClearTargets();
+    }
+
+    static void AddHighlightTargets(List<RectTransform> destination, IReadOnlyList<RectTransform> source)
+    {
+        if (destination == null || source == null) return;
+        for (int i = 0; i < source.Count; i++)
         {
-            for (int i = 0; i < step.enableSelectables.Count; i++)
-            {
-                var sel = step.enableSelectables[i];
-                if (sel != null) sel.interactable = true;
-            }
+            var target = source[i];
+            if (target == null) continue;
+            if (!destination.Contains(target))
+                destination.Add(target);
         }
-        if (step.disableSelectables != null)
+    }
+
+    bool ShouldHighlightBuildButton(Step step)
+    {
+        if (step == null) return false;
+        switch (step.trigger)
         {
-            for (int i = 0; i < step.disableSelectables.Count; i++)
-            {
-                var sel = step.disableSelectables[i];
-                if (sel != null) sel.interactable = false;
-            }
+            case StepTrigger.DroneHqBlueprintPlaced:
+            case StepTrigger.DroneHqBuilt:
+            case StepTrigger.SolarPanelBuilt:
+            case StepTrigger.SugarMineBuilt:
+            case StepTrigger.MinesPowered:
+            case StepTrigger.PressBuilt:
+            case StepTrigger.MinesConnectedToPresses:
+            case StepTrigger.PressesPowered:
+                return true;
+            default:
+                return false;
         }
-        if (step.showObjects != null)
+    }
+
+    bool TryGetBuildButtonHighlightTarget(out RectTransform target)
+    {
+        if (buildButtonHighlightTarget != null)
         {
-            for (int i = 0; i < step.showObjects.Count; i++)
-            {
-                var go = step.showObjects[i];
-                if (go != null) go.SetActive(true);
-            }
+            target = buildButtonHighlightTarget;
+            return true;
         }
-        if (step.hideObjects != null)
+
+        EnsureBuildControlObjects();
+        if (buildButtonObject != null && buildButtonObject.TryGetComponent<RectTransform>(out var rect))
         {
-            for (int i = 0; i < step.hideObjects.Count; i++)
-            {
-                var go = step.hideObjects[i];
-                if (go != null) go.SetActive(false);
-            }
+            target = rect;
+            return true;
+        }
+
+        target = null;
+        return false;
+    }
+
+    static void SetSelectablesInteractable(IReadOnlyList<Selectable> selectables, bool interactable)
+    {
+        if (selectables == null) return;
+        for (int i = 0; i < selectables.Count; i++)
+        {
+            var selectable = selectables[i];
+            if (selectable != null) selectable.interactable = interactable;
+        }
+    }
+
+    static void SetObjectsActive(IReadOnlyList<GameObject> objects, bool active)
+    {
+        if (objects == null) return;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            var go = objects[i];
+            if (go != null) go.SetActive(active);
         }
     }
 
@@ -1184,6 +1265,7 @@ public class OnboardingManager : MonoBehaviour
             {
                 dialogueMode = DialogueMode.None;
                 HideUi();
+                ApplyStepUi(step);
                 UpdateGoalUi(step);
                 if (step.trigger == StepTrigger.CameraMoveZoom)
                     TryCompleteCameraStep(step);
@@ -1225,6 +1307,7 @@ public class OnboardingManager : MonoBehaviour
             if (step != null && step.hideUiAfterCompletion) HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplyTutorialUiLocks();
         }
     }
 
@@ -1727,6 +1810,69 @@ public class OnboardingManager : MonoBehaviour
     {
         if (dialogueUi == null) return;
         dialogueUi.Show(speaker, message);
+    }
+
+    void ApplyTutorialUiLocks()
+    {
+        EnsureBuildControlObjects();
+        bool visible = ShouldShowBuildControls();
+        SetObjectVisible(buildButtonObject, visible);
+        SetObjectVisible(deleteButtonObject, visible);
+    }
+
+    bool ShouldShowBuildControls()
+    {
+        if (!gateBuildControlsDuringTutorial) return true;
+        if (!isActive) return true;
+        var unlockStepId = string.IsNullOrWhiteSpace(unlockBuildControlsAfterStepId)
+            ? DefaultBuildControlUnlockStepId
+            : unlockBuildControlsAfterStepId;
+        if (completedSteps.Contains(unlockStepId)) return true;
+
+        var list = GetSteps();
+        int unlockIndex = FindStepIndex(list, unlockStepId);
+        if (unlockIndex < 0) return true;
+        return currentStepIndex > unlockIndex;
+    }
+
+    void EnsureBuildControlObjects()
+    {
+        var buildName = string.IsNullOrWhiteSpace(buildButtonFallbackName) ? DefaultBuildButtonName : buildButtonFallbackName;
+        var deleteName = string.IsNullOrWhiteSpace(deleteButtonFallbackName) ? DefaultDeleteButtonName : deleteButtonFallbackName;
+
+        if (buildButtonObject == null)
+            buildButtonObject = FindSceneObjectByName(buildName);
+        if (deleteButtonObject == null)
+            deleteButtonObject = FindSceneObjectByName(deleteName);
+    }
+
+    static GameObject FindSceneObjectByName(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName)) return null;
+        var transforms = FindObjectsByType<Transform>(FindObjectsSortMode.None);
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            var tr = transforms[i];
+            if (tr == null) continue;
+            if (string.Equals(tr.name, objectName, System.StringComparison.OrdinalIgnoreCase))
+                return tr.gameObject;
+        }
+        return null;
+    }
+
+    static void SetObjectVisible(GameObject go, bool visible)
+    {
+        if (go == null) return;
+        var animator = go.GetComponent<UIElementAnimator>();
+        if (animator != null)
+        {
+            if (visible) animator.Show();
+            else animator.Hide();
+            return;
+        }
+
+        if (go.activeSelf != visible)
+            go.SetActive(visible);
     }
 
     void HideUi()
