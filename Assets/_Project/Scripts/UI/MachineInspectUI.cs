@@ -61,6 +61,8 @@ public class MachineInspectUI : MonoBehaviour
     Sequence uiTween;
     int closeWaitCount;
 
+    public bool IsPanelOpen => isOpen || isClosing;
+
     void Awake()
     {
         if (persistAcrossScenes) DontDestroyOnLoad(gameObject);

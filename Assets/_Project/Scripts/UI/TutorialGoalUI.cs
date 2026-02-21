@@ -23,6 +23,7 @@ public class TutorialGoalUI : MonoBehaviour
     [Header("UI References")]
     [SerializeField] GameObject uiRoot;
     [SerializeField] CanvasGroup canvasGroup;
+    [SerializeField] RectTransform panelRect;
     [SerializeField] TMP_Text goalText;
 
     [Header("Content")]
@@ -35,6 +36,11 @@ public class TutorialGoalUI : MonoBehaviour
     [SerializeField] Color completedItemColor = new Color(0.35f, 0.9f, 0.35f, 1f);
     [SerializeField] bool toggleRootActive = false;
     [SerializeField] bool blockRaycastsWhenVisible = false;
+
+    [Header("Layout")]
+    [SerializeField] bool autoResizePanelHeight = true;
+    [SerializeField, Min(0f)] float panelVerticalPadding = 16f;
+    [SerializeField, Min(0f)] float panelMinimumHeight = 64f;
 
     bool isVisible;
     bool warnedMissing;
@@ -65,6 +71,7 @@ public class TutorialGoalUI : MonoBehaviour
             goalText.text = string.IsNullOrWhiteSpace(goal) ? string.Empty : $"{prefix}{goal}";
             goalText.gameObject.SetActive(!string.IsNullOrWhiteSpace(goalText.text));
         }
+        RefreshLayout();
 
         SetVisible(!string.IsNullOrWhiteSpace(goal));
     }
@@ -84,6 +91,7 @@ public class TutorialGoalUI : MonoBehaviour
             goalText.text = text;
             goalText.gameObject.SetActive(!string.IsNullOrWhiteSpace(text));
         }
+        RefreshLayout();
 
         SetVisible(!string.IsNullOrWhiteSpace(text));
     }
@@ -100,6 +108,21 @@ public class TutorialGoalUI : MonoBehaviour
             canvasGroup = uiRoot.GetComponent<CanvasGroup>();
         if (goalText == null)
             goalText = GetComponentInChildren<TMP_Text>(true);
+        if (panelRect == null && goalText != null)
+            panelRect = goalText.transform.parent as RectTransform;
+    }
+
+    void RefreshLayout()
+    {
+        if (!autoResizePanelHeight || panelRect == null || goalText == null)
+            return;
+
+        Canvas.ForceUpdateCanvases();
+        goalText.ForceMeshUpdate();
+
+        float textHeight = goalText.GetRenderedValues(false).y;
+        float targetHeight = Mathf.Max(panelMinimumHeight, textHeight + panelVerticalPadding);
+        panelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, targetHeight);
     }
 
     void SetVisible(bool visible)

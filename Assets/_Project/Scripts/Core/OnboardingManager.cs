@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.Serialization;
 using DG.Tweening;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -14,6 +15,10 @@ public class OnboardingManager : MonoBehaviour
     const string DefaultBuildControlUnlockStepId = "camera-move-zoom";
     const string DefaultBuildButtonName = "Build Btn";
     const string DefaultDeleteButtonName = "Delete btn";
+    const string DefaultSolarStepId = "place-solar-panel";
+    const string DefaultSolarButtonName = "Solar Panel";
+    const string DefaultCableButtonName = "Cable";
+    const string DefaultPoleButtonName = "Pole";
 
     public enum StepTrigger
     {
@@ -93,6 +98,15 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField, TextArea(2, 4)] string mineWrongCellMessage =
         "Sugar Mines can only be placed on sugar deposits.";
     [SerializeField] TutorialCellOverlay cellOverlay;
+    [SerializeField] bool highlightDroneHqDuringBuyStep = true;
+
+    [Header("Build Category Restrictions")]
+    [Tooltip("If enabled, each step uses its own allowed categories instead of cumulative unlocks.")]
+    [SerializeField] bool useStepSpecificCategoryLocks = true;
+    [Tooltip("Force only Extraction category on sugar-mine placement step.")]
+    [SerializeField] bool extractionOnlyOnSugarMineStep = true;
+    [Tooltip("Force only Power category on mine-powering (cable) step.")]
+    [SerializeField] bool powerOnlyOnMinesPoweredStep = true;
 
     [Header("Tutorial UI Locks")]
     [Tooltip("If enabled, build/delete controls stay hidden until the configured tutorial step is completed.")]
@@ -110,6 +124,27 @@ public class OnboardingManager : MonoBehaviour
     [Tooltip("Fallback scene object name used when Delete Button reference is not set.")]
     [SerializeField] string deleteButtonFallbackName = DefaultDeleteButtonName;
 
+    [Header("Step Timing")]
+    [Tooltip("Delay before completing a tutorial step after its objectives are satisfied.")]
+    [FormerlySerializedAs("cameraStepCompletionDelaySeconds")]
+    [SerializeField, Min(0f)] float stepCompletionDelaySeconds = 1f;
+
+    [Header("Solar Step UI Restriction")]
+    [Tooltip("If enabled, only the Solar Panel button is visible during the solar-panel tutorial step.")]
+    [SerializeField] bool showOnlySolarPanelOnSolarStep = true;
+    [SerializeField] string solarPanelStepId = DefaultSolarStepId;
+    [SerializeField] GameObject solarPanelBuildButtonObject;
+    [SerializeField] GameObject cableBuildButtonObject;
+    [SerializeField] GameObject poleBuildButtonObject;
+    [SerializeField] string solarPanelButtonFallbackName = DefaultSolarButtonName;
+    [SerializeField] string cableButtonFallbackName = DefaultCableButtonName;
+    [SerializeField] string poleButtonFallbackName = DefaultPoleButtonName;
+
+    [Header("Buy Crew Step")]
+    [Tooltip("If enabled, the buy-drones step completes only after the machine overview panel is closed.")]
+    [SerializeField] bool requireMachineOverviewClosedForBuyStep = true;
+    [SerializeField] MachineInspectUI machineInspectUi;
+
     int currentStepIndex = -1;
     readonly HashSet<string> completedSteps = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
     bool isActive;
@@ -119,12 +154,17 @@ public class OnboardingManager : MonoBehaviour
     readonly List<SugarMine> trackedMines = new List<SugarMine>();
     readonly List<PressMachine> trackedPresses = new List<PressMachine>();
     readonly HashSet<string> unlockedCategories = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+    readonly List<string> effectiveCategories = new List<string>(4);
     bool cameraMoved;
     bool zoomedIn;
     bool zoomedOut;
     bool oneOffDialogueActive;
     Tweener mineFocusTween;
     readonly List<RectTransform> resolvedHighlightTargets = new List<RectTransform>(4);
+    Coroutine pendingStepCompletionRoutine;
+    int pendingStepCompletionIndex = -1;
+    string pendingStepCompletionId;
+    readonly Dictionary<GameObject, bool> cachedPowerButtonVisibility = new Dictionary<GameObject, bool>();
 
     enum DialogueMode
     {
@@ -350,7 +390,7 @@ public class OnboardingManager : MonoBehaviour
                 trigger = StepTrigger.SugarMineBuilt,
                 requiredMineCount = 2,
                 openCategory = "Extraction",
-                allowedCategories = new List<string> { "Essential", "Extraction" }
+                allowedCategories = new List<string> { "Extraction" }
             },
             new Step
             {
@@ -367,7 +407,7 @@ public class OnboardingManager : MonoBehaviour
                 },
                 trigger = StepTrigger.MinesPowered,
                 openCategory = "Power",
-                allowedCategories = new List<string> { "Essential", "Power" }
+                allowedCategories = new List<string> { "Power" }
             },
             new Step
             {
@@ -460,11 +500,28 @@ public class OnboardingManager : MonoBehaviour
         CameraDragPan.CameraDragged -= HandleCameraDragged;
         CameraZoomController.ZoomedIn -= HandleZoomedIn;
         CameraZoomController.ZoomedOut -= HandleZoomedOut;
+        CancelPendingStepCompletion();
     }
 
     void OnDestroy()
     {
         if (Instance == this) Instance = null;
+    }
+
+    void Update()
+    {
+        if (!isActive) return;
+        var step = GetCurrentStep();
+        if (step == null) return;
+
+        if (step.trigger == StepTrigger.BuyDrones)
+        {
+            EvaluateBuyDronesStep(step);
+            UpdateGoalUi(step);
+        }
+
+        if (showOnlySolarPanelOnSolarStep && IsSolarPanelTutorialStep(step))
+            ApplySolarStepPowerButtonVisibility(step);
     }
 
     void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -502,6 +559,7 @@ public class OnboardingManager : MonoBehaviour
     void Deactivate()
     {
         isActive = false;
+        CancelPendingStepCompletion();
         currentStepIndex = -1;
         dialogueMode = DialogueMode.None;
         trackedMines.Clear();
@@ -513,6 +571,12 @@ public class OnboardingManager : MonoBehaviour
         zoomedOut = false;
         if (goalUi != null) goalUi.Hide();
         HidePlacementHighlight();
+        if (buildMenu == null && autoFindReferences)
+            buildMenu = FindAnyObjectByType<BuildMenuController>();
+        if (buildMenu != null)
+            buildMenu.ResetCategoryStates();
+        ApplySolarStepPowerButtonVisibility(null);
+        cachedPowerButtonVisibility.Clear();
         HideUi();
         ApplyTutorialUiLocks();
     }
@@ -627,6 +691,7 @@ public class OnboardingManager : MonoBehaviour
             HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplySolarStepPowerButtonVisibility(null);
             ApplyTutorialUiLocks();
             return;
         }
@@ -637,6 +702,7 @@ public class OnboardingManager : MonoBehaviour
             HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplySolarStepPowerButtonVisibility(null);
             ApplyTutorialUiLocks();
             return;
         }
@@ -675,7 +741,7 @@ public class OnboardingManager : MonoBehaviour
             case StepTrigger.SugarMineBuilt:
                 return GetMineCount() >= Mathf.Max(0, step.requiredMineCount);
             case StepTrigger.BuyDrones:
-                return MeetsBuyCrewStep(step);
+                return IsBuyDronesStepSatisfied(step);
             case StepTrigger.MinesPowered:
                 return AreAllMinesPowered(GetCurrentMines(), true);
             case StepTrigger.PressBuilt:
@@ -696,6 +762,7 @@ public class OnboardingManager : MonoBehaviour
     {
         var list = GetSteps();
         if (index < 0 || list == null || index >= list.Count) return;
+        CancelPendingStepCompletion();
         currentStepIndex = index;
         var step = list[index];
         messageIndex = 0;
@@ -729,10 +796,11 @@ public class OnboardingManager : MonoBehaviour
         ApplyTutorialUiLocks();
     }
 
-    void CompleteCurrentStep()
+    void CompleteCurrentStepImmediate()
     {
         var step = GetCurrentStep();
         if (step == null) return;
+        CancelPendingStepCompletion();
 
         if (!string.IsNullOrWhiteSpace(step.id))
             completedSteps.Add(step.id);
@@ -756,6 +824,64 @@ public class OnboardingManager : MonoBehaviour
         }
     }
 
+    void RequestCompleteCurrentStep(Step step = null)
+    {
+        step ??= GetCurrentStep();
+        if (step == null || !isActive) return;
+
+        if (pendingStepCompletionRoutine != null)
+        {
+            bool sameStep = pendingStepCompletionIndex == currentStepIndex
+                && string.Equals(pendingStepCompletionId, step.id, System.StringComparison.OrdinalIgnoreCase);
+            if (sameStep) return;
+            CancelPendingStepCompletion();
+        }
+
+        if (stepCompletionDelaySeconds <= 0f)
+        {
+            CompleteCurrentStepImmediate();
+            return;
+        }
+
+        pendingStepCompletionIndex = currentStepIndex;
+        pendingStepCompletionId = step.id;
+        pendingStepCompletionRoutine = StartCoroutine(CompleteCurrentStepAfterDelay(stepCompletionDelaySeconds));
+    }
+
+    IEnumerator CompleteCurrentStepAfterDelay(float delaySeconds)
+    {
+        if (delaySeconds > 0f)
+            yield return new WaitForSecondsRealtime(delaySeconds);
+
+        pendingStepCompletionRoutine = null;
+        int expectedIndex = pendingStepCompletionIndex;
+        string expectedId = pendingStepCompletionId;
+        pendingStepCompletionIndex = -1;
+        pendingStepCompletionId = null;
+
+        if (!isActive) yield break;
+        if (dialogueMode != DialogueMode.None) yield break;
+        if (currentStepIndex != expectedIndex) yield break;
+
+        var current = GetCurrentStep();
+        if (current == null) yield break;
+        if (!string.IsNullOrWhiteSpace(expectedId)
+            && !string.Equals(current.id, expectedId, System.StringComparison.OrdinalIgnoreCase))
+            yield break;
+        if (!IsStepComplete(current)) yield break;
+
+        CompleteCurrentStepImmediate();
+    }
+
+    void CancelPendingStepCompletion()
+    {
+        if (pendingStepCompletionRoutine != null)
+            StopCoroutine(pendingStepCompletionRoutine);
+        pendingStepCompletionRoutine = null;
+        pendingStepCompletionIndex = -1;
+        pendingStepCompletionId = null;
+    }
+
     void ApplyStepUi(Step step)
     {
         if (step == null) return;
@@ -768,19 +894,65 @@ public class OnboardingManager : MonoBehaviour
             buildMenu = FindAnyObjectByType<BuildMenuController>();
         if (buildMenu != null)
         {
-            if (step.allowedCategories != null && step.allowedCategories.Count > 0)
-                UnlockCategories(step.allowedCategories);
-            if (unlockedCategories.Count > 0)
-                buildMenu.SetAllowedCategories(GetUnlockedCategoryList(), step.hideDisallowedCategories, step.disableDisallowedCategories);
+            var allowedCategories = BuildEffectiveAllowedCategories(step);
+            if (allowedCategories.Count > 0)
+            {
+                if (useStepSpecificCategoryLocks)
+                {
+                    buildMenu.SetAllowedCategories(allowedCategories, step.hideDisallowedCategories, step.disableDisallowedCategories);
+                }
+                else
+                {
+                    UnlockCategories(allowedCategories);
+                    if (unlockedCategories.Count > 0)
+                        buildMenu.SetAllowedCategories(GetUnlockedCategoryList(), step.hideDisallowedCategories, step.disableDisallowedCategories);
+                }
+            }
+            else if (useStepSpecificCategoryLocks)
+            {
+                buildMenu.ResetCategoryStates();
+            }
             if (!string.IsNullOrWhiteSpace(step.openCategory))
-                buildMenu.ShowCategoryIfNoneOpen(step.openCategory);
+                buildMenu.ShowCategory(step.openCategory);
         }
 
         SetSelectablesInteractable(step.enableSelectables, true);
         SetSelectablesInteractable(step.disableSelectables, false);
         SetObjectsActive(step.showObjects, true);
         SetObjectsActive(step.hideObjects, false);
+        ApplySolarStepPowerButtonVisibility(step);
         ApplyTutorialUiLocks();
+    }
+
+    List<string> BuildEffectiveAllowedCategories(Step step)
+    {
+        effectiveCategories.Clear();
+        if (step == null) return effectiveCategories;
+
+        if (extractionOnlyOnSugarMineStep && step.trigger == StepTrigger.SugarMineBuilt)
+        {
+            effectiveCategories.Add("Extraction");
+            return effectiveCategories;
+        }
+
+        if (powerOnlyOnMinesPoweredStep && step.trigger == StepTrigger.MinesPowered)
+        {
+            effectiveCategories.Add("Power");
+            return effectiveCategories;
+        }
+
+        if (step.allowedCategories == null || step.allowedCategories.Count == 0)
+            return effectiveCategories;
+
+        for (int i = 0; i < step.allowedCategories.Count; i++)
+        {
+            var category = step.allowedCategories[i];
+            if (string.IsNullOrWhiteSpace(category)) continue;
+            var trimmed = category.Trim();
+            if (!effectiveCategories.Contains(trimmed))
+                effectiveCategories.Add(trimmed);
+        }
+        return effectiveCategories;
     }
 
     void ApplyHighlighterTargets(Step step)
@@ -789,10 +961,15 @@ public class OnboardingManager : MonoBehaviour
             return;
 
         resolvedHighlightTargets.Clear();
-        AddHighlightTargets(resolvedHighlightTargets, step.highlightTargets);
-
-        if (ShouldHighlightBuildButton(step) && TryGetBuildButtonHighlightTarget(out var buildTarget) && !resolvedHighlightTargets.Contains(buildTarget))
+        bool useBuildHighlight = ShouldHighlightBuildButton(step) && ShouldShowBuildControls();
+        if (useBuildHighlight && TryGetBuildButtonHighlightTarget(out var buildTarget))
+        {
             resolvedHighlightTargets.Add(buildTarget);
+        }
+        else
+        {
+            AddHighlightTargets(resolvedHighlightTargets, step.highlightTargets);
+        }
 
         if (resolvedHighlightTargets.Count > 0)
             highlighter.SetTargets(resolvedHighlightTargets);
@@ -850,6 +1027,84 @@ public class OnboardingManager : MonoBehaviour
         return false;
     }
 
+    void ApplySolarStepPowerButtonVisibility(Step step)
+    {
+        EnsureSolarStepPowerButtons();
+        CachePowerButtonVisibility(solarPanelBuildButtonObject);
+        CachePowerButtonVisibility(cableBuildButtonObject);
+        CachePowerButtonVisibility(poleBuildButtonObject);
+
+        if (!showOnlySolarPanelOnSolarStep)
+        {
+            RestoreCachedPowerButtonVisibility();
+            return;
+        }
+
+        bool isSolarStep = IsSolarPanelTutorialStep(step);
+        if (isSolarStep)
+        {
+            SetPowerButtonActive(solarPanelBuildButtonObject, true);
+            SetPowerButtonActive(cableBuildButtonObject, false);
+            SetPowerButtonActive(poleBuildButtonObject, false);
+        }
+        else
+        {
+            RestoreCachedPowerButtonVisibility();
+        }
+    }
+
+    bool IsSolarPanelTutorialStep(Step step)
+    {
+        if (step == null) return false;
+        if (!string.IsNullOrWhiteSpace(solarPanelStepId))
+            return string.Equals(step.id, solarPanelStepId, System.StringComparison.OrdinalIgnoreCase);
+        return IsSolarPanelPlacementStep(step);
+    }
+
+    void EnsureSolarStepPowerButtons()
+    {
+        if (solarPanelBuildButtonObject == null && !string.IsNullOrWhiteSpace(solarPanelButtonFallbackName))
+            solarPanelBuildButtonObject = FindSceneObjectByName(solarPanelButtonFallbackName);
+        if (cableBuildButtonObject == null && !string.IsNullOrWhiteSpace(cableButtonFallbackName))
+            cableBuildButtonObject = FindSceneObjectByName(cableButtonFallbackName);
+        if (poleBuildButtonObject == null && !string.IsNullOrWhiteSpace(poleButtonFallbackName))
+            poleBuildButtonObject = FindSceneObjectByName(poleButtonFallbackName);
+    }
+
+    void CachePowerButtonVisibility(GameObject go)
+    {
+        if (go == null) return;
+        if (!cachedPowerButtonVisibility.ContainsKey(go))
+            cachedPowerButtonVisibility[go] = go.activeSelf;
+    }
+
+    void RestoreCachedPowerButtonVisibility()
+    {
+        RestoreCachedPowerButtonVisibility(solarPanelBuildButtonObject);
+        RestoreCachedPowerButtonVisibility(cableBuildButtonObject);
+        RestoreCachedPowerButtonVisibility(poleBuildButtonObject);
+    }
+
+    void RestoreCachedPowerButtonVisibility(GameObject go)
+    {
+        if (go == null) return;
+        if (cachedPowerButtonVisibility.TryGetValue(go, out var wasActive))
+        {
+            if (go.activeSelf != wasActive)
+                go.SetActive(wasActive);
+            return;
+        }
+        if (!go.activeSelf)
+            go.SetActive(true);
+    }
+
+    static void SetPowerButtonActive(GameObject go, bool active)
+    {
+        if (go == null) return;
+        if (go.activeSelf != active)
+            go.SetActive(active);
+    }
+
     static void SetSelectablesInteractable(IReadOnlyList<Selectable> selectables, bool interactable)
     {
         if (selectables == null) return;
@@ -890,6 +1145,15 @@ public class OnboardingManager : MonoBehaviour
             }
         }
 
+        if (IsBuyDronesStep(step) && highlightDroneHqDuringBuyStep)
+        {
+            if (TryGetDroneHqCell(out var hqCell))
+            {
+                ShowPlacementHighlight(new[] { hqCell });
+                return;
+            }
+        }
+
         HidePlacementHighlight();
     }
 
@@ -914,6 +1178,11 @@ public class OnboardingManager : MonoBehaviour
     bool IsSolarPanelPlacementStep(Step step)
     {
         return step != null && step.trigger == StepTrigger.SolarPanelBuilt;
+    }
+
+    static bool IsBuyDronesStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.BuyDrones;
     }
 
     void UnlockCategories(IReadOnlyList<string> categories)
@@ -966,6 +1235,16 @@ public class OnboardingManager : MonoBehaviour
             }
         }
         return cells != null && cells.Count > 0;
+    }
+
+    bool TryGetDroneHqCell(out Vector2Int cell)
+    {
+        cell = default;
+        var hq = DroneHQ.Instance;
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (hq == null || grid == null) return false;
+        cell = grid.WorldToCell(hq.transform.position);
+        return grid.InBounds(cell);
     }
 
     static bool TryParseCellLabel(string label, out Vector2Int cell)
@@ -1117,7 +1396,7 @@ public class OnboardingManager : MonoBehaviour
         var step = GetCurrentStep();
         if (step == null) return;
         if (step.trigger == StepTrigger.DroneHqBlueprintPlaced && type == BlueprintTask.BlueprintType.DroneHQ)
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
     }
 
     void HandleBlueprintCompleted(BlueprintTask.BlueprintType type, BlueprintTask task)
@@ -1126,18 +1405,18 @@ public class OnboardingManager : MonoBehaviour
         var step = GetCurrentStep();
         if (step == null) return;
         if (step.trigger == StepTrigger.DroneHqBuilt && type == BlueprintTask.BlueprintType.DroneHQ)
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
         else if (step.trigger == StepTrigger.SolarPanelBuilt && type == BlueprintTask.BlueprintType.Machine && IsSolarPanelTask(task))
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
         else if (step.trigger == StepTrigger.SugarMineBuilt && type == BlueprintTask.BlueprintType.Machine && IsSugarMineTask(task))
         {
             if (GetMineCount() >= Mathf.Max(0, step.requiredMineCount))
-                CompleteCurrentStep();
+                RequestCompleteCurrentStep(step);
         }
         else if (step.trigger == StepTrigger.PressBuilt && type == BlueprintTask.BlueprintType.Machine && IsPressTask(task))
         {
             if (GetPressCount() >= Mathf.Max(0, step.requiredPressCount))
-                CompleteCurrentStep();
+                RequestCompleteCurrentStep(step);
         }
         else if (step.trigger == StepTrigger.MinesConnectedToPresses)
         {
@@ -1160,8 +1439,8 @@ public class OnboardingManager : MonoBehaviour
         if (!isActive) return;
         var step = GetCurrentStep();
         if (step == null) return;
-        if (step.trigger == StepTrigger.BuyDrones && MeetsBuyCrewStep(step))
-            CompleteCurrentStep();
+        if (step.trigger == StepTrigger.BuyDrones)
+            EvaluateBuyDronesStep(step);
         UpdateGoalUi(step);
     }
 
@@ -1170,8 +1449,8 @@ public class OnboardingManager : MonoBehaviour
         if (!isActive) return;
         var step = GetCurrentStep();
         if (step == null) return;
-        if (step.trigger == StepTrigger.BuyDrones && MeetsBuyCrewStep(step))
-            CompleteCurrentStep();
+        if (step.trigger == StepTrigger.BuyDrones)
+            EvaluateBuyDronesStep(step);
         UpdateGoalUi(step);
     }
 
@@ -1307,6 +1586,7 @@ public class OnboardingManager : MonoBehaviour
             if (step != null && step.hideUiAfterCompletion) HideUi();
             if (goalUi != null) goalUi.Hide();
             HidePlacementHighlight();
+            ApplySolarStepPowerButtonVisibility(null);
             ApplyTutorialUiLocks();
         }
     }
@@ -1458,6 +1738,30 @@ public class OnboardingManager : MonoBehaviour
         return GetDroneCount() >= requiredDrones && GetCrawlerCount() >= requiredCrawlers;
     }
 
+    bool IsBuyDronesStepSatisfied(Step step)
+    {
+        if (!MeetsBuyCrewStep(step)) return false;
+        if (!requireMachineOverviewClosedForBuyStep) return true;
+        return IsMachineOverviewClosed();
+    }
+
+    void EvaluateBuyDronesStep(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.BuyDrones) return;
+        if (IsBuyDronesStepSatisfied(step))
+            RequestCompleteCurrentStep(step);
+        else
+            CancelPendingStepCompletion();
+    }
+
+    bool IsMachineOverviewClosed()
+    {
+        if (machineInspectUi == null)
+            machineInspectUi = FindAnyObjectByType<MachineInspectUI>();
+        if (machineInspectUi == null) return true;
+        return !machineInspectUi.IsPanelOpen;
+    }
+
     void UpdateGoalUi(Step step)
     {
         if (goalUi == null || !isActive || dialogueMode != DialogueMode.None) return;
@@ -1489,13 +1793,20 @@ public class OnboardingManager : MonoBehaviour
                     int required = Mathf.Max(0, step.requiredDroneCount);
                     int current = GetDroneCount();
                     string label = FormatCountLabel("Buy", "drone", current, required);
-                    items.Add(new TutorialGoalUI.ChecklistItem(label, required <= 0 || current >= required));
+                    bool dronesDone = required <= 0 || current >= required;
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, dronesDone));
                     int requiredCrawlers = Mathf.Max(0, step.requiredCrawlerCount);
                     int currentCrawlers = GetCrawlerCount();
+                    bool crawlersDone = requiredCrawlers <= 0 || currentCrawlers >= requiredCrawlers;
                     if (requiredCrawlers > 0)
                     {
                         string crawlerLabel = FormatCountLabel("Buy", "crawler", currentCrawlers, requiredCrawlers);
-                        items.Add(new TutorialGoalUI.ChecklistItem(crawlerLabel, currentCrawlers >= requiredCrawlers));
+                        items.Add(new TutorialGoalUI.ChecklistItem(crawlerLabel, crawlersDone));
+                    }
+                    if (requireMachineOverviewClosedForBuyStep)
+                    {
+                        bool crewDone = dronesDone && crawlersDone;
+                        items.Add(new TutorialGoalUI.ChecklistItem("Close the overview panel", crewDone && IsMachineOverviewClosed()));
                     }
                 }
                 break;
@@ -1587,7 +1898,7 @@ public class OnboardingManager : MonoBehaviour
         if (step == null || step.trigger != StepTrigger.MinesPowered) return;
         if (trackedMines.Count == 0) return;
         if (AreAllMinesPowered(trackedMines, true))
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
     }
 
     void TryCompleteMinesConnected(Step step)
@@ -1595,7 +1906,7 @@ public class OnboardingManager : MonoBehaviour
         if (step == null || step.trigger != StepTrigger.MinesConnectedToPresses) return;
         if (trackedMines.Count == 0 || trackedPresses.Count == 0) return;
         if (AreAllMinesConnectedToPresses(trackedMines, trackedPresses, true))
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
     }
 
     void TryCompletePressesPowered(Step step)
@@ -1603,7 +1914,7 @@ public class OnboardingManager : MonoBehaviour
         if (step == null || step.trigger != StepTrigger.PressesPowered) return;
         if (trackedPresses.Count == 0) return;
         if (AreAllPressesPowered(trackedPresses, true))
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
     }
 
     void ResetCameraStepState(Step step)
@@ -1627,7 +1938,9 @@ public class OnboardingManager : MonoBehaviour
         if (step == null || step.trigger != StepTrigger.CameraMoveZoom) return;
         if (dialogueMode != DialogueMode.None) return;
         if (IsCameraStepComplete(step))
-            CompleteCurrentStep();
+            RequestCompleteCurrentStep(step);
+        else
+            CancelPendingStepCompletion();
     }
 
     bool AreAllMinesPowered(List<SugarMine> mines, bool requireAny)
@@ -1849,7 +2162,7 @@ public class OnboardingManager : MonoBehaviour
     static GameObject FindSceneObjectByName(string objectName)
     {
         if (string.IsNullOrWhiteSpace(objectName)) return null;
-        var transforms = FindObjectsByType<Transform>(FindObjectsSortMode.None);
+        var transforms = FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         for (int i = 0; i < transforms.Length; i++)
         {
             var tr = transforms[i];

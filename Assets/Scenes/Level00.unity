@@ -5921,6 +5921,108 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 728785210}
   m_CullTransparentMesh: 1
+--- !u!1 &749708303
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 749708304}
+  - component: {fileID: 749708307}
+  - component: {fileID: 749708306}
+  - component: {fileID: 749708305}
+  m_Layer: 0
+  m_Name: TutorialHighlightCanvas
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &749708304
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 749708303}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 0, y: 0, z: 0}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1310697313}
+  m_Father: {fileID: 888585947}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
+  m_Pivot: {x: 0, y: 0}
+--- !u!114 &749708305
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 749708303}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc42784cf147c0c48a680349fa168899, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_IgnoreReversedGraphics: 1
+  m_BlockingObjects: 0
+  m_BlockingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+--- !u!114 &749708306
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 749708303}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_UiScaleMode: 1
+  m_ReferencePixelsPerUnit: 100
+  m_ScaleFactor: 1
+  m_ReferenceResolution: {x: 800, y: 600}
+  m_ScreenMatchMode: 0
+  m_MatchWidthOrHeight: 0
+  m_PhysicalUnit: 3
+  m_FallbackScreenDPI: 96
+  m_DefaultSpriteDPI: 96
+  m_DynamicPixelsPerUnit: 1
+  m_PresetInfoIsWorld: 0
+--- !u!223 &749708307
+Canvas:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 749708303}
+  m_Enabled: 1
+  serializedVersion: 3
+  m_RenderMode: 0
+  m_Camera: {fileID: 0}
+  m_PlaneDistance: 100
+  m_PixelPerfect: 0
+  m_ReceivesEvents: 1
+  m_OverrideSorting: 0
+  m_OverridePixelPerfect: 0
+  m_SortingBucketNormalizedSize: 0
+  m_VertexColorAlwaysGammaSpace: 0
+  m_AdditionalShaderChannelsFlag: 0
+  m_UpdateRectTransformForStandalone: 0
+  m_SortingLayerID: 0
+  m_SortingOrder: -600
+  m_TargetDisplay: 0
 --- !u!1001 &752692195
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -6431,7 +6533,36 @@ MonoBehaviour:
   droneHqWrongCellMessage: Can you follow orders or do I need to find another engineer?
     Place it where I tell you, you'll have more freedom later on to play around.
   highlightDroneHqCell: 1
+  forceSolarPanelPlacement: 1
+  solarPanelRequiredCells: O8,N8
+  highlightSolarPanelCells: 1
+  focusCameraOnMineSelection: 1
+  mineFocusDuration: 0.6
+  mineFocusEase: 4
+  mineWrongCellMessage: Sugar Mines can only be placed on sugar deposits.
   cellOverlay: {fileID: 888585948}
+  highlightDroneHqDuringBuyStep: 1
+  useStepSpecificCategoryLocks: 1
+  extractionOnlyOnSugarMineStep: 1
+  powerOnlyOnMinesPoweredStep: 1
+  gateBuildControlsDuringTutorial: 1
+  unlockBuildControlsAfterStepId: camera-move-zoom
+  buildButtonObject: {fileID: 0}
+  buildButtonHighlightTarget: {fileID: 0}
+  deleteButtonObject: {fileID: 0}
+  buildButtonFallbackName: Build Btn
+  deleteButtonFallbackName: Delete btn
+  stepCompletionDelaySeconds: 1
+  showOnlySolarPanelOnSolarStep: 1
+  solarPanelStepId: place-solar-panel
+  solarPanelBuildButtonObject: {fileID: 0}
+  cableBuildButtonObject: {fileID: 0}
+  poleBuildButtonObject: {fileID: 0}
+  solarPanelButtonFallbackName: Solar Panel
+  cableButtonFallbackName: Cable
+  poleButtonFallbackName: Pole
+  requireMachineOverviewClosedForBuyStep: 1
+  machineInspectUi: {fileID: 0}
 --- !u!4 &860314671
 Transform:
   m_ObjectHideFlags: 0
@@ -6705,17 +6836,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97d619dab4612094ca3cc857a86f21cf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  overlayCanvas: {fileID: 0}
-  overlayRoot: {fileID: 0}
-  sortingOrder: 6200
+  overlayCanvas: {fileID: 749708307}
+  overlayRoot: {fileID: 749708304}
+  sortingOrder: 600
+  drawBehindUi: 1
   highlightSprite: {fileID: 5571973092267743803, guid: 38da002fe90b0404a8fed6cd60e16589, type: 3}
-  highlightColor: {r: 1, g: 1, b: 1, a: 0.39607844}
-  padding: {x: 16, y: 16}
-  keepAspect: 0
+  highlightColor: {r: 0.97087646, g: 1, b: 0.39811313, a: 0.27450982}
+  padding: {x: 0.18, y: 16}
+  positionOffset: {x: -2.16, y: 0.76}
+  keepAspect: 1
   pulse: 1
-  pulseSpeed: 2
-  pulseScale: 1.06
+  pulseSpeed: 4
+  pulseScale: 1.2
   useUnscaledTime: 1
+  previewInEditMode: 1
+  previewTargets:
+  - {fileID: 1458539403}
 --- !u!4 &888585947
 Transform:
   m_ObjectHideFlags: 0
@@ -6728,7 +6864,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 749708304}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &888585948
@@ -6746,13 +6883,13 @@ MonoBehaviour:
   grid: {fileID: 1021027029}
   matchGridLayer: 1
   highlightColor: {r: 0.96981126, g: 0.92877454, b: 0.6349519, a: 0.19215687}
-  padding: 0.05
+  padding: 0
   zOffset: 0.1
   sortingLayerName: Default
   sortingOrder: 1200
   pulse: 1
-  pulseSpeed: 3
-  pulseScale: 1.08
+  pulseSpeed: 2
+  pulseScale: 1.06
   useUnscaledTime: 1
 --- !u!1 &935178578
 GameObject:
@@ -9210,6 +9347,9 @@ MonoBehaviour:
   poleBuildSeconds: 0.6
   cableCost: 20
   poleCost: 40
+  showCableLengthLimitHint: 1
+  cableLengthLimitMessage: Cable limit reached
+  cableHintCooldownSeconds: 0.2
 --- !u!4 &1195365099
 Transform:
   m_ObjectHideFlags: 0
@@ -10065,6 +10205,81 @@ CanvasRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1291390620}
+  m_CullTransparentMesh: 1
+--- !u!1 &1310697312
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1310697313}
+  - component: {fileID: 1310697315}
+  - component: {fileID: 1310697314}
+  m_Layer: 0
+  m_Name: Highlight
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1310697313
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1310697312}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1.1125494, y: 1.1125494, z: 1.1125494}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 749708304}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
+  m_AnchoredPosition: {x: 296.73413, y: -120.882965}
+  m_SizeDelta: {x: 95.14673, y: 126.78673}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1310697314
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1310697312}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Material: {fileID: 0}
+  m_Color: {r: 0.97087646, g: 1, b: 0.39811313, a: 0.27450982}
+  m_RaycastTarget: 0
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 5571973092267743803, guid: 38da002fe90b0404a8fed6cd60e16589, type: 3}
+  m_Type: 0
+  m_PreserveAspect: 1
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
+--- !u!222 &1310697315
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1310697312}
   m_CullTransparentMesh: 1
 --- !u!1 &1311199720
 GameObject:
@@ -17276,6 +17491,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   uiRoot: {fileID: 2109001000}
   canvasGroup: {fileID: 2109001004}
+  panelRect: {fileID: 0}
   goalText: {fileID: 2109001013}
   prefix: 'Goal: '
   title: Goal
@@ -17286,6 +17502,9 @@ MonoBehaviour:
   completedItemColor: {r: 0.35, g: 0.9, b: 0.35, a: 1}
   toggleRootActive: 0
   blockRaycastsWhenVisible: 0
+  autoResizePanelHeight: 1
+  panelVerticalPadding: 16
+  panelMinimumHeight: 64
 --- !u!1 &2109001010
 GameObject:
   m_ObjectHideFlags: 0

@@ -18,6 +18,11 @@ public class PowerBuildManager : MonoBehaviour
     [SerializeField, Min(0)] int cableCost = 0;
     [SerializeField, Min(0)] int poleCost = 0;
 
+    [Header("Placement Feedback")]
+    [SerializeField] bool showCableLengthLimitHint = true;
+    [SerializeField, TextArea(1, 2)] string cableLengthLimitMessage = "Cable limit reached";
+    [SerializeField, Min(0f)] float cableHintCooldownSeconds = 0.2f;
+
     enum Mode { None, Cable, Pole }
     Mode mode = Mode.None;
 
@@ -30,6 +35,7 @@ public class PowerBuildManager : MonoBehaviour
     readonly Dictionary<Vector2Int, int> dragDistances = new();
     bool isDeleteDragging;
     Vector2Int lastDeleteCell = new Vector2Int(int.MinValue, int.MinValue);
+    float lastCableLimitHintTime = -999f;
 
     static readonly Vector2Int[] NeighborDirs =
     {
@@ -94,8 +100,14 @@ public class PowerBuildManager : MonoBehaviour
 
             if (TryGetExistingCableAtCell(cell.Value, out var existingCable))
             {
-                if (!TryGetStartDragDistanceFromExisting(cell.Value, out var startDistance) || !IsWithinLengthLimit(startDistance))
+                if (!TryGetStartDragDistanceFromExisting(cell.Value, out var startDistance))
                 {
+                    isMouseDown = false;
+                    return;
+                }
+                if (!IsWithinLengthLimit(startDistance))
+                {
+                    ShowCableLengthLimitHint(cell.Value);
                     isMouseDown = false;
                     return;
                 }
@@ -108,8 +120,14 @@ public class PowerBuildManager : MonoBehaviour
                 return;
             }
 
-            if (!TryGetStartDragDistance(cell.Value, out var newStartDistance) || !IsWithinLengthLimit(newStartDistance))
+            if (!TryGetStartDragDistance(cell.Value, out var newStartDistance))
             {
+                isMouseDown = false;
+                return;
+            }
+            if (!IsWithinLengthLimit(newStartDistance))
+            {
+                ShowCableLengthLimitHint(cell.Value);
                 isMouseDown = false;
                 return;
             }
@@ -569,8 +587,13 @@ public class PowerBuildManager : MonoBehaviour
             var prev = targetPath[i - 1];
             var dir = DeltaToDirection(cell - prev);
 
-            if (!TryGetNextDragDistance(cell, prev, out var nextDistance) || !IsWithinLengthLimit(nextDistance))
+            if (!TryGetNextDragDistance(cell, prev, out var nextDistance))
                 break;
+            if (!IsWithinLengthLimit(nextDistance))
+            {
+                ShowCableLengthLimitHint(cell);
+                break;
+            }
             if (!TryPlaceCable(cell, dir, out var newCable, allowChainPlacement: true))
                 break;
 
@@ -762,6 +785,19 @@ public class PowerBuildManager : MonoBehaviour
         var power = PowerService.Instance ?? PowerService.EnsureInstance();
         if (power == null) return true;
         return distance <= power.MaxCableLength;
+    }
+
+    void ShowCableLengthLimitHint(Vector2Int cell)
+    {
+        if (!showCableLengthLimitHint || string.IsNullOrWhiteSpace(cableLengthLimitMessage))
+            return;
+
+        float now = Time.unscaledTime;
+        if (now - lastCableLimitHintTime < cableHintCooldownSeconds)
+            return;
+
+        lastCableLimitHintTime = now;
+        BuildPlacementHintUI.ShowAtCell(cell, cableLengthLimitMessage);
     }
 
     void PinUndergroundView()
