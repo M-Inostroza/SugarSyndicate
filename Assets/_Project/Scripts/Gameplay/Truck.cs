@@ -63,6 +63,8 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
     static bool trucksCalled;
     public static bool TrucksCalled => trucksCalled;
+    static bool compassIndicatorsSuppressed;
+    public static bool CompassIndicatorsSuppressed => compassIndicatorsSuppressed;
 
     static Canvas compassCanvas;
     static RectTransform compassCanvasRect;
@@ -172,6 +174,20 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
         if (trucksCalled == called) return;
         trucksCalled = called;
         try { OnTrucksCalledChanged?.Invoke(trucksCalled); } catch { }
+    }
+
+    public static void SetCompassIndicatorsSuppressed(bool suppressed)
+    {
+        if (compassIndicatorsSuppressed == suppressed) return;
+        compassIndicatorsSuppressed = suppressed;
+
+        var trucks = FindObjectsByType<Truck>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < trucks.Length; i++)
+        {
+            var truck = trucks[i];
+            if (truck == null) continue;
+            truck.SetCompassVisible(false);
+        }
     }
 
     void ResetDocking()
@@ -454,7 +470,7 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
     void EnsureCompassIndicator()
     {
-        if (!showCompass || compassSprite == null) return;
+        if (compassIndicatorsSuppressed || !showCompass || compassSprite == null) return;
         EnsureCompassCanvas(compassSortingOrder);
         if (compassCanvas == null || compassImage != null) return;
 
@@ -484,7 +500,7 @@ public class Truck : MonoBehaviour, IMachine, IMachineStorageWithCapacity, IPowe
 
     void UpdateCompassIndicator()
     {
-        if (!showCompass || compassSprite == null)
+        if (compassIndicatorsSuppressed || !showCompass || compassSprite == null)
         {
             SetCompassVisible(false);
             return;

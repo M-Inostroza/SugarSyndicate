@@ -99,6 +99,7 @@ public class OnboardingManager : MonoBehaviour
         "Sugar Mines can only be placed on sugar deposits.";
     [SerializeField] TutorialCellOverlay cellOverlay;
     [SerializeField] bool highlightDroneHqDuringBuyStep = true;
+    [SerializeField] bool hideTruckCompassesDuringTutorial = true;
 
     [Header("Build Category Restrictions")]
     [Tooltip("If enabled, each step uses its own allowed categories instead of cumulative unlocks.")]
@@ -107,6 +108,8 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField] bool extractionOnlyOnSugarMineStep = true;
     [Tooltip("Force only Power category on mine-powering (cable) step.")]
     [SerializeField] bool powerOnlyOnMinesPoweredStep = true;
+    [Tooltip("Force only Power category on solar-panel placement step.")]
+    [SerializeField] bool powerOnlyOnSolarPanelStep = true;
 
     [Header("Tutorial UI Locks")]
     [Tooltip("If enabled, build/delete controls stay hidden until the configured tutorial step is completed.")]
@@ -501,10 +504,14 @@ public class OnboardingManager : MonoBehaviour
         CameraZoomController.ZoomedIn -= HandleZoomedIn;
         CameraZoomController.ZoomedOut -= HandleZoomedOut;
         CancelPendingStepCompletion();
+        if (hideTruckCompassesDuringTutorial)
+            Truck.SetCompassIndicatorsSuppressed(false);
     }
 
     void OnDestroy()
     {
+        if (hideTruckCompassesDuringTutorial)
+            Truck.SetCompassIndicatorsSuppressed(false);
         if (Instance == this) Instance = null;
     }
 
@@ -543,6 +550,7 @@ public class OnboardingManager : MonoBehaviour
         if (autoFindReferences) EnsurePowerService();
         if (autoFindReferences) EnsureGoalUi();
         isActive = true;
+        ApplyTutorialTruckCompassVisibility();
         ApplyTutorialUiLocks();
         AdvanceToFirstIncompleteStep();
     }
@@ -578,6 +586,7 @@ public class OnboardingManager : MonoBehaviour
         ApplySolarStepPowerButtonVisibility(null);
         cachedPowerButtonVisibility.Clear();
         HideUi();
+        ApplyTutorialTruckCompassVisibility();
         ApplyTutorialUiLocks();
     }
 
@@ -929,6 +938,12 @@ public class OnboardingManager : MonoBehaviour
         effectiveCategories.Clear();
         if (step == null) return effectiveCategories;
 
+        if (powerOnlyOnSolarPanelStep && IsSolarPanelTutorialStep(step))
+        {
+            effectiveCategories.Add("Power");
+            return effectiveCategories;
+        }
+
         if (extractionOnlyOnSugarMineStep && step.trigger == StepTrigger.SugarMineBuilt)
         {
             effectiveCategories.Add("Extraction");
@@ -995,7 +1010,10 @@ public class OnboardingManager : MonoBehaviour
         switch (step.trigger)
         {
             case StepTrigger.DroneHqBlueprintPlaced:
+                return true;
             case StepTrigger.DroneHqBuilt:
+                // Once the HQ blueprint is placed, the "Build" button is no longer the relevant action.
+                return !(BlueprintTask.HasHqBlueprint || DroneHQ.Instance != null);
             case StepTrigger.SolarPanelBuilt:
             case StepTrigger.SugarMineBuilt:
             case StepTrigger.MinesPowered:
@@ -1395,6 +1413,8 @@ public class OnboardingManager : MonoBehaviour
         if (!isActive) return;
         var step = GetCurrentStep();
         if (step == null) return;
+        ApplyHighlighterTargets(step);
+        UpdatePlacementHighlight(step);
         if (step.trigger == StepTrigger.DroneHqBlueprintPlaced && type == BlueprintTask.BlueprintType.DroneHQ)
             RequestCompleteCurrentStep(step);
     }
@@ -2131,6 +2151,12 @@ public class OnboardingManager : MonoBehaviour
         bool visible = ShouldShowBuildControls();
         SetObjectVisible(buildButtonObject, visible);
         SetObjectVisible(deleteButtonObject, visible);
+    }
+
+    void ApplyTutorialTruckCompassVisibility()
+    {
+        if (!hideTruckCompassesDuringTutorial) return;
+        Truck.SetCompassIndicatorsSuppressed(isActive);
     }
 
     bool ShouldShowBuildControls()

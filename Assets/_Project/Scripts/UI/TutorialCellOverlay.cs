@@ -10,11 +10,14 @@ public class TutorialCellOverlay : MonoBehaviour
     [SerializeField] bool matchGridLayer = true;
 
     [Header("Visuals")]
+    [SerializeField] Sprite highlightSprite;
     [SerializeField] Color highlightColor = new Color(1f, 0.9f, 0.2f, 0.85f);
     [SerializeField, Min(0f)] float padding = 0.05f;
     [SerializeField] float zOffset = 0.1f;
     [SerializeField] string sortingLayerName = "Default";
     [SerializeField] int sortingOrder = 1200;
+    [SerializeField] bool drawBehindMachines = true;
+    [SerializeField] int maxSortingOrderWhenBehindMachines = -1;
 
     [Header("Pulse")]
     [SerializeField] bool pulse = true;
@@ -140,10 +143,10 @@ public class TutorialCellOverlay : MonoBehaviour
             go.transform.SetParent(transform, false);
             go.layer = gameObject.layer;
             var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = quadSprite;
+            sr.sprite = GetHighlightSprite();
             sr.color = highlightColor;
             sr.sortingLayerID = sortingLayerId;
-            sr.sortingOrder = sortingOrder;
+            sr.sortingOrder = GetEffectiveSortingOrder();
             sr.drawMode = SpriteDrawMode.Simple;
             sr.enabled = false;
             sprites.Add(sr);
@@ -156,11 +159,18 @@ public class TutorialCellOverlay : MonoBehaviour
         {
             var sr = sprites[i];
             if (sr == null) continue;
-            sr.sprite = quadSprite;
+            sr.sprite = GetHighlightSprite();
             sr.color = highlightColor;
             sr.sortingLayerID = sortingLayerId;
-            sr.sortingOrder = sortingOrder;
+            sr.sortingOrder = GetEffectiveSortingOrder();
         }
+    }
+
+    int GetEffectiveSortingOrder()
+    {
+        if (!drawBehindMachines) return sortingOrder;
+        int cap = maxSortingOrderWhenBehindMachines < 0 ? 3 : maxSortingOrderWhenBehindMachines;
+        return Mathf.Min(sortingOrder, cap);
     }
 
     void EnsureSprite()
@@ -171,6 +181,13 @@ public class TutorialCellOverlay : MonoBehaviour
         tex.Apply();
         quadSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f, 0, SpriteMeshType.FullRect);
         quadSprite.name = "TutorialCellOverlaySprite";
+    }
+
+    Sprite GetHighlightSprite()
+    {
+        if (highlightSprite != null) return highlightSprite;
+        EnsureSprite();
+        return quadSprite;
     }
 
     float ResolveZ()

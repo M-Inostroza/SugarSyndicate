@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using TMPro;
@@ -42,14 +43,37 @@ public class TutorialGoalUI : MonoBehaviour
     [SerializeField, Min(0f)] float panelVerticalPadding = 16f;
     [SerializeField, Min(0f)] float panelMinimumHeight = 64f;
 
+    [Header("Visibility Animation")]
+    [SerializeField] bool animateVisibility = true;
+    [SerializeField, Min(0f)] float enterDuration = 0.3f;
+    [SerializeField, Min(0f)] float exitDuration = 0.2f;
+    [SerializeField] float enterOffsetX = -120f;
+    [SerializeField, Range(0f, 1f)] float startAlpha = 0f;
+    [SerializeField, Range(0f, 1f)] float fadeStartNormalized = 0.35f;
+    [SerializeField] bool useUnscaledAnimationTime = true;
+    [SerializeField] AnimationCurve visibilityMoveCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+
     bool isVisible;
     bool warnedMissing;
+    bool panelTargetPositionCached;
+    Vector2 panelTargetAnchoredPosition;
+    float visibilityVisualT = 1f;
+    Coroutine visibilityRoutine;
 
     void Awake()
     {
         CacheReferences();
         if (goalText != null)
-            SetVisible(false);
+            SetVisibleImmediate(false);
+    }
+
+    void OnDisable()
+    {
+        if (visibilityRoutine != null)
+        {
+            StopCoroutine(visibilityRoutine);
+            visibilityRoutine = null;
+        }
     }
 
     public void Show(string goal)
@@ -110,6 +134,11 @@ public class TutorialGoalUI : MonoBehaviour
             goalText = GetComponentInChildren<TMP_Text>(true);
         if (panelRect == null && goalText != null)
             panelRect = goalText.transform.parent as RectTransform;
+        if (panelRect != null && !panelTargetPositionCached)
+        {
+            panelTargetAnchoredPosition = panelRect.anchoredPosition;
+            panelTargetPositionCached = true;
+        }
     }
 
     void RefreshLayout()
@@ -127,16 +156,118 @@ public class TutorialGoalUI : MonoBehaviour
 
     void SetVisible(bool visible)
     {
+        CacheReferences();
+
+        if (isVisible == visible && visibilityRoutine == null)
+        {
+            ApplyVisualState(visible ? 1f : 0f);
+            ApplyCanvasInteraction(visible);
+            return;
+        }
+
+        if (visibilityRoutine != null)
+        {
+            StopCoroutine(visibilityRoutine);
+            visibilityRoutine = null;
+        }
+
+        if (!ShouldAnimateVisibility())
+        {
+            SetVisibleImmediate(visible);
+            return;
+        }
+
+        if (visible)
+        {
+            if (toggleRootActive && uiRoot != null && uiRoot != gameObject)
+                uiRoot.SetActive(true);
+        }
+
         isVisible = visible;
+        visibilityRoutine = StartCoroutine(AnimateVisibility(visible));
+    }
+
+    void SetVisibleImmediate(bool visible)
+    {
+        isVisible = visible;
+        if (toggleRootActive && uiRoot != null && uiRoot != gameObject)
+            uiRoot.SetActive(visible);
+
+        ApplyVisualState(visible ? 1f : 0f);
+        ApplyCanvasInteraction(visible);
+    }
+
+    void ApplyCanvasInteraction(bool visible)
+    {
         if (canvasGroup != null)
         {
-            canvasGroup.alpha = visible ? 1f : 0f;
             canvasGroup.blocksRaycasts = visible && blockRaycastsWhenVisible;
             canvasGroup.interactable = visible;
         }
+    }
 
-        if (toggleRootActive && uiRoot != null && uiRoot != gameObject)
-            uiRoot.SetActive(visible);
+    bool ShouldAnimateVisibility()
+    {
+        if (!animateVisibility) return false;
+        return panelRect != null || canvasGroup != null;
+    }
+
+    IEnumerator AnimateVisibility(bool show)
+    {
+        float from = visibilityVisualT;
+        float to = show ? 1f : 0f;
+        float duration = show ? enterDuration : exitDuration;
+
+        if (duration <= 0f)
+        {
+            ApplyVisualState(to);
+            ApplyCanvasInteraction(show);
+            if (!show && toggleRootActive && uiRoot != null && uiRoot != gameObject)
+                uiRoot.SetActive(false);
+            visibilityRoutine = null;
+            yield break;
+        }
+
+        ApplyCanvasInteraction(false);
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += useUnscaledAnimationTime ? Time.unscaledDeltaTime : Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            ApplyVisualState(Mathf.Lerp(from, to, t));
+            yield return null;
+        }
+
+        ApplyVisualState(to);
+        ApplyCanvasInteraction(show);
+        if (!show && toggleRootActive && uiRoot != null && uiRoot != gameObject)
+            uiRoot.SetActive(false);
+        visibilityRoutine = null;
+    }
+
+    void ApplyVisualState(float t)
+    {
+        CacheReferences();
+        float visibilityT = Mathf.Clamp01(t);
+        visibilityVisualT = visibilityT;
+
+        float moveT = visibilityMoveCurve != null
+            ? Mathf.Clamp01(visibilityMoveCurve.Evaluate(visibilityT))
+            : visibilityT;
+        float fadeStart = Mathf.Clamp01(fadeStartNormalized);
+        float fadeT = fadeStart >= 1f
+            ? (visibilityT >= 1f ? 1f : 0f)
+            : Mathf.InverseLerp(fadeStart, 1f, visibilityT);
+        float alpha = Mathf.Lerp(startAlpha, 1f, fadeT);
+
+        if (canvasGroup != null)
+            canvasGroup.alpha = alpha;
+
+        if (panelRect != null && panelTargetPositionCached)
+        {
+            var startPos = panelTargetAnchoredPosition + new Vector2(enterOffsetX, 0f);
+            panelRect.anchoredPosition = Vector2.LerpUnclamped(startPos, panelTargetAnchoredPosition, moveT);
+        }
     }
 
     string BuildChecklistText(IReadOnlyList<ChecklistItem> items)
