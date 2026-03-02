@@ -23,6 +23,22 @@ public class PowerBuildManager : MonoBehaviour
     [SerializeField, TextArea(1, 2)] string cableLengthLimitMessage = "Cable limit reached";
     [SerializeField, Min(0f)] float cableHintCooldownSeconds = 0.2f;
 
+    [Header("Node Link Cables")]
+    [SerializeField] bool useNodeLinkCables = true;
+    [SerializeField, Min(0.01f)] float cableLineWidth = 0.09f;
+    [SerializeField] Color cableLineColor = new Color(1f, 0.92f, 0.35f, 0.95f);
+    [SerializeField] Material cableLineMaterial;
+    [SerializeField] string cableSortingLayerName = "Default";
+    [SerializeField] int cableSortingOrder = 5000;
+    [SerializeField, TextArea(1, 2)] string cableNodeRequiredMessage = "Select a machine or power node to connect.";
+    [SerializeField, TextArea(1, 2)] string cableAlreadyConnectedMessage = "These nodes are already connected.";
+    [SerializeField, TextArea(1, 2)] string cableInvalidDirectionMessage = "Connect from a power source/node to a machine/node.";
+    [SerializeField, TextArea(1, 2)] string consumerInputLimitMessage = "This machine already has a power cable connected.";
+    [SerializeField, TextArea(1, 2)] string providerOutputLimitMessage = "This power provider already has an output cable.";
+    [SerializeField, Min(1)] int powerNodeMaxConnections = 4;
+    [SerializeField, TextArea(1, 2)] string powerNodeLimitMessage = "This power node can only connect up to 4 cables.";
+    [SerializeField, TextArea(1, 2)] string surfaceOnlyMessage = "Power lines and nodes can only be built on the surface.";
+
     enum Mode { None, Cable, Pole }
     Mode mode = Mode.None;
 
@@ -36,6 +52,20 @@ public class PowerBuildManager : MonoBehaviour
     bool isDeleteDragging;
     Vector2Int lastDeleteCell = new Vector2Int(int.MinValue, int.MinValue);
     float lastCableLimitHintTime = -999f;
+    Component pendingCableStartNode;
+    bool isNodeLinkDragging;
+    LineRenderer nodeLinkPreviewLine;
+    static PowerBuildManager activeInstance;
+
+    public static bool AllowCameraPanWithCableTool { get; private set; }
+    public static bool IsCameraPanBlockedByCableDrag { get; private set; }
+
+    public static bool ShouldBlockCameraPanInput()
+    {
+        if (IsCameraPanBlockedByCableDrag) return true;
+        if (activeInstance == null) return false;
+        return activeInstance.ShouldBlockCameraPanInputInternal();
+    }
 
     static readonly Vector2Int[] NeighborDirs =
     {
@@ -47,6 +77,7 @@ public class PowerBuildManager : MonoBehaviour
 
     void Awake()
     {
+        activeInstance = this;
         cam = Camera.main;
         if (cam == null) cam = Camera.current;
     }
@@ -59,6 +90,11 @@ public class PowerBuildManager : MonoBehaviour
     void OnDisable()
     {
         BuildSelectionNotifier.OnSelectionChanged -= HandleSelectionChanged;
+        if (activeInstance == this)
+            activeInstance = null;
+        EndNodeLinkDrag(clearStartNode: true);
+        AllowCameraPanWithCableTool = false;
+        IsCameraPanBlockedByCableDrag = false;
     }
 
     void Update()
@@ -79,6 +115,12 @@ public class PowerBuildManager : MonoBehaviour
 
         if (cam == null) cam = Camera.main;
         if (cam == null) return;
+
+        if (mode == Mode.Cable && useNodeLinkCables)
+        {
+            HandleNodeLinkCableInput();
+            return;
+        }
 
         if (Input.GetMouseButtonDown(0))
         {
@@ -198,9 +240,17 @@ public class PowerBuildManager : MonoBehaviour
 
     bool TryDeletePowerAtCell(Vector2Int cell)
     {
+        if (TryDeleteLinkAtCell(cell)) return true;
         if (TryDeleteCableAtCell(cell)) return true;
         if (TryDeletePoleAtCell(cell)) return true;
         return false;
+    }
+
+    bool TryDeleteLinkAtCell(Vector2Int cell)
+    {
+        if (!PowerLinkLine.TryGetAtCell(cell, out var link) || link == null) return false;
+        DeletePowerObject(link.gameObject, cableCost);
+        return true;
     }
 
     bool TryDeleteCableAtCell(Vector2Int cell)
@@ -282,18 +332,28 @@ public class PowerBuildManager : MonoBehaviour
     {
         TryStopOtherTools();
         mode = Mode.Cable;
+        pendingCableStartNode = null;
+        EndNodeLinkDrag(clearStartNode: true);
+        AllowCameraPanWithCableTool = useNodeLinkCables;
+        IsCameraPanBlockedByCableDrag = false;
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Build);
         try { BuildModeController.SetToolActive(true); } catch { }
         BuildSelectionNotifier.Notify("PowerCable");
+        ForceSurfacePowerPlacementView();
     }
 
     public void StartPlacingPole()
     {
         TryStopOtherTools();
         mode = Mode.Pole;
+        pendingCableStartNode = null;
+        EndNodeLinkDrag(clearStartNode: true);
+        AllowCameraPanWithCableTool = false;
+        IsCameraPanBlockedByCableDrag = false;
         if (GameManager.Instance != null) GameManager.Instance.SetState(GameState.Build);
         try { BuildModeController.SetToolActive(true); } catch { }
         BuildSelectionNotifier.Notify("PowerPole");
+        ForceSurfacePowerPlacementView();
     }
 
     public void StopPlacing()
@@ -306,6 +366,10 @@ public class PowerBuildManager : MonoBehaviour
         mode = Mode.None;
         isMouseDown = false;
         lastPlacedCable = null;
+        pendingCableStartNode = null;
+        EndNodeLinkDrag(clearStartNode: true);
+        AllowCameraPanWithCableTool = false;
+        IsCameraPanBlockedByCableDrag = false;
         ResetDragPath();
         if (setGameState && GameManager.Instance != null) GameManager.Instance.SetState(GameState.Play);
         if (setToolActive)
@@ -314,6 +378,8 @@ public class PowerBuildManager : MonoBehaviour
         }
         if (notifySelection)
             BuildSelectionNotifier.Notify(null);
+        if (undergroundView != null)
+            undergroundView.ClearManualOverride();
     }
 
     bool IsDeleteModeActive()
@@ -351,6 +417,299 @@ public class PowerBuildManager : MonoBehaviour
         var cell = gs.WorldToCell(worldPoint);
         if (!gs.InBounds(cell)) return null;
         return cell;
+    }
+
+    bool ShouldBlockCameraPanInputInternal()
+    {
+        if (mode != Mode.Cable || !useNodeLinkCables) return false;
+        if (!Input.GetMouseButtonDown(0)) return false;
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return false;
+
+        if (cam == null) cam = Camera.main;
+        if (cam == null) return false;
+
+        var cell = GetMouseCell();
+        if (!cell.HasValue) return false;
+        return PowerNodeUtil.FindConnectableNodeAtCell(cell.Value) != null;
+    }
+
+    void HandleNodeLinkCableInput()
+    {
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+        {
+            if (isNodeLinkDragging && Input.GetMouseButtonUp(0))
+                EndNodeLinkDrag(clearStartNode: true);
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0))
+            TryBeginNodeLinkDrag();
+
+        if (isNodeLinkDragging && Input.GetMouseButton(0))
+            UpdateNodeLinkPreviewToMouse();
+
+        if (isNodeLinkDragging && Input.GetMouseButtonUp(0))
+            TryCompleteNodeLinkDrag();
+    }
+
+    bool TryPlaceNodeLink(Component startNode, Component endNode, Vector2Int hintCell)
+    {
+        if (!TryResolveDirectedLink(startNode, endNode, out var fromNode, out var toNode, out var failMessage))
+        {
+            ShowPlacementHint(hintCell, failMessage);
+            return false;
+        }
+
+        if (!PowerNodeUtil.TryBuildCableCells(fromNode, toNode, out var cableCells) || cableCells == null || cableCells.Count == 0)
+        {
+            ShowPlacementHint(hintCell, cableNodeRequiredMessage);
+            return false;
+        }
+
+        int distance = Mathf.Max(0, cableCells.Count - 1);
+        if (!IsWithinLengthLimit(distance))
+        {
+            ShowCableLengthLimitHint(hintCell);
+            return false;
+        }
+
+        if (!TrySpendCost(cableCost))
+            return false;
+
+        var parent = placeParent != null ? placeParent : null;
+        var go = new GameObject($"PowerLink_{fromNode.name}_{toNode.name}");
+        if (parent != null)
+            go.transform.SetParent(parent, true);
+
+        float z = Mathf.Min(fromNode.transform.position.z, toNode.transform.position.z);
+        go.transform.position = new Vector3(0f, 0f, z);
+
+        var tag = go.AddComponent<BuildCostTag>();
+        tag.Cost = cableCost;
+
+        var link = go.AddComponent<PowerLinkLine>();
+        bool initialized = link.Initialize(fromNode, toNode, cableLineWidth, cableLineColor, cableLineMaterial, cableSortingLayerName, cableSortingOrder, cableCells);
+        if (!initialized)
+        {
+            RefundCost(cableCost);
+            Destroy(go);
+            ShowPlacementHint(hintCell, cableNodeRequiredMessage);
+            return false;
+        }
+
+        return true;
+    }
+
+    void TryBeginNodeLinkDrag()
+    {
+        var cell = GetMouseCell();
+        if (!cell.HasValue) return;
+
+        if (IsUndergroundPlacementBlocked())
+        {
+            ShowPlacementHint(cell.Value, surfaceOnlyMessage);
+            return;
+        }
+
+        var node = PowerNodeUtil.FindConnectableNodeAtCell(cell.Value);
+        if (node == null)
+        {
+            EndNodeLinkDrag(clearStartNode: true);
+            return;
+        }
+
+        pendingCableStartNode = node;
+        isNodeLinkDragging = true;
+        IsCameraPanBlockedByCableDrag = true;
+        EnsureNodeLinkPreviewLine();
+        UpdateNodeLinkPreviewToMouse();
+    }
+
+    void UpdateNodeLinkPreviewToMouse()
+    {
+        if (!isNodeLinkDragging || pendingCableStartNode == null)
+        {
+            EndNodeLinkDrag(clearStartNode: true);
+            return;
+        }
+
+        EnsureNodeLinkPreviewLine();
+        if (nodeLinkPreviewLine == null) return;
+
+        float z = pendingCableStartNode.transform.position.z;
+        var startPos = PowerNodeUtil.GetNodeWorldPosition(pendingCableStartNode, z);
+        var endPos = GetMouseWorldOnPlane(z);
+        nodeLinkPreviewLine.enabled = true;
+        nodeLinkPreviewLine.SetPosition(0, startPos);
+        nodeLinkPreviewLine.SetPosition(1, endPos);
+    }
+
+    void TryCompleteNodeLinkDrag()
+    {
+        if (!isNodeLinkDragging || pendingCableStartNode == null)
+        {
+            EndNodeLinkDrag(clearStartNode: true);
+            return;
+        }
+
+        var startNode = pendingCableStartNode;
+        var cell = GetMouseCell();
+        if (cell.HasValue)
+        {
+            var targetNode = PowerNodeUtil.FindConnectableNodeAtCell(cell.Value);
+            if (targetNode != null && targetNode != startNode)
+                TryPlaceNodeLink(startNode, targetNode, cell.Value);
+        }
+
+        EndNodeLinkDrag(clearStartNode: true);
+    }
+
+    void EndNodeLinkDrag(bool clearStartNode)
+    {
+        isNodeLinkDragging = false;
+        IsCameraPanBlockedByCableDrag = false;
+        if (clearStartNode)
+            pendingCableStartNode = null;
+        if (nodeLinkPreviewLine != null)
+            nodeLinkPreviewLine.enabled = false;
+    }
+
+    void EnsureNodeLinkPreviewLine()
+    {
+        if (nodeLinkPreviewLine != null) return;
+
+        var previewGo = new GameObject("PowerLinkPreview");
+        previewGo.transform.SetParent(transform, false);
+        nodeLinkPreviewLine = previewGo.AddComponent<LineRenderer>();
+        nodeLinkPreviewLine.positionCount = 2;
+        nodeLinkPreviewLine.useWorldSpace = true;
+        nodeLinkPreviewLine.numCapVertices = 3;
+        nodeLinkPreviewLine.numCornerVertices = 2;
+        nodeLinkPreviewLine.startWidth = cableLineWidth;
+        nodeLinkPreviewLine.endWidth = cableLineWidth;
+        nodeLinkPreviewLine.startColor = cableLineColor;
+        nodeLinkPreviewLine.endColor = cableLineColor;
+        if (!string.IsNullOrWhiteSpace(cableSortingLayerName))
+            nodeLinkPreviewLine.sortingLayerName = cableSortingLayerName;
+        nodeLinkPreviewLine.sortingOrder = cableSortingOrder + 1;
+        if (cableLineMaterial != null)
+        {
+            nodeLinkPreviewLine.sharedMaterial = cableLineMaterial;
+        }
+        else
+        {
+            var shader = Shader.Find("Sprites/Default");
+            if (shader != null)
+                nodeLinkPreviewLine.sharedMaterial = new Material(shader);
+        }
+        nodeLinkPreviewLine.enabled = false;
+    }
+
+    Vector3 GetMouseWorldOnPlane(float zPlane)
+    {
+        var mp = Input.mousePosition;
+        float camZ = cam != null ? cam.transform.position.z : -10f;
+        mp.z = zPlane - camZ;
+        var world = cam != null ? cam.ScreenToWorldPoint(mp) : Vector3.zero;
+        world.z = zPlane;
+        return world;
+    }
+
+    bool TryResolveDirectedLink(Component firstNode, Component secondNode, out Component fromNode, out Component toNode, out string failMessage)
+    {
+        fromNode = null;
+        toNode = null;
+        failMessage = cableNodeRequiredMessage;
+
+        if (firstNode == null || secondNode == null || firstNode == secondNode)
+            return false;
+
+        if (PowerLinkLine.HasLinkBetween(firstNode, secondNode))
+        {
+            failMessage = cableAlreadyConnectedMessage;
+            return false;
+        }
+
+        if (CanConnectDirected(firstNode, secondNode, out var firstReason))
+        {
+            fromNode = firstNode;
+            toNode = secondNode;
+            return true;
+        }
+
+        if (CanConnectDirected(secondNode, firstNode, out var secondReason))
+        {
+            fromNode = secondNode;
+            toNode = firstNode;
+            return true;
+        }
+
+        bool secondIsGeneric = string.Equals(secondReason, cableInvalidDirectionMessage, StringComparison.Ordinal);
+        failMessage = secondIsGeneric && !string.IsNullOrWhiteSpace(firstReason)
+            ? firstReason
+            : (!string.IsNullOrWhiteSpace(secondReason) ? secondReason : firstReason);
+        if (string.IsNullOrWhiteSpace(failMessage))
+            failMessage = cableInvalidDirectionMessage;
+        return false;
+    }
+
+    bool CanConnectDirected(Component fromNode, Component toNode, out string failMessage)
+    {
+        failMessage = cableInvalidDirectionMessage;
+        if (!CanOutputPower(fromNode)) return false;
+        if (!CanInputPower(toNode)) return false;
+
+        if (!HasNodeConnectionCapacity(fromNode, out failMessage)) return false;
+        if (!HasNodeConnectionCapacity(toNode, out failMessage)) return false;
+
+        if (IsProviderMachineNode(fromNode) && PowerLinkLine.CountLinksForNode(fromNode) >= 1)
+        {
+            failMessage = providerOutputLimitMessage;
+            return false;
+        }
+
+        if (IsConsumerMachineNode(toNode) && PowerLinkLine.CountLinksForNode(toNode) >= 1)
+        {
+            failMessage = consumerInputLimitMessage;
+            return false;
+        }
+
+        failMessage = null;
+        return true;
+    }
+
+    bool HasNodeConnectionCapacity(Component node, out string failMessage)
+    {
+        failMessage = null;
+        if (!(node is PowerPole)) return true;
+        int limit = Mathf.Max(1, powerNodeMaxConnections);
+        if (PowerLinkLine.CountLinksForNode(node) < limit) return true;
+        failMessage = powerNodeLimitMessage;
+        return false;
+    }
+
+    static bool CanOutputPower(Component node)
+    {
+        if (node == null) return false;
+        if (node is PowerPole) return true;
+        return node is IPowerSourceNode;
+    }
+
+    static bool CanInputPower(Component node)
+    {
+        if (node == null) return false;
+        if (node is PowerPole) return true;
+        return node is IPowerConsumer;
+    }
+
+    static bool IsProviderMachineNode(Component node)
+    {
+        return node != null && !(node is PowerPole) && node is IPowerSourceNode;
+    }
+
+    static bool IsConsumerMachineNode(Component node)
+    {
+        return node != null && !(node is PowerPole) && node is IPowerConsumer;
     }
 
     bool TryPlaceCable(Vector2Int cell, Direction? direction, out PowerCable placedCable, bool allowChainPlacement = false)
@@ -399,6 +758,11 @@ public class PowerBuildManager : MonoBehaviour
 
     bool TryPlacePole(Vector2Int cell)
     {
+        if (IsUndergroundPlacementBlocked())
+        {
+            ShowPlacementHint(cell, surfaceOnlyMessage);
+            return false;
+        }
         if (!CanPlacePoleAt(cell)) return false;
         if (polePrefab == null)
         {
@@ -429,7 +793,6 @@ public class PowerBuildManager : MonoBehaviour
         var task = go.GetComponent<BlueprintTask>();
         if (task == null) task = go.AddComponent<BlueprintTask>();
         task.InitializePole(cell, go.transform.rotation, polePrefab, poleCost, poleBuildSeconds);
-        PinUndergroundView();
         return true;
     }
 
@@ -450,6 +813,8 @@ public class PowerBuildManager : MonoBehaviour
 
     bool CanPlacePoleAt(Vector2Int cell)
     {
+        if (IsUndergroundPlacementBlocked())
+            return false;
         var power = PowerService.Instance ?? PowerService.EnsureInstance();
         if (power == null) return true;
         return power.CanPlacePoleAt(cell) && !IsMachineCell(cell);
@@ -784,6 +1149,7 @@ public class PowerBuildManager : MonoBehaviour
     {
         var power = PowerService.Instance ?? PowerService.EnsureInstance();
         if (power == null) return true;
+        if (!power.HasCableLengthLimit) return true;
         return distance <= power.MaxCableLength;
     }
 
@@ -800,11 +1166,31 @@ public class PowerBuildManager : MonoBehaviour
         BuildPlacementHintUI.ShowAtCell(cell, cableLengthLimitMessage);
     }
 
+    void ShowPlacementHint(Vector2Int cell, string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        BuildPlacementHintUI.ShowAtCell(cell, message);
+    }
+
     void PinUndergroundView()
     {
         if (undergroundView == null)
             undergroundView = FindAnyObjectByType<UndergroundViewController>();
         undergroundView?.ShowUndergroundView();
+    }
+
+    void ForceSurfacePowerPlacementView()
+    {
+        if (undergroundView == null)
+            undergroundView = FindAnyObjectByType<UndergroundViewController>();
+        undergroundView?.HideUndergroundView();
+    }
+
+    bool IsUndergroundPlacementBlocked()
+    {
+        if (undergroundView == null)
+            undergroundView = FindAnyObjectByType<UndergroundViewController>();
+        return undergroundView != null && undergroundView.IsUndergroundActive;
     }
 
     bool IsMachineCell(Vector2Int cell)

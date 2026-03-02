@@ -67,6 +67,8 @@ public class OnboardingManager : MonoBehaviour
     public static OnboardingManager Instance { get; private set; }
 
     [Header("Setup")]
+    [Tooltip("If disabled, onboarding tutorial logic is fully inactive (sandbox playtesting mode).")]
+    [SerializeField] bool tutorialEnabled = false;
     [SerializeField] bool autoStart = true;
     [SerializeField] bool onlyInTutorialScene = true;
     [SerializeField] int tutorialSceneBuildIndex = 0;
@@ -255,7 +257,12 @@ public class OnboardingManager : MonoBehaviour
 #if UNITY_EDITOR
     void OnValidate()
     {
-        if (Application.isPlaying) return;
+        if (Application.isPlaying)
+        {
+            if (!tutorialEnabled)
+                DisableTutorialRestrictions();
+            return;
+        }
         TryAutoCreateStepsAsset();
     }
 
@@ -539,6 +546,12 @@ public class OnboardingManager : MonoBehaviour
 
     void TryActivateForScene(Scene scene)
     {
+        if (!tutorialEnabled)
+        {
+            DisableTutorialRestrictions();
+            return;
+        }
+
         if (!ShouldRunInScene(scene))
         {
             Deactivate();
@@ -553,6 +566,19 @@ public class OnboardingManager : MonoBehaviour
         ApplyTutorialTruckCompassVisibility();
         ApplyTutorialUiLocks();
         AdvanceToFirstIncompleteStep();
+    }
+
+    void DisableTutorialRestrictions()
+    {
+        Deactivate();
+
+        if (buildMenu == null)
+            buildMenu = FindAnyObjectByType<BuildMenuController>();
+        if (buildMenu != null)
+            buildMenu.ShowAndEnableAllCategories();
+
+        ApplySolarStepPowerButtonVisibility(null);
+        ApplyTutorialUiLocks();
     }
 
     bool ShouldRunInScene(Scene scene)
@@ -1363,12 +1389,55 @@ public class OnboardingManager : MonoBehaviour
 
         var targetWorld = grid.CellToWorld(bestCell, camPos.z);
         var targetPos = new Vector3(targetWorld.x, targetWorld.y, camPos.z);
+        targetPos = GetClampedMineFocusTarget(cam, grid, targetPos);
         mineFocusTween?.Kill();
         mineFocusTween = cam.transform.DOMove(targetPos, mineFocusDuration)
             .SetEase(mineFocusEase)
             .SetUpdate(true)
             .SetTarget(this);
         return true;
+    }
+
+    static Vector3 GetClampedMineFocusTarget(Camera cam, GridService grid, Vector3 targetPos)
+    {
+        if (cam == null) return targetPos;
+
+        var dragPan = cam.GetComponent<CameraDragPan>();
+        if (dragPan == null)
+            dragPan = FindAnyObjectByType<CameraDragPan>();
+        if (dragPan != null)
+            return dragPan.GetClampedPosition(targetPos);
+
+        return ClampToGridCameraBounds(targetPos, cam, grid, 0.1f);
+    }
+
+    static Vector3 ClampToGridCameraBounds(Vector3 pos, Camera cam, GridService grid, float edgePadding)
+    {
+        if (cam == null || grid == null || !cam.orthographic) return pos;
+
+        var origin = (Vector2)grid.Origin;
+        var size = grid.GridSize;
+        float cellSize = grid.CellSize;
+
+        float minX = origin.x;
+        float minY = origin.y;
+        float maxX = origin.x + size.x * cellSize;
+        float maxY = origin.y + size.y * cellSize;
+
+        float halfH = cam.orthographicSize;
+        float halfW = halfH * cam.aspect;
+        float clampMinX = minX + halfW + edgePadding;
+        float clampMaxX = maxX - halfW - edgePadding;
+        float clampMinY = minY + halfH + edgePadding;
+        float clampMaxY = maxY - halfH - edgePadding;
+
+        if (clampMinX > clampMaxX) pos.x = (minX + maxX) * 0.5f;
+        else pos.x = Mathf.Clamp(pos.x, clampMinX, clampMaxX);
+
+        if (clampMinY > clampMaxY) pos.y = (minY + maxY) * 0.5f;
+        else pos.y = Mathf.Clamp(pos.y, clampMinY, clampMaxY);
+
+        return pos;
     }
 
     static bool TryParseCellList(string value, out List<Vector2Int> cells)

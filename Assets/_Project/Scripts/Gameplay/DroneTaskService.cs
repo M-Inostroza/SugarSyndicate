@@ -338,7 +338,7 @@ public class DroneTaskService : MonoBehaviour
     bool IsCrawlerTask(DroneTaskTarget task)
     {
         if (task is BlueprintTask bt)
-            return bt.Type == BlueprintTask.BlueprintType.Cable || bt.Type == BlueprintTask.BlueprintType.Pole;
+            return bt.Type == BlueprintTask.BlueprintType.Cable;
         return false;
     }
 

@@ -17,6 +17,7 @@ public class UndergroundViewController : MonoBehaviour
     [SerializeField] bool hideSurfaceBelts = true;
     [SerializeField] bool hideSurfaceItems = true;
     [SerializeField] bool hideSurfacePowerLines = true;
+    [SerializeField] bool forceShowPowerLinesOnSurface = true;
     [SerializeField] bool includeInactiveMachines = true;
     [SerializeField] bool keepPowerSourcesVisible = true;
     [SerializeField] Color machineTint = new Color(1f, 0.9f, 0.2f, 0.5f);
@@ -52,10 +53,33 @@ public class UndergroundViewController : MonoBehaviour
     float lastNightBlend = -1f;
     bool backgroundDirty;
 
+    public bool IsUndergroundActive => isUndergroundActive;
+
     void Awake()
     {
         tintSurfaceMachines = false;
         hideSurfaceMachineRenderers = false;
+        if (forceShowPowerLinesOnSurface)
+        {
+            hideSurfacePowerLines = false;
+            RemovePowerSelectionsFromAutoShow();
+        }
+    }
+
+    void RemovePowerSelectionsFromAutoShow()
+    {
+        if (showOnSelections == null || showOnSelections.Length == 0) return;
+
+        var filtered = new List<string>(showOnSelections.Length);
+        for (int i = 0; i < showOnSelections.Length; i++)
+        {
+            var selection = showOnSelections[i];
+            if (string.Equals(selection, "PowerCable", System.StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(selection, "PowerPole", System.StringComparison.OrdinalIgnoreCase)) continue;
+            filtered.Add(selection);
+        }
+
+        showOnSelections = filtered.ToArray();
     }
 
     void Start()

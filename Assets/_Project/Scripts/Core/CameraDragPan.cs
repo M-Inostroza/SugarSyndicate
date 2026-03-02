@@ -55,6 +55,11 @@ public class CameraDragPan : MonoBehaviour
     void Update()
     {
         if (targetCamera == null) return;
+        if (PowerBuildManager.ShouldBlockCameraPanInput())
+        {
+            dragging = false;
+            return;
+        }
 
         // Respect game state if requested
         if (requirePlayState && !IsPlayState())
@@ -142,7 +147,16 @@ public class CameraDragPan : MonoBehaviour
 
     bool HasActiveBuildTool()
     {
-        return BuildModeController.HasActiveTool;
+        if (!BuildModeController.HasActiveTool) return false;
+        if (PowerBuildManager.AllowCameraPanWithCableTool && !PowerBuildManager.IsCameraPanBlockedByCableDrag)
+            return false;
+        return true;
+    }
+
+    public Vector3 GetClampedPosition(Vector3 pos)
+    {
+        ClampToGrid(ref pos);
+        return pos;
     }
 
     void ClampToGrid(ref Vector3 pos)

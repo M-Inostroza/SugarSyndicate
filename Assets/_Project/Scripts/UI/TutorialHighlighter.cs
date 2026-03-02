@@ -233,8 +233,9 @@ public class TutorialHighlighter : MonoBehaviour
     {
         if (targets.Count == 0 || overlayRoot == null) return;
 
-        float pulseT = pulse ? Mathf.Sin(GetCurrentPulseTime() * pulseSpeed) : 0f;
-        float scale = pulse ? Mathf.Lerp(1f, pulseScale, (pulseT + 1f) * 0.5f) : 1f;
+        bool animatePulse = pulse && Application.isPlaying;
+        float pulseT = animatePulse ? Mathf.Sin(GetCurrentPulseTime() * pulseSpeed) : 0f;
+        float scale = animatePulse ? Mathf.Lerp(1f, pulseScale, (pulseT + 1f) * 0.5f) : 1f;
 
         for (int i = 0; i < targets.Count; i++)
         {

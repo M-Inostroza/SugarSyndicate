@@ -5126,6 +5126,7 @@ MonoBehaviour:
   hideSurfaceBelts: 1
   hideSurfaceItems: 1
   hideSurfacePowerLines: 1
+  forceShowPowerLinesOnSurface: 1
   includeInactiveMachines: 1
   keepPowerSourcesVisible: 1
   machineTint: {r: 0.5882353, g: 1, b: 0.6059985, a: 1}
@@ -6237,6 +6238,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cab33c2784cc9bf46bb089353338a381, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  tutorialEnabled: 0
   autoStart: 1
   onlyInTutorialScene: 1
   tutorialSceneBuildIndex: 0
@@ -6853,7 +6855,7 @@ MonoBehaviour:
   sortingOrder: 600
   drawBehindUi: 1
   highlightSprite: {fileID: -3927312144190958236, guid: fde33868d8e382d4398ebaf96e429375, type: 3}
-  highlightColor: {r: 0.9455421, g: 0.9924528, b: 0.07450981, a: 0.5176471}
+  highlightColor: {r: 0.97184324, g: 1, b: 0.4509434, a: 0.5176471}
   padding: {x: -11, y: 0}
   positionOffset: {x: -2.16, y: 0.76}
   keepAspect: 1
@@ -7374,6 +7376,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   powerTransitionSeconds: 1
+  enforceCableLengthLimit: 0
   maxCableLength: 5
 --- !u!4 &978236876
 Transform:
@@ -9365,6 +9368,20 @@ MonoBehaviour:
   showCableLengthLimitHint: 1
   cableLengthLimitMessage: Cable limit reached
   cableHintCooldownSeconds: 0.2
+  useNodeLinkCables: 1
+  cableLineWidth: 0.09
+  cableLineColor: {r: 0.735849, g: 0.7099212, b: 0.5206479, a: 1}
+  cableLineMaterial: {fileID: 0}
+  cableSortingLayerName: Default
+  cableSortingOrder: 5000
+  cableNodeRequiredMessage: Select a machine or power node to connect.
+  cableAlreadyConnectedMessage: These nodes are already connected.
+  cableInvalidDirectionMessage: Connect from a power source/node to a machine/node.
+  consumerInputLimitMessage: This machine already has a power cable connected.
+  providerOutputLimitMessage: This power provider already has an output cable.
+  powerNodeMaxConnections: 4
+  powerNodeLimitMessage: This power node can only connect up to 4 cables.
+  surfaceOnlyMessage: Power lines and nodes can only be built on the surface.
 --- !u!4 &1195365099
 Transform:
   m_ObjectHideFlags: 0
@@ -10248,7 +10265,7 @@ RectTransform:
   m_GameObject: {fileID: 1310697312}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1.0448481, y: 1.0448481, z: 1.0448481}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 749708304}
@@ -10271,7 +10288,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.9455421, g: 0.9924528, b: 0.07450981, a: 0.5176471}
+  m_Color: {r: 0.97184324, g: 1, b: 0.4509434, a: 0.5176471}
   m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1

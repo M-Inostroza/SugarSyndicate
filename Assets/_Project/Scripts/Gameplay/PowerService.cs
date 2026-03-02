@@ -56,6 +56,7 @@ public class PowerService : MonoBehaviour
     public event Action OnNetworkChanged;
 
     [Header("Network Rules")]
+    [SerializeField] bool enforceCableLengthLimit = false;
     [SerializeField, Min(0)] int maxCableLength = 8;
 
 
@@ -759,6 +760,7 @@ public class PowerService : MonoBehaviour
     }
 
     public int MaxCableLength => maxCableLength;
+    public bool HasCableLengthLimit => enforceCableLengthLimit && maxCableLength > 0;
 
     public void SetMaxCableLength(int length)
     {
@@ -780,13 +782,7 @@ public class PowerService : MonoBehaviour
     public bool IsCellOccupiedOrBlueprint(Vector2Int cell) => IsCellOccupied(cell) || cableBlueprints.Contains(cell) || poleBlueprints.Contains(cell);
     public bool IsCellPoweredOrAdjacent(Vector2Int cell)
     {
-        if (IsCellPowered(cell)) return true;
-        foreach (var dir in NeighborDirs)
-        {
-            if (IsCellPowered(cell + dir))
-                return true;
-        }
-        return false;
+        return IsCellPowered(cell);
     }
 
     public bool RegisterCable(Vector2Int cell)
@@ -938,7 +934,7 @@ public class PowerService : MonoBehaviour
                 if (poles.Contains(next))
                     PowerPole(next, step.cell, queue);
 
-                if (step.distance >= maxCableLength)
+                if (HasCableLengthLimit && step.distance >= maxCableLength)
                     continue;
 
                 if (cables.Contains(next))
@@ -1063,7 +1059,7 @@ public class PowerService : MonoBehaviour
                 if (IsAnyPole(next))
                     SeedPlacementFromPole(next, queue);
 
-                if (step.distance >= maxCableLength)
+                if (HasCableLengthLimit && step.distance >= maxCableLength)
                     continue;
 
                 if (IsAnyCable(next))
@@ -1125,7 +1121,7 @@ public class PowerService : MonoBehaviour
 
     void EnqueuePlacementCable(Vector2Int cell, int distance, Queue<Step> queue)
     {
-        if (distance > maxCableLength) return;
+        if (HasCableLengthLimit && distance > maxCableLength) return;
         if (!IsAnyCable(cell)) return;
         if (placementDistance.TryGetValue(cell, out var best) && best <= distance) return;
         placementDistance[cell] = distance;
@@ -1251,7 +1247,7 @@ public class PowerService : MonoBehaviour
 
     void EnqueueCable(Vector2Int cell, int distance, Queue<Step> queue)
     {
-        if (distance > maxCableLength) return;
+        if (HasCableLengthLimit && distance > maxCableLength) return;
         if (!cables.Contains(cell)) return;
         if (bestDistance.TryGetValue(cell, out var best) && best <= distance) return;
         bestDistance[cell] = distance;

@@ -145,7 +145,7 @@ public class BuildPlacementHintUI : MonoBehaviour
             panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.sizeDelta = new Vector2(260f, 46f);
+            panelRect.sizeDelta = new Vector2(420f, 72f);
 
             panelGroup = panelGo.GetComponent<CanvasGroup>();
             panelGroup.alpha = 0f;
@@ -169,8 +169,8 @@ public class BuildPlacementHintUI : MonoBehaviour
             textLabel.color = textColor;
             textLabel.alignment = TextAlignmentOptions.Center;
             textLabel.enableAutoSizing = true;
-            textLabel.fontSizeMin = 16f;
-            textLabel.fontSizeMax = 26f;
+            textLabel.fontSizeMin = 24f;
+            textLabel.fontSizeMax = 42f;
             textLabel.textWrappingMode = TextWrappingModes.Normal;
         }
         else if (panelRect != null)

@@ -149,6 +149,19 @@ public class BuildMenuController : MonoBehaviour
         }
     }
 
+    public void ShowAndEnableAllCategories()
+    {
+        for (int i = 0; i < categories.Count; i++)
+        {
+            var cat = categories[i];
+            if (cat == null || cat.button == null) continue;
+            cat.button.gameObject.SetActive(true);
+            cat.button.interactable = true;
+        }
+
+        HideAll();
+    }
+
     void SetCategoryVisible(Category cat, bool visible)
     {
         if (cat?.button == null) return;
