@@ -32,9 +32,10 @@ public class ConveyorPlacer : MonoBehaviour
     [Header("Camera Assist")]
     [SerializeField] bool assistCameraWhileDragging = true;
     [SerializeField] Camera assistCamera;
-    [Tooltip("Start panning when pointer enters the outer half of the screen (0.5 = center line).")]
-    [SerializeField, Range(0.1f, 0.5f)] float assistEdgeThreshold = 0.5f;
-    [SerializeField, Min(0f)] float assistPanSpeed = 4f;
+    [Tooltip("Start panning when pointer enters the outer edge band. Lower values mean larger center no-pan area.")]
+    [SerializeField, Range(0.05f, 0.45f)] float assistEdgeThreshold = 0.18f;
+    [SerializeField, Min(0f)] float assistPanSpeed = 2f;
+    [SerializeField, Min(0f)] float assistStartDelay = 0.12f;
     [SerializeField] bool assistConstrainToGrid = true;
     [SerializeField, Min(0f)] float assistEdgePadding = 0.1f;
 
@@ -231,6 +232,7 @@ public class ConveyorPlacer : MonoBehaviour
     Vector2Int lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
     Vector2Int dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
     Vector3 dragStartWorld = Vector3.zero;
+    float dragStartUnscaledTime = -1f;
     bool isDragging = false;
     bool dragHasMoved = false; // Track if the mouse has moved to a new cell after starting a drag
 
@@ -285,6 +287,7 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
+        dragStartUnscaledTime = -1f;
         deferredRegistrations.Clear();
         // Clear any leftover ghost visuals from previous sessions
         RestoreGhostVisuals(false);
@@ -301,6 +304,7 @@ public class ConveyorPlacer : MonoBehaviour
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
         isDragging = false;
+        dragStartUnscaledTime = -1f;
         deferredRegistrations.Clear();
         // ensure any ghost visuals are cleared
         RestoreGhostVisuals(false);
@@ -372,6 +376,7 @@ public class ConveyorPlacer : MonoBehaviour
         dragStartCell = cell; 
         lastDragCell = new Vector2Int(int.MinValue, int.MinValue); // Keep lastDragCell invalid
         dragStartWorld = world;
+        dragStartUnscaledTime = Time.unscaledTime;
         dragPath.Clear();
         
         return true;
@@ -383,6 +388,7 @@ public class ConveyorPlacer : MonoBehaviour
     {
         if (!isDragging) return false; 
         isDragging = false;
+        dragStartUnscaledTime = -1f;
         
         if (isDeleting)
         {
@@ -465,7 +471,7 @@ public class ConveyorPlacer : MonoBehaviour
             }
             
             // DON'T place a belt here; OnPointerUp handles commit.
-            isDragging = false; RestoreGhostVisuals(true); dragStartCell = lastDragCell = new Vector2Int(int.MinValue, int.MinValue); dragStartWorld = Vector3.zero; FlushDeferredRegistrations(); dragPath.Clear();
+            isDragging = false; dragStartUnscaledTime = -1f; RestoreGhostVisuals(true); dragStartCell = lastDragCell = new Vector2Int(int.MinValue, int.MinValue); dragStartWorld = Vector3.zero; FlushDeferredRegistrations(); dragPath.Clear();
         }
     }
 
@@ -473,6 +479,8 @@ public class ConveyorPlacer : MonoBehaviour
     {
         if (!assistCameraWhileDragging || isDeleting) return;
         if (!isDragging || !Input.GetMouseButton(0)) return;
+        if (!dragHasMoved) return;
+        if (dragStartUnscaledTime >= 0f && Time.unscaledTime - dragStartUnscaledTime < assistStartDelay) return;
         if (assistCamera == null) assistCamera = Camera.main;
         if (assistCamera == null) return;
 
@@ -492,6 +500,10 @@ public class ConveyorPlacer : MonoBehaviour
         else if (vp.y > top) yDir = Mathf.InverseLerp(top, 1f, vp.y);
 
         if (Mathf.Approximately(xDir, 0f) && Mathf.Approximately(yDir, 0f)) return;
+
+        // Softer acceleration near the edge threshold.
+        xDir = Mathf.Sign(xDir) * xDir * xDir;
+        yDir = Mathf.Sign(yDir) * yDir * yDir;
 
         var delta = new Vector3(xDir, yDir, 0f) * assistPanSpeed * Time.deltaTime;
         var pos = assistCamera.transform.position + delta;
@@ -631,7 +643,14 @@ public class ConveyorPlacer : MonoBehaviour
                 RemoveGhostAtCell(tail);
                 dragPath.RemoveAt(dragPath.Count - 1);
                 // Orient the new tail toward the direction we're moving (optional for visual feedback)
-            UpdateBeltDirectionFast(prevCell, dirNameNext);
+                Direction? incomingAtPrev = null;
+                if (dragPath.Count >= 2)
+                {
+                    var beforePrev = dragPath[dragPath.Count - 2];
+                    incomingAtPrev = DirectionFromDelta(prevCell - beforePrev);
+                }
+                if (!WouldCreateOpposingPair(incomingAtPrev, dirNameNext))
+                    UpdateBeltDirectionFast(prevCell, dirNameNext, incomingAtPrev);
                 lastDragCell = prevCell;
                 return;
             }
@@ -647,7 +666,15 @@ public class ConveyorPlacer : MonoBehaviour
                 dragPath.RemoveAt(i);
             }
             // Re-orient last to face toward next direction
-            UpdateBeltDirectionFast(dragPath[dragPath.Count - 1], dirNameNext);
+            Direction? incomingAtTail = null;
+            if (dragPath.Count >= 2)
+            {
+                var tail = dragPath[dragPath.Count - 1];
+                var beforeTail = dragPath[dragPath.Count - 2];
+                incomingAtTail = DirectionFromDelta(tail - beforeTail);
+            }
+            if (!WouldCreateOpposingPair(incomingAtTail, dirNameNext))
+                UpdateBeltDirectionFast(dragPath[dragPath.Count - 1], dirNameNext, incomingAtTail);
             lastDragCell = dragPath[dragPath.Count - 1];
             return;
         }
@@ -659,6 +686,8 @@ public class ConveyorPlacer : MonoBehaviour
             var prevCell = dragPath[dragPath.Count - 2];
             incomingDirection = DirectionFromDelta(lastDragCell - prevCell);
         }
+        if (WouldCreateOpposingPair(incomingDirection, dirNameNext))
+            return;
         UpdateBeltDirectionFast(lastDragCell, dirNameNext, incomingDirection);
 
         if (IsCellBlockedForBelt(nextCellMove)) return;
@@ -756,6 +785,9 @@ public class ConveyorPlacer : MonoBehaviour
         var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell2, 0f }); var center = worldObj is Vector3 vv ? vv : Vector3.zero;
 
         if (IsCellBlockedForBelt(cell2)) return false;
+        var outDir = DirectionFromName(outDirName);
+        if (outDir == Direction.None) return false;
+        if (WouldCreateHeadOnPair(cell2, outDir)) return false;
 
         if (!isDragging && !BuildModeController.IsDragging)
         {
@@ -823,7 +855,6 @@ public class ConveyorPlacer : MonoBehaviour
                 var conv = go.GetComponent<Conveyor>() ?? go.GetComponentInChildren<Conveyor>(true);
                 if (conv != null)
                 {
-                    var outDir = DirectionFromName(outDirName);
                     conv.SetStraight(outDir, visualRotationOffset);
 
                     if (isDragging || BuildModeController.IsDragging)
@@ -1098,6 +1129,61 @@ public class ConveyorPlacer : MonoBehaviour
         if (delta.y > 0) return Direction.Up;
         if (delta.y < 0) return Direction.Down;
         return Direction.None;
+    }
+
+    bool WouldCreateOpposingPair(Direction? incomingDirection, string outDirName)
+    {
+        if (!incomingDirection.HasValue || incomingDirection.Value == Direction.None) return false;
+        var outDir = DirectionFromName(outDirName);
+        if (outDir == Direction.None) return false;
+        return outDir == DirectionUtil.Opposite(incomingDirection.Value);
+    }
+
+    bool WouldCreateHeadOnPair(Vector2Int cell, Direction outDir)
+    {
+        if (outDir == Direction.None) return false;
+        var nextCell = cell + DirectionUtil.DirVec(outDir);
+        var nextConv = GetConveyorAtCellFast(nextCell);
+        if (nextConv == null) return false;
+        return nextConv.direction == DirectionUtil.Opposite(outDir);
+    }
+
+    Conveyor GetConveyorAtCellFast(Vector2Int cell)
+    {
+        try
+        {
+            if (ghostByCell.TryGetValue(cell, out var ghost) && ghost != null)
+                return ghost;
+        }
+        catch { }
+
+        try
+        {
+            var getConv = gridServiceInstance.GetType().GetMethod("GetConveyor", new Type[] { typeof(Vector2Int) });
+            if (getConv != null)
+            {
+                var conv = getConv.Invoke(gridServiceInstance, new object[] { cell }) as Conveyor;
+                if (conv != null) return conv;
+            }
+        }
+        catch { }
+
+        if (miCellToWorld == null) return null;
+        try
+        {
+            var worldObj = miCellToWorld.Invoke(gridServiceInstance, new object[] { cell, 0f });
+            var center = worldObj is Vector3 world ? world : Vector3.zero;
+            var colliders = Physics2D.OverlapBoxAll((Vector2)center, Vector2.one * 0.9f, 0f);
+            foreach (var col in colliders)
+            {
+                if (col == null) continue;
+                var conv = col.GetComponent<Conveyor>() ?? col.GetComponentInChildren<Conveyor>(true);
+                if (conv != null) return conv;
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     string RotationToDirectionName(Quaternion q)
@@ -1591,6 +1677,8 @@ public class ConveyorPlacer : MonoBehaviour
                 try
                 {
                     var outDir = DirectionFromName(outDirName);
+                    if (WouldCreateHeadOnPair(cell, outDir))
+                        return;
                     bool shouldCurve = incomingDirection.HasValue && incomingDirection.Value != Direction.None && incomingDirection.Value != outDir;
                     if (shouldCurve)
                     {

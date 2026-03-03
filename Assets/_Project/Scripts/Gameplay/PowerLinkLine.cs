@@ -15,11 +15,12 @@ public class PowerLinkLine : MonoBehaviour
     [Header("Sag")]
     [SerializeField] bool useSagCurve = true;
     [SerializeField, Min(3)] int sagSegments = 8;
-    [SerializeField, Min(0f)] float baseSag = 0.03f;
-    [SerializeField, Min(0f)] float sagPerUnit = 0.02f;
-    [SerializeField, Min(0f)] float maxSag = 0.18f;
+    [SerializeField, Min(0f)] float baseSag = 0.08f;
+    [SerializeField, Min(0f)] float sagPerUnit = 0.05f;
+    [SerializeField, Min(0f)] float maxSag = 0.4f;
 
     readonly List<Vector2Int> cableCells = new List<Vector2Int>();
+    readonly List<Vector2Int> ownedCableCells = new List<Vector2Int>();
     static readonly HashSet<PowerLinkLine> ActiveLinks = new HashSet<PowerLinkLine>();
 
     PowerService powerService;
@@ -155,13 +156,18 @@ public class PowerLinkLine : MonoBehaviour
         for (int i = 0; i < path.Count; i++)
         {
             var cell = path[i];
-            if (!powerService.RegisterCable(cell))
+            bool registeredCell = powerService.RegisterCable(cell);
+            if (!registeredCell && !powerService.IsCableAt(cell))
             {
-                for (int j = 0; j < cableCells.Count; j++)
-                    powerService.UnregisterCable(cableCells[j]);
+                for (int j = 0; j < ownedCableCells.Count; j++)
+                    powerService.UnregisterCable(ownedCableCells[j]);
                 cableCells.Clear();
+                ownedCableCells.Clear();
                 return false;
             }
+
+            if (registeredCell)
+                ownedCableCells.Add(cell);
             cableCells.Add(cell);
         }
 
@@ -171,14 +177,15 @@ public class PowerLinkLine : MonoBehaviour
 
     void UnregisterCableCells()
     {
-        if (!registered && cableCells.Count == 0) return;
+        if (!registered && cableCells.Count == 0 && ownedCableCells.Count == 0) return;
         if (powerService == null) powerService = PowerService.Instance;
         if (powerService != null)
         {
-            for (int i = 0; i < cableCells.Count; i++)
-                powerService.UnregisterCable(cableCells[i]);
+            for (int i = 0; i < ownedCableCells.Count; i++)
+                powerService.UnregisterCable(ownedCableCells[i]);
         }
         cableCells.Clear();
+        ownedCableCells.Clear();
         registered = false;
     }
 
