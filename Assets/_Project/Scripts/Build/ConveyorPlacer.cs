@@ -400,7 +400,14 @@ public class ConveyorPlacer : MonoBehaviour
         if (!dragHasMoved)
         {
             RestoreGhostVisuals(false); 
-            PlaceBeltAtCell(dragStartCell, RotationToDirectionName(rotation));
+            var outDirName = RotationToDirectionName(rotation);
+            if (PlaceBeltAtCell(dragStartCell, outDirName))
+            {
+                var outDir = DirectionFromName(outDirName);
+                var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, outDir, null);
+                if (autoIncoming.HasValue && !WouldCreateOpposingPair(autoIncoming, outDirName))
+                    UpdateBeltDirectionFast(dragStartCell, outDirName, autoIncoming);
+            }
             FlushDeferredRegistrations();
             // Prevent an instant chain pull on the very next step
             BeltSimulationService.Instance?.SuppressNextStepPulls();
@@ -594,6 +601,10 @@ public class ConveyorPlacer : MonoBehaviour
             if (PlaceBeltAtCell(dragStartCell, dirName))
             {
                 dragPath.Add(dragStartCell);
+                var startOutDir = DirectionFromName(dirName);
+                var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, startOutDir, null);
+                if (autoIncoming.HasValue && !WouldCreateOpposingPair(autoIncoming, dirName))
+                    UpdateBeltDirectionFast(dragStartCell, dirName, autoIncoming);
             }
             else
             {
@@ -649,8 +660,10 @@ public class ConveyorPlacer : MonoBehaviour
                     var beforePrev = dragPath[dragPath.Count - 2];
                     incomingAtPrev = DirectionFromDelta(prevCell - beforePrev);
                 }
-                if (!WouldCreateOpposingPair(incomingAtPrev, dirNameNext))
-                    UpdateBeltDirectionFast(prevCell, dirNameNext, incomingAtPrev);
+                var outDir = DirectionFromName(dirNameNext);
+                var resolvedIncoming = ResolveIncomingDirectionForNewBelt(prevCell, outDir, incomingAtPrev);
+                if (!WouldCreateOpposingPair(resolvedIncoming, dirNameNext))
+                    UpdateBeltDirectionFast(prevCell, dirNameNext, resolvedIncoming);
                 lastDragCell = prevCell;
                 return;
             }
@@ -673,8 +686,11 @@ public class ConveyorPlacer : MonoBehaviour
                 var beforeTail = dragPath[dragPath.Count - 2];
                 incomingAtTail = DirectionFromDelta(tail - beforeTail);
             }
-            if (!WouldCreateOpposingPair(incomingAtTail, dirNameNext))
-                UpdateBeltDirectionFast(dragPath[dragPath.Count - 1], dirNameNext, incomingAtTail);
+            var tailCell = dragPath[dragPath.Count - 1];
+            var outDir = DirectionFromName(dirNameNext);
+            var resolvedIncoming = ResolveIncomingDirectionForNewBelt(tailCell, outDir, incomingAtTail);
+            if (!WouldCreateOpposingPair(resolvedIncoming, dirNameNext))
+                UpdateBeltDirectionFast(tailCell, dirNameNext, resolvedIncoming);
             lastDragCell = dragPath[dragPath.Count - 1];
             return;
         }
@@ -686,9 +702,11 @@ public class ConveyorPlacer : MonoBehaviour
             var prevCell = dragPath[dragPath.Count - 2];
             incomingDirection = DirectionFromDelta(lastDragCell - prevCell);
         }
-        if (WouldCreateOpposingPair(incomingDirection, dirNameNext))
+        var outDirForTail = DirectionFromName(dirNameNext);
+        var resolvedIncomingForTail = ResolveIncomingDirectionForNewBelt(lastDragCell, outDirForTail, incomingDirection);
+        if (WouldCreateOpposingPair(resolvedIncomingForTail, dirNameNext))
             return;
-        UpdateBeltDirectionFast(lastDragCell, dirNameNext, incomingDirection);
+        UpdateBeltDirectionFast(lastDragCell, dirNameNext, resolvedIncomingForTail);
 
         if (IsCellBlockedForBelt(nextCellMove)) return;
 
@@ -1129,6 +1147,147 @@ public class ConveyorPlacer : MonoBehaviour
         if (delta.y > 0) return Direction.Up;
         if (delta.y < 0) return Direction.Down;
         return Direction.None;
+    }
+
+    Direction? ResolveIncomingDirectionForNewBelt(Vector2Int cell, Direction outDir, Direction? preferredIncoming)
+    {
+        if (outDir == Direction.None) return null;
+
+        if (preferredIncoming.HasValue && preferredIncoming.Value != Direction.None)
+        {
+            if (preferredIncoming.Value == DirectionUtil.Opposite(outDir)) return null;
+            return preferredIncoming.Value;
+        }
+
+        var candidates = new HashSet<Direction>();
+        foreach (var d in CardinalDirections())
+        {
+            if (d == Direction.None) continue;
+            if (d == DirectionUtil.Opposite(outDir)) continue; // disallow input from the output side
+            var sourceCell = cell - DirectionUtil.DirVec(d);
+            if (HasNeighborOutputTowards(sourceCell, d))
+                candidates.Add(d);
+        }
+
+        if (candidates.Count != 1) return null;
+        foreach (var d in candidates) return d;
+        return null;
+    }
+
+    bool HasNeighborOutputTowards(Vector2Int sourceCell, Direction towardDir)
+    {
+        if (towardDir == Direction.None) return false;
+        var towardVec = DirectionUtil.DirVec(towardDir);
+        if (towardVec == Vector2Int.zero) return false;
+
+        // Existing/ghost belt source.
+        var neighborConv = GetConveyorAtCellFast(sourceCell);
+        if (neighborConv != null && neighborConv.direction == towardDir)
+            return true;
+
+        // Machine spawner source (press/colorizer/storage/mine).
+        if (TryGetMachineOutputVecAtCell(sourceCell, out var machineOutVec))
+            return machineOutVec == towardVec;
+
+        return false;
+    }
+
+    bool TryGetMachineOutputVecAtCell(Vector2Int cell, out Vector2Int outputVec)
+    {
+        outputVec = Vector2Int.zero;
+
+        // Registered machine cell first (fast path).
+        try
+        {
+            if (MachineRegistry.TryGet(cell, out var machine) && machine != null)
+            {
+                if (machine is PressMachine press && !press.isGhost)
+                {
+                    outputVec = NormalizeCardinal(press.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+                if (machine is ColorizerMachine colorizer && !colorizer.isGhost)
+                {
+                    outputVec = NormalizeCardinal(colorizer.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+                if (machine is StorageContainerMachine storage && !storage.isGhost)
+                {
+                    outputVec = NormalizeCardinal(storage.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+            }
+        }
+        catch { }
+
+        // Storage footprint blocker / non-registered machine lookup fallback.
+        try
+        {
+            var go = FindMachineAtCell(cell);
+            if (go != null)
+            {
+                var press = go.GetComponentInParent<PressMachine>();
+                if (press != null && !press.isGhost)
+                {
+                    outputVec = NormalizeCardinal(press.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+
+                var colorizer = go.GetComponentInParent<ColorizerMachine>();
+                if (colorizer != null && !colorizer.isGhost)
+                {
+                    outputVec = NormalizeCardinal(colorizer.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+
+                var storage = go.GetComponentInParent<StorageContainerMachine>();
+                if (storage != null && !storage.isGhost)
+                {
+                    outputVec = NormalizeCardinal(storage.OutputVec);
+                    return outputVec != Vector2Int.zero;
+                }
+            }
+        }
+        catch { }
+
+        // Sugar mine is not registered as IMachine; detect emitter footprint cell manually.
+        try
+        {
+            var gs = GridService.Instance;
+            if (gs != null)
+            {
+                var mines = UnityEngine.Object.FindObjectsByType<SugarMine>(FindObjectsSortMode.None);
+                float half = gs.CellSize * 0.5f;
+                foreach (var mine in mines)
+                {
+                    if (mine == null || mine.isGhost) continue;
+                    var dir = DirectionUtil.DirVec(mine.outputDirection);
+                    if (dir == Vector2Int.zero) continue;
+
+                    var baseCell = gs.WorldToCell(mine.transform.position - new Vector3(dir.x * half, dir.y * half, 0f));
+                    var emitCell = baseCell + dir;
+                    if (emitCell != cell) continue;
+
+                    outputVec = NormalizeCardinal(dir);
+                    return outputVec != Vector2Int.zero;
+                }
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    static Vector2Int NormalizeCardinal(Vector2Int v)
+    {
+        if (v == Vector2Int.zero) return Vector2Int.zero;
+        if (Mathf.Abs(v.x) >= Mathf.Abs(v.y)) return new Vector2Int(Math.Sign(v.x), 0);
+        return new Vector2Int(0, Math.Sign(v.y));
+    }
+
+    static Direction[] CardinalDirections()
+    {
+        return new[] { Direction.Up, Direction.Right, Direction.Down, Direction.Left };
     }
 
     bool WouldCreateOpposingPair(Direction? incomingDirection, string outDirName)

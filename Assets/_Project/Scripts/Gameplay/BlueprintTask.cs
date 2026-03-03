@@ -451,9 +451,28 @@ public class BlueprintTask : DroneTaskTarget
         if (sortingOrderOverride != int.MinValue)
         {
             var group = go.GetComponentInChildren<UnityEngine.Rendering.SortingGroup>(true);
-            if (group != null) group.sortingOrder = sortingOrderOverride;
             var srs = go.GetComponentsInChildren<SpriteRenderer>(true);
-            foreach (var sr in srs) sr.sortingOrder = sortingOrderOverride;
+            if (group != null)
+            {
+                // Keep child sprite relative ordering (e.g. overlays/attachments), only move the group.
+                group.sortingOrder = sortingOrderOverride;
+            }
+            else if (srs != null && srs.Length > 0)
+            {
+                int minOrder = int.MaxValue;
+                for (int i = 0; i < srs.Length; i++)
+                {
+                    if (srs[i] == null) continue;
+                    if (srs[i].sortingOrder < minOrder) minOrder = srs[i].sortingOrder;
+                }
+                if (minOrder == int.MaxValue) minOrder = 0;
+                int delta = sortingOrderOverride - minOrder;
+                for (int i = 0; i < srs.Length; i++)
+                {
+                    if (srs[i] == null) continue;
+                    srs[i].sortingOrder += delta;
+                }
+            }
         }
 
         var press = go.GetComponent<PressMachine>();

@@ -44,6 +44,11 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
     [Header("Debug")]
     [SerializeField] bool debugLogging = false;
 
+    [Header("Visual")]
+    [SerializeField] Transform drill;
+    [SerializeField, Min(0f)] float drillSpinDegreesPerSecond = 240f;
+    [SerializeField] bool drillSpinClockwise = true;
+
     [System.NonSerialized] public bool isGhost = false;
     public bool IsGhost => isGhost;
 
@@ -75,6 +80,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
     void Start()
     {
         if (isGhost) return;
+        TryCacheDrill();
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
         powerService?.RegisterConsumer(this);
     }
@@ -86,6 +92,12 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         GameTick.OnTickStart -= OnTick;
         if (powerService == null) powerService = PowerService.Instance;
         powerService?.UnregisterConsumer(this);
+    }
+
+    void Update()
+    {
+        if (isGhost) return;
+        SpinDrillIfWorking();
     }
 
     void OnTick()
@@ -100,8 +112,9 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         float rate = spawnsPerSecond;
         if (scaleBySugarEfficiency && GridService.Instance != null)
         {
-            var cell = GridService.Instance.WorldToCell(transform.position);
-            float eff = GridService.Instance.GetSugarEfficiency(cell);
+            var gs = GridService.Instance;
+            var cell = GetBaseCell(gs);
+            float eff = gs.GetSugarEfficiency(cell);
             rate *= Mathf.Max(0f, eff);
         }
         spawnProgress += rate / Mathf.Max(1f, tps);
@@ -115,7 +128,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
 
     public void SetFacing(Vector2Int dir)
     {
-        outputDirection = DirFromVec(dir);
+        outputDirection = DirFromVecHorizontal(dir);
     }
 
     void Spawn()
@@ -127,9 +140,10 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
             return;
         }
         var gs = GridService.Instance;
-        var baseCell = gs.WorldToCell(transform.position);
+        var baseCell = GetBaseCell(gs);
         var dir = DirectionUtil.DirVec(outputDirection);
-        var headCell = baseCell + dir;
+        var emitCell = baseCell + dir;
+        var headCell = baseCell + dir * 2;
 
         var item = new Item { id = nextItemId, type = ResolveItemType() };
 
@@ -138,7 +152,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         Vector2Int outputCell = baseCell;
         if (preferHeadCell)
         {
-            if (TrySendToMachine(gs, headCell, baseCell, item))
+            if (TrySendToMachine(gs, headCell, emitCell, item))
             {
                 delivered = true;
                 outputCell = headCell;
@@ -174,7 +188,7 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
                 spawnedOnBelt = true;
                 outputCell = baseCell;
             }
-            else if (!requireFreeHeadCell && TrySendToMachine(gs, headCell, baseCell, item))
+            else if (!requireFreeHeadCell && TrySendToMachine(gs, headCell, emitCell, item))
             {
                 delivered = true;
                 outputCell = headCell;
@@ -240,13 +254,48 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         return Mathf.Max(0f, powerUsageWatts);
     }
 
-    static Direction DirFromVec(Vector2Int dir)
+    Vector2Int GetBaseCell(GridService gs)
     {
-        if (dir == Vector2Int.up) return Direction.Up;
-        if (dir == Vector2Int.right) return Direction.Right;
-        if (dir == Vector2Int.down) return Direction.Down;
-        if (dir == Vector2Int.left) return Direction.Left;
+        if (gs == null) return Vector2Int.zero;
+        float half = gs.CellSize * 0.5f;
+        var dir = DirectionUtil.DirVec(outputDirection);
+        var offset = new Vector3(dir.x * half, dir.y * half, 0f);
+        return gs.WorldToCell(transform.position - offset);
+    }
+
+    static Direction DirFromVecHorizontal(Vector2Int dir)
+    {
+        if (dir.x < 0) return Direction.Left;
+        if (dir.x > 0) return Direction.Right;
         return Direction.Right;
+    }
+
+    void SpinDrillIfWorking()
+    {
+        if (drillSpinDegreesPerSecond <= 0f) return;
+        TryCacheDrill();
+        if (drill == null) return;
+        if (!IsOperationalNow()) return;
+
+        float sign = drillSpinClockwise ? -1f : 1f;
+        float delta = sign * drillSpinDegreesPerSecond * Time.deltaTime;
+        drill.Rotate(0f, 0f, delta, Space.Self);
+    }
+
+    bool IsOperationalNow()
+    {
+        if (!running) return false;
+        if (IsStopped) return false;
+        if (outputBlocked) return false;
+        if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play) return false;
+        return HasPower();
+    }
+
+    void TryCacheDrill()
+    {
+        if (drill != null) return;
+        var t = transform.Find("drill");
+        if (t != null) drill = t;
     }
 
     bool TrySendToMachine(GridService gs, Vector2Int outCell, Vector2Int sourceCell, Item item)

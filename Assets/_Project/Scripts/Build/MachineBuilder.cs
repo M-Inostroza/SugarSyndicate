@@ -34,6 +34,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
+    [SerializeField, Min(0f)] float ghostRotationSpeedDegPerSec = 1080f;
     [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
     [SerializeField] Color blockedGhostTint = new Color(1f, 0.25f, 0.25f, 0.75f);
     [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
@@ -198,12 +199,10 @@ public class MachineBuilder : MonoBehaviour
             {
                 // Drag to set orientation, release to commit
                 if (!TryCellFromWorld(world, out var curCell)) return;
-            var dir = curCell - baseCell;
-            dir = Mathf.Abs(dir.x) >= Mathf.Abs(dir.y) ? new Vector2Int(Mathf.Clamp(dir.x, -1, 1), 0) : new Vector2Int(0, Mathf.Clamp(dir.y, -1, 1));
-            if (dir == Vector2Int.zero) dir = GetDefaultFacing();
-            UpdateGhost(baseCell, dir);
+                var dir = GetPlacementDirection(baseCell, curCell);
+                UpdateGhost(baseCell, dir);
 
-            if (Input.GetMouseButtonUp(0))
+                if (Input.GetMouseButtonUp(0))
                 {
                     // Commit the press but STAY in Build mode so user can place another
                     Commit(baseCell, dir);
@@ -809,7 +808,15 @@ public class MachineBuilder : MonoBehaviour
         else if (outputDir == new Vector2Int(0, 1)) z = 90f;
         else if (outputDir == new Vector2Int(-1, 0)) z = 180f;
         else if (outputDir == new Vector2Int(0, -1)) z = 270f;
-        ghostGO.transform.rotation = Quaternion.Euler(0, 0, z);
+        var targetRot = Quaternion.Euler(0f, 0f, z);
+        if (ghostRotationSpeedDegPerSec <= 0f)
+            ghostGO.transform.rotation = targetRot;
+        else
+            ghostGO.transform.rotation = Quaternion.RotateTowards(
+                ghostGO.transform.rotation,
+                targetRot,
+                ghostRotationSpeedDegPerSec * Time.deltaTime
+            );
         // Update position to footprint center
         ghostGO.transform.position = GetFootprintCenterWorld(cell, outputDir);
         if (ghostPress != null) ghostPress.facingVec = outputDir;
@@ -819,7 +826,8 @@ public class MachineBuilder : MonoBehaviour
         if (ghostSolarPanel != null) ghostSolarPanel.facingVec = outputDir;
         if (ghostMine != null) ghostMine.SetFacing(outputDir);
         var footprint = GetFootprintCells(cell, outputDir);
-        UpdateGhostTint(IsAnyBlocked(footprint));
+        bool blocked = IsAnyBlocked(footprint);
+        UpdateGhostTint(blocked);
     }
 
     void ApplyGhostSorting(GameObject go)
@@ -898,14 +906,6 @@ public class MachineBuilder : MonoBehaviour
             ClearPreviewState(clearActiveSelection: false);
             return;
         }
-        if (RequiresSugarCell() && !IsSugarCell(cell))
-        {
-            Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
-            OnboardingManager.Instance?.NotifyMinePlacementInvalid(cell);
-            if (ghostGO != null) Destroy(ghostGO);
-            ClearPreviewState(clearActiveSelection: false);
-            return;
-        }
         if (activeName == "DroneHQ" && (DroneHQ.Instance != null || BlueprintTask.HasHqBlueprint))
         {
             Debug.LogWarning("[MachineBuilder] Only one Drone HQ is allowed.");
@@ -915,6 +915,14 @@ public class MachineBuilder : MonoBehaviour
         }
 
         var footprint = GetFootprintCells(cell, outputDir);
+        if (RequiresSugarCell() && !IsSugarCell(cell))
+        {
+            Debug.LogWarning("[MachineBuilder] Mine must be placed on sugar.");
+            OnboardingManager.Instance?.NotifyMinePlacementInvalid(cell);
+            if (ghostGO != null) Destroy(ghostGO);
+            ClearPreviewState(clearActiveSelection: false);
+            return;
+        }
         if (activeName == "SolarPanel")
         {
             var onboarding = OnboardingManager.Instance;
@@ -1161,9 +1169,11 @@ public class MachineBuilder : MonoBehaviour
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)
     {
-        if (activeName == "StorageContainer" || activeName == "SolarPanel")
+        if (activeName == "StorageContainer" || activeName == "SolarPanel" || activeName == "Mine")
         {
             var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
+            if (activeName == "Mine")
+                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
             return new List<Vector2Int> { origin, origin + dir };
         }
         return new List<Vector2Int> { origin };
@@ -1184,5 +1194,23 @@ public class MachineBuilder : MonoBehaviour
     Vector2Int GetDefaultFacing()
     {
         return activeName == "SolarPanel" ? Vector2Int.up : Vector2Int.right;
+    }
+
+    Vector2Int GetPlacementDirection(Vector2Int origin, Vector2Int current)
+    {
+        var delta = current - origin;
+        if (activeName == "Mine")
+        {
+            if (delta.x > 0) return Vector2Int.right;
+            if (delta.x < 0) return Vector2Int.left;
+            return GetDefaultFacing();
+        }
+
+        var dir = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y)
+            ? new Vector2Int(Mathf.Clamp(delta.x, -1, 1), 0)
+            : new Vector2Int(0, Mathf.Clamp(delta.y, -1, 1));
+
+        if (dir == Vector2Int.zero) dir = GetDefaultFacing();
+        return dir;
     }
 }
