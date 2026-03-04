@@ -34,7 +34,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
-    [SerializeField, Min(0f)] float ghostRotationSpeedDegPerSec = 1080f;
+    [SerializeField, Min(0f)] float ghostRotationSpeedDegPerSec = 1620f;
     [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
     [SerializeField] Color blockedGhostTint = new Color(1f, 0.25f, 0.25f, 0.75f);
     [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
@@ -1169,18 +1169,50 @@ public class MachineBuilder : MonoBehaviour
 
     List<Vector2Int> GetFootprintCells(Vector2Int origin, Vector2Int facing)
     {
-        if (activeName == "StorageContainer" || activeName == "SolarPanel" || activeName == "Mine")
+        if (activeName == "PressMachine")
+        {
+            var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
+            if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
+                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
+            else
+                dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
+
+            var side = new Vector2Int(dir.y, -dir.x);
+            return new List<Vector2Int> { origin, origin + side, origin - side, origin + dir };
+        }
+
+        if (activeName == "StorageContainer" || activeName == "Mine")
         {
             var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
             if (activeName == "Mine")
                 dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
             return new List<Vector2Int> { origin, origin + dir };
         }
+        if (activeName == "SolarPanel")
+        {
+            var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
+            dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
+            return new List<Vector2Int> { origin, origin + dir, origin + (dir * 2) };
+        }
         return new List<Vector2Int> { origin };
     }
 
     Vector3 GetFootprintCenterWorld(Vector2Int origin, Vector2Int facing)
     {
+        if (activeName == "PressMachine" && miCellToWorld != null)
+        {
+            var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
+            if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
+                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
+            else
+                dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
+
+            var center = (Vector3)miCellToWorld.Invoke(grid, new object[] { origin, 0f });
+            var gs = grid as GridService ?? GridService.Instance;
+            float half = gs != null ? gs.CellSize * 0.5f : 0.5f;
+            return center + new Vector3(dir.x * half, dir.y * half, 0f);
+        }
+
         var cells = GetFootprintCells(origin, facing);
         if (cells.Count == 0 || miCellToWorld == null) return Vector3.zero;
         Vector3 sum2 = Vector3.zero;
@@ -1193,13 +1225,13 @@ public class MachineBuilder : MonoBehaviour
 
     Vector2Int GetDefaultFacing()
     {
-        return activeName == "SolarPanel" ? Vector2Int.up : Vector2Int.right;
+        return Vector2Int.right;
     }
 
     Vector2Int GetPlacementDirection(Vector2Int origin, Vector2Int current)
     {
         var delta = current - origin;
-        if (activeName == "Mine")
+        if (activeName == "Mine" || activeName == "SolarPanel")
         {
             if (delta.x > 0) return Vector2Int.right;
             if (delta.x < 0) return Vector2Int.left;

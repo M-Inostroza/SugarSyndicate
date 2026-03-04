@@ -7227,6 +7227,7 @@ MonoBehaviour:
   assistCamera: {fileID: 0}
   assistEdgeThreshold: 0.5
   assistPanSpeed: 4
+  assistStartDelay: 0.12
   assistConstrainToGrid: 1
   assistEdgePadding: 0.1
 --- !u!4 &958606651
@@ -9370,7 +9371,7 @@ MonoBehaviour:
   cableHintCooldownSeconds: 0.2
   useNodeLinkCables: 1
   cableLineWidth: 0.09
-  cableLineColor: {r: 0.735849, g: 0.7099212, b: 0.5206479, a: 1}
+  cableLineColor: {r: 0.5, g: 0.49129504, b: 0.4316038, a: 0.50980395}
   cableLineMaterial: {fileID: 0}
   cableSortingLayerName: Default
   cableSortingOrder: 5000
@@ -16422,6 +16423,7 @@ MonoBehaviour:
   sugarOverlay: {fileID: 0}
   ghostSortingOrder: 10000
   mineSortingOrder: 1100
+  ghostRotationSpeedDegPerSec: 1080
   ghostTint: {r: 0.3607843, g: 0.6973558, b: 0.94509804, a: 0.78039217}
   blockedGhostTint: {r: 1, g: 0.25, b: 0.25, a: 0.75}
   blueprintTint: {r: 0.25, g: 0.8321123, b: 1, a: 0.6}

@@ -9,7 +9,7 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
     [SerializeField] PowerService powerService;
 
     [Header("Orientation")]
-    [Tooltip("Facing vector. Right=(1,0), Left=(-1,0), Up=(0,1), Down=(0,-1)")]
+    [Tooltip("Facing vector. Horizontal only: Right=(1,0), Left=(-1,0).")]
     public Vector2Int facingVec = new Vector2Int(1, 0);
 
     public enum PowerOutputFace
@@ -37,7 +37,7 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
     {
         get
         {
-            yield return outputFace == PowerOutputFace.BaseCell ? baseCell : extraCell;
+            yield return outputFace == PowerOutputFace.BaseCell ? baseCell : frontCell;
         }
     }
 
@@ -52,7 +52,7 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
         }
         else
         {
-            if (cell != extraCell) return false;
+            if (cell != frontCell) return false;
             direction = facingVec;
         }
 
@@ -75,9 +75,10 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
     }
 
     Vector2Int baseCell;
-    Vector2Int extraCell;
+    Vector2Int midCell;
+    Vector2Int frontCell;
     bool registered;
-    FootprintBlocker footprintBlocker;
+    readonly List<FootprintBlocker> footprintBlockers = new();
     TimeManager timeManager;
     float currentOutputWatts;
     float targetOutputWatts;
@@ -147,8 +148,12 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
         if (registered)
         {
             MachineRegistry.Unregister(this);
-            if (footprintBlocker != null)
-                MachineRegistry.Unregister(footprintBlocker);
+            for (int i = 0; i < footprintBlockers.Count; i++)
+            {
+                if (footprintBlockers[i] != null)
+                    MachineRegistry.Unregister(footprintBlockers[i]);
+            }
+            footprintBlockers.Clear();
         }
 
         if (timeManager != null)
@@ -161,7 +166,8 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
         if (grid != null)
         {
             ClearMachineCell(baseCell);
-            ClearMachineCell(extraCell);
+            ClearMachineCell(midCell);
+            ClearMachineCell(frontCell);
         }
     }
 
@@ -170,40 +176,47 @@ public class SolarPanelMachine : MonoBehaviour, IMachine, IPowerSourceNode, IPow
         if (grid == null) return;
         facingVec = NormalizeFacing(facingVec);
         baseCell = ComputeBaseCell();
-        extraCell = baseCell + facingVec;
+        midCell = baseCell + facingVec;
+        frontCell = baseCell + (facingVec * 2);
 
         grid.SetMachineCell(baseCell);
-        grid.SetMachineCell(extraCell);
+        grid.SetMachineCell(midCell);
+        grid.SetMachineCell(frontCell);
 
-        transform.position = GetFootprintCenterWorld(baseCell, extraCell, transform.position.z);
+        transform.position = GetFootprintCenterWorld(baseCell, midCell, frontCell, transform.position.z);
 
         MachineRegistry.Register(this);
-        footprintBlocker = new FootprintBlocker(extraCell);
-        MachineRegistry.Register(footprintBlocker);
+        RegisterFootprintBlocker(midCell);
+        RegisterFootprintBlocker(frontCell);
         registered = true;
     }
 
     Vector2Int ComputeBaseCell()
     {
-        float half = grid.CellSize * 0.5f;
-        var offset = new Vector3(facingVec.x * half, facingVec.y * half, 0f);
+        float oneCell = grid.CellSize;
+        var offset = new Vector3(facingVec.x * oneCell, facingVec.y * oneCell, 0f);
         return grid.WorldToCell(transform.position - offset);
     }
 
     static Vector2Int NormalizeFacing(Vector2Int dir)
     {
-        if (dir == Vector2Int.zero) return Vector2Int.right;
-        if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
-            return new Vector2Int(Math.Sign(dir.x), 0);
-        return new Vector2Int(0, Math.Sign(dir.y));
+        return dir.x < 0 ? Vector2Int.left : Vector2Int.right;
     }
 
-    Vector3 GetFootprintCenterWorld(Vector2Int a, Vector2Int b, float z)
+    void RegisterFootprintBlocker(Vector2Int cell)
+    {
+        var blocker = new FootprintBlocker(cell);
+        footprintBlockers.Add(blocker);
+        MachineRegistry.Register(blocker);
+    }
+
+    Vector3 GetFootprintCenterWorld(Vector2Int a, Vector2Int b, Vector2Int c, float z)
     {
         if (grid == null) return transform.position;
         var w1 = grid.CellToWorld(a, z);
         var w2 = grid.CellToWorld(b, z);
-        return (w1 + w2) * 0.5f;
+        var w3 = grid.CellToWorld(c, z);
+        return (w1 + w2 + w3) / 3f;
     }
 
     void ClearMachineCell(Vector2Int cell)

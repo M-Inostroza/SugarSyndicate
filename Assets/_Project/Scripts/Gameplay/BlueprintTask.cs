@@ -443,6 +443,17 @@ public class BlueprintTask : DroneTaskTarget
             return;
 
         var pos = ComputeFootprintCenter();
+        if (buildPrefab.GetComponent<PressMachine>() != null)
+        {
+            var center = grid.CellToWorld(footprintCells[0], transform.position.z);
+            float half = grid.CellSize * 0.5f;
+            var dir = facingVec;
+            if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
+                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
+            else
+                dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
+            pos = center + new Vector3(dir.x * half, dir.y * half, 0f);
+        }
         var go = Instantiate(buildPrefab, pos, buildRotation);
         var tag = go.GetComponent<BuildCostTag>();
         if (tag == null) tag = go.AddComponent<BuildCostTag>();

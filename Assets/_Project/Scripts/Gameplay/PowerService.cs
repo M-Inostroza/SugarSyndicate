@@ -64,6 +64,8 @@ public class PowerService : MonoBehaviour
     readonly HashSet<Vector2Int> poles = new();
     readonly HashSet<Vector2Int> cableBlueprints = new();
     readonly HashSet<Vector2Int> poleBlueprints = new();
+    readonly Dictionary<Vector2Int, int> cableEndpointCounts = new();
+    readonly Dictionary<Vector2Int, int> cablePassThroughCounts = new();
     readonly HashSet<Vector2Int> poweredCables = new();
     readonly HashSet<Vector2Int> poweredPoles = new();
     readonly Dictionary<Vector2Int, int> bestDistance = new();
@@ -469,10 +471,49 @@ public class PowerService : MonoBehaviour
 
     public bool AllowsTerminalConnection(Vector2Int terminalCell, Vector2Int neighborCell)
     {
+        if (!CanTerminalAttachToCableCell(neighborCell, includeBlueprints: true)) return false;
         if (!terminalDirectionCounts.TryGetValue(terminalCell, out var counts)) return false;
         var delta = neighborCell - terminalCell;
         if (!TryGetDirection(delta, out var dir)) return false;
         return GetDirectionCount(counts, dir) > 0;
+    }
+
+    public void RegisterCableEndpoint(Vector2Int cell)
+    {
+        IncrementCellCount(cableEndpointCounts, cell);
+        MarkNetworkDirty();
+        MarkPlacementDirty();
+    }
+
+    public void UnregisterCableEndpoint(Vector2Int cell)
+    {
+        DecrementCellCount(cableEndpointCounts, cell);
+        MarkNetworkDirty();
+        MarkPlacementDirty();
+    }
+
+    public void RegisterCablePassThrough(Vector2Int cell)
+    {
+        IncrementCellCount(cablePassThroughCounts, cell);
+        MarkNetworkDirty();
+        MarkPlacementDirty();
+    }
+
+    public void UnregisterCablePassThrough(Vector2Int cell)
+    {
+        DecrementCellCount(cablePassThroughCounts, cell);
+        MarkNetworkDirty();
+        MarkPlacementDirty();
+    }
+
+    public bool IsCableEndpoint(Vector2Int cell)
+    {
+        return cableEndpointCounts.TryGetValue(cell, out var count) && count > 0;
+    }
+
+    public bool IsCablePassThrough(Vector2Int cell)
+    {
+        return cablePassThroughCounts.TryGetValue(cell, out var count) && count > 0;
     }
 
     void TryHookTimeManager()
@@ -750,11 +791,11 @@ public class PowerService : MonoBehaviour
 
     int GetNetworkIdAtCellOrAdjacent(Vector2Int cell)
     {
-        if (poweredNetworkIds.TryGetValue(cell, out var id)) return id;
+        if (TryGetPoweredAttachmentNetworkId(cell, out var id)) return id;
         foreach (var dir in NeighborDirs)
         {
             var next = cell + dir;
-            if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+            if (TryGetPoweredAttachmentNetworkId(next, out id)) return id;
         }
         return -1;
     }
@@ -782,7 +823,10 @@ public class PowerService : MonoBehaviour
     public bool IsCellOccupiedOrBlueprint(Vector2Int cell) => IsCellOccupied(cell) || cableBlueprints.Contains(cell) || poleBlueprints.Contains(cell);
     public bool IsCellPoweredOrAdjacent(Vector2Int cell)
     {
-        return IsCellPowered(cell);
+        if (poweredPoles.Contains(cell)) return true;
+        if (poweredCables.Contains(cell) && CanTerminalAttachToCableCell(cell, includeBlueprints: false))
+            return true;
+        return false;
     }
 
     public bool RegisterCable(Vector2Int cell)
@@ -802,6 +846,8 @@ public class PowerService : MonoBehaviour
     {
         if (cables.Remove(cell))
         {
+            cableEndpointCounts.Remove(cell);
+            cablePassThroughCounts.Remove(cell);
             MarkNetworkDirty();
             MarkPlacementDirty();
         }
@@ -931,7 +977,7 @@ public class PowerService : MonoBehaviour
             foreach (var dir in NeighborDirs)
             {
                 var next = step.cell + dir;
-                if (poles.Contains(next))
+                if (poles.Contains(next) && CanTerminalAttachToCableCell(step.cell, includeBlueprints: false))
                     PowerPole(next, step.cell, queue);
 
                 if (HasCableLengthLimit && step.distance >= maxCableLength)
@@ -1006,18 +1052,18 @@ public class PowerService : MonoBehaviour
     {
         foreach (var cell in source.PowerCells)
         {
-            if (poweredNetworkIds.TryGetValue(cell, out var id)) return id;
+            if (TryGetPoweredAttachmentNetworkId(cell, out var id)) return id;
             if (TryGetSourceOutputDirection(source, cell, out var dir))
             {
                 var next = cell + dir;
-                if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+                if (TryGetPoweredAttachmentNetworkId(next, out id)) return id;
             }
             else
             {
                 foreach (var d in NeighborDirs)
                 {
                     var next = cell + d;
-                    if (poweredNetworkIds.TryGetValue(next, out id)) return id;
+                    if (TryGetPoweredAttachmentNetworkId(next, out id)) return id;
                 }
             }
         }
@@ -1056,7 +1102,7 @@ public class PowerService : MonoBehaviour
             foreach (var dir in NeighborDirs)
             {
                 var next = step.cell + dir;
-                if (IsAnyPole(next))
+                if (IsAnyPole(next) && CanTerminalAttachToCableCell(step.cell, includeBlueprints: true))
                     SeedPlacementFromPole(next, queue);
 
                 if (HasCableLengthLimit && step.distance >= maxCableLength)
@@ -1093,7 +1139,7 @@ public class PowerService : MonoBehaviour
             var next = cell + d;
             if (IsAnyPole(next))
                 SeedPlacementFromPole(next, queue);
-            if (IsAnyCable(next))
+            if (CanTerminalAttachToCableCell(next, includeBlueprints: true))
                 EnqueuePlacementCable(next, 1, queue);
         }
     }
@@ -1103,7 +1149,7 @@ public class PowerService : MonoBehaviour
         var next = cell + dir;
         if (IsAnyPole(next))
             SeedPlacementFromPole(next, queue);
-        if (IsAnyCable(next))
+        if (CanTerminalAttachToCableCell(next, includeBlueprints: true))
             EnqueuePlacementCable(next, 1, queue);
     }
 
@@ -1114,7 +1160,7 @@ public class PowerService : MonoBehaviour
         foreach (var dir in NeighborDirs)
         {
             var next = cell + dir;
-            if (IsAnyCable(next))
+            if (CanTerminalAttachToCableCell(next, includeBlueprints: true))
                 EnqueuePlacementCable(next, 1, queue);
         }
     }
@@ -1183,7 +1229,7 @@ public class PowerService : MonoBehaviour
     {
         if (poles.Contains(cell))
             PowerPole(cell, cell, queue);
-        if (cables.Contains(cell))
+        if (CanTerminalAttachToCableCell(cell, includeBlueprints: false))
             EnqueueCable(cell, 1, queue);
 
         if (TryGetSourceOutputDirection(source, cell, out var dir))
@@ -1197,7 +1243,7 @@ public class PowerService : MonoBehaviour
             var next = cell + d;
             if (poles.Contains(next))
                 PowerPole(next, cell, queue);
-            if (cables.Contains(next))
+            if (CanTerminalAttachToCableCell(next, includeBlueprints: false))
                 EnqueueCable(next, 1, queue);
         }
     }
@@ -1207,7 +1253,7 @@ public class PowerService : MonoBehaviour
         var next = cell + dir;
         if (poles.Contains(next))
             PowerPole(next, cell, queue);
-        if (cables.Contains(next))
+        if (CanTerminalAttachToCableCell(next, includeBlueprints: false))
             EnqueueCable(next, 1, queue);
     }
 
@@ -1240,7 +1286,7 @@ public class PowerService : MonoBehaviour
         {
             var next = cell + dir;
             if (next == inputCell) continue;
-            if (cables.Contains(next))
+            if (CanTerminalAttachToCableCell(next, includeBlueprints: false))
                 EnqueueCable(next, 1, queue);
         }
     }
@@ -1268,13 +1314,59 @@ public class PowerService : MonoBehaviour
     {
         foreach (var cell in consumer.PowerCells)
         {
-            if (IsCellPowered(cell)) return true;
+            if (poweredPoles.Contains(cell)) return true;
+            if (poweredCables.Contains(cell) && CanTerminalAttachToCableCell(cell, includeBlueprints: false))
+                return true;
             foreach (var dir in NeighborDirs)
             {
-                if (IsCellPowered(cell + dir))
+                var next = cell + dir;
+                if (poweredPoles.Contains(next)) return true;
+                if (poweredCables.Contains(next) && CanTerminalAttachToCableCell(next, includeBlueprints: false))
                     return true;
             }
         }
         return false;
+    }
+
+    bool CanTerminalAttachToCableCell(Vector2Int cableCell, bool includeBlueprints)
+    {
+        bool hasCable = cables.Contains(cableCell);
+        if (!hasCable)
+            return includeBlueprints && cableBlueprints.Contains(cableCell);
+
+        if (!IsCablePassThrough(cableCell))
+            return true;
+
+        return IsCableEndpoint(cableCell);
+    }
+
+    bool TryGetPoweredAttachmentNetworkId(Vector2Int cell, out int networkId)
+    {
+        networkId = -1;
+
+        if (poweredPoles.Contains(cell))
+            return poweredNetworkIds.TryGetValue(cell, out networkId);
+
+        if (!poweredCables.Contains(cell))
+            return false;
+        if (!CanTerminalAttachToCableCell(cell, includeBlueprints: false))
+            return false;
+        return poweredNetworkIds.TryGetValue(cell, out networkId);
+    }
+
+    static void IncrementCellCount(Dictionary<Vector2Int, int> counts, Vector2Int cell)
+    {
+        if (counts.TryGetValue(cell, out var current))
+            counts[cell] = current + 1;
+        else
+            counts[cell] = 1;
+    }
+
+    static void DecrementCellCount(Dictionary<Vector2Int, int> counts, Vector2Int cell)
+    {
+        if (!counts.TryGetValue(cell, out var current)) return;
+        current--;
+        if (current <= 0) counts.Remove(cell);
+        else counts[cell] = current;
     }
 }

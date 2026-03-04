@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 // Simple press machine with processing time and gated input/output.
@@ -83,8 +84,27 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         }
     }
 
+    class FootprintBlocker : IMachine
+    {
+        readonly Vector2Int cellPos;
+
+        public FootprintBlocker(Vector2Int cell)
+        {
+            cellPos = cell;
+        }
+
+        public Vector2Int Cell => cellPos;
+        public Vector2Int InputVec => Vector2Int.zero;
+        public bool CanAcceptFrom(Vector2Int approachFromVec) => false;
+        public bool TryStartProcess(Item item) => false;
+    }
+	
     Vector2Int cell;
+    Vector2Int outputFootprintCell;
+    Vector2Int sideCellA;
+    Vector2Int sideCellB;
     bool registered;
+    readonly List<FootprintBlocker> footprintBlockers = new();
 
     // State
     bool busy;               // true after accepting an input until output successfully spawns
@@ -129,8 +149,6 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         if (isGhost || grid == null) return;
 
         TryRegisterAsMachineAndSnap();
-        MachineRegistry.Register(this);
-        registered = true;
         DLog($"[PressMachine] Registered at cell {cell} facing {OutputVec}");
 
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
@@ -171,12 +189,19 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             }
             if (!registered) return;
             MachineRegistry.Unregister(this);
+            for (int i = 0; i < footprintBlockers.Count; i++)
+            {
+                if (footprintBlockers[i] == null) continue;
+                MachineRegistry.Unregister(footprintBlockers[i]);
+            }
+            footprintBlockers.Clear();
             if (grid == null) grid = GridService.Instance;
             if (grid != null)
             {
-                grid.ClearCell(cell);
-                var c = grid.GetCell(cell);
-                if (c != null) c.hasMachine = false;
+                ClearMachineCell(cell);
+                ClearMachineCell(outputFootprintCell);
+                ClearMachineCell(sideCellA);
+                ClearMachineCell(sideCellB);
             }
         }
         catch { }
@@ -190,7 +215,25 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             press = pm;
             return true;
         }
+
+        var all = UnityEngine.Object.FindObjectsByType<PressMachine>(FindObjectsSortMode.None);
+        for (int i = 0; i < all.Length; i++)
+        {
+            var candidate = all[i];
+            if (candidate == null || candidate.isGhost) continue;
+            if (!candidate.OccupiesCell(c)) continue;
+            press = candidate;
+            return true;
+        }
         return false;
+    }
+
+    public bool OccupiesCell(Vector2Int queryCell)
+    {
+        return queryCell == cell
+            || queryCell == outputFootprintCell
+            || queryCell == sideCellA
+            || queryCell == sideCellB;
     }
 
     public bool CanAcceptFrom(Vector2Int approachFromVec)
@@ -223,13 +266,68 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             if (grid == null) grid = GridService.Instance;
             if (grid == null) { Debug.LogWarning("[PressMachine] GridService not found"); return; }
 
-            cell = grid.WorldToCell(transform.position);
+            facingVec = NormalizeFacing(facingVec);
+            cell = ComputeCenterCellFromTransform();
+
+            var sideDir = PerpendicularClockwise(OutputVec);
+            outputFootprintCell = cell + OutputVec;
+            sideCellA = cell + sideDir;
+            sideCellB = cell - sideDir;
+
             grid.SetMachineCell(cell);
-            // snap to center
-            var world = grid.CellToWorld(cell, transform.position.z);
-            transform.position = world;
+            grid.SetMachineCell(outputFootprintCell);
+            grid.SetMachineCell(sideCellA);
+            grid.SetMachineCell(sideCellB);
+
+            transform.position = GetFootprintCenterWorld(transform.position.z);
+
+            MachineRegistry.Register(this);
+            RegisterFootprintBlocker(outputFootprintCell);
+            RegisterFootprintBlocker(sideCellA);
+            RegisterFootprintBlocker(sideCellB);
+            registered = true;
         }
         catch (Exception ex) { DWarn($"[PressMachine] Registration failed: {ex.Message}"); }
+    }
+
+    Vector2Int ComputeCenterCellFromTransform()
+    {
+        float half = grid.CellSize * 0.5f;
+        var offset = new Vector3(OutputVec.x * half, OutputVec.y * half, 0f);
+        return grid.WorldToCell(transform.position - offset);
+    }
+
+    static Vector2Int NormalizeFacing(Vector2Int dir)
+    {
+        if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
+            return dir.x < 0 ? Vector2Int.left : Vector2Int.right;
+        return dir.y < 0 ? Vector2Int.down : Vector2Int.up;
+    }
+
+    static Vector2Int PerpendicularClockwise(Vector2Int dir)
+    {
+        return new Vector2Int(dir.y, -dir.x);
+    }
+
+    Vector3 GetFootprintCenterWorld(float z)
+    {
+        var center = grid.CellToWorld(cell, z);
+        float half = grid.CellSize * 0.5f;
+        return center + new Vector3(OutputVec.x * half, OutputVec.y * half, 0f);
+    }
+
+    void RegisterFootprintBlocker(Vector2Int blockerCell)
+    {
+        var blocker = new FootprintBlocker(blockerCell);
+        footprintBlockers.Add(blocker);
+        MachineRegistry.Register(blocker);
+    }
+
+    void ClearMachineCell(Vector2Int targetCell)
+    {
+        grid.ClearCell(targetCell);
+        var c = grid.GetCell(targetCell);
+        if (c != null) c.hasMachine = false;
     }
 
     void EnsureStorageDisplay()
@@ -457,10 +555,11 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             return false;
         }
 
-        // Compute out cell
-        var outCell = cell + OutputVec;
+        // Output starts at the T arm and ejects one cell beyond it.
+        var outputSourceCell = cell + OutputVec;
+        var outCell = outputSourceCell + OutputVec;
 
-        if (!TryResolveOutputTarget(outCell, out var targetMachine))
+        if (!TryResolveOutputTarget(outCell, outputSourceCell, out var targetMachine))
         {
             // Keep waitingToOutput=true; try again on a later tick
             return false;
@@ -512,14 +611,14 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         return true;
     }
 
-    bool TryResolveOutputTarget(Vector2Int outCell, out IMachine targetMachine)
+    bool TryResolveOutputTarget(Vector2Int outCell, Vector2Int sourceCell, out IMachine targetMachine)
     {
         targetMachine = null;
         try
         {
             if (MachineRegistry.TryGet(outCell, out var machine) && machine is IMachineStorageWithCapacity)
             {
-                var approachFromVec = cell - outCell;
+                var approachFromVec = sourceCell - outCell;
                 bool accepts = false;
                 try { accepts = machine.CanAcceptFrom(approachFromVec); } catch { return false; }
                 if (!accepts) return false;

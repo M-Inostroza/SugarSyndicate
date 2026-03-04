@@ -1422,6 +1422,18 @@ public class ConveyorPlacer : MonoBehaviour
 
         try
         {
+            var presses = UnityEngine.Object.FindObjectsByType<PressMachine>(FindObjectsSortMode.None);
+            foreach (var press in presses)
+            {
+                if (press == null || press.isGhost) continue;
+                if (press.OccupiesCell(cell))
+                    return press.gameObject;
+            }
+        }
+        catch { }
+
+        try
+        {
             var storages = UnityEngine.Object.FindObjectsByType<StorageContainerMachine>(FindObjectsSortMode.None);
             foreach (var storage in storages)
             {

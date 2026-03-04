@@ -14,13 +14,15 @@ public class PowerLinkLine : MonoBehaviour
     [SerializeField] int lineSortingOrder = 5000;
     [Header("Sag")]
     [SerializeField] bool useSagCurve = true;
-    [SerializeField, Min(3)] int sagSegments = 8;
-    [SerializeField, Min(0f)] float baseSag = 0.08f;
-    [SerializeField, Min(0f)] float sagPerUnit = 0.05f;
-    [SerializeField, Min(0f)] float maxSag = 0.4f;
+    [SerializeField, Min(3)] int sagSegments = 10;
+    [SerializeField, Min(0f)] float baseSag = 0.12f;
+    [SerializeField, Min(0f)] float sagPerUnit = 0.075f;
+    [SerializeField, Min(0f)] float maxSag = 0.6f;
 
     readonly List<Vector2Int> cableCells = new List<Vector2Int>();
     readonly List<Vector2Int> ownedCableCells = new List<Vector2Int>();
+    readonly List<Vector2Int> endpointCells = new List<Vector2Int>();
+    readonly List<Vector2Int> passThroughCells = new List<Vector2Int>();
     static readonly HashSet<PowerLinkLine> ActiveLinks = new HashSet<PowerLinkLine>();
 
     PowerService powerService;
@@ -163,6 +165,8 @@ public class PowerLinkLine : MonoBehaviour
                     powerService.UnregisterCable(ownedCableCells[j]);
                 cableCells.Clear();
                 ownedCableCells.Clear();
+                endpointCells.Clear();
+                passThroughCells.Clear();
                 return false;
             }
 
@@ -171,22 +175,59 @@ public class PowerLinkLine : MonoBehaviour
             cableCells.Add(cell);
         }
 
+        RegisterCableRoles(path);
         registered = cableCells.Count > 0;
         return registered;
     }
 
     void UnregisterCableCells()
     {
-        if (!registered && cableCells.Count == 0 && ownedCableCells.Count == 0) return;
+        if (!registered
+            && cableCells.Count == 0
+            && ownedCableCells.Count == 0
+            && endpointCells.Count == 0
+            && passThroughCells.Count == 0) return;
         if (powerService == null) powerService = PowerService.Instance;
         if (powerService != null)
         {
+            for (int i = 0; i < passThroughCells.Count; i++)
+                powerService.UnregisterCablePassThrough(passThroughCells[i]);
+            for (int i = 0; i < endpointCells.Count; i++)
+                powerService.UnregisterCableEndpoint(endpointCells[i]);
             for (int i = 0; i < ownedCableCells.Count; i++)
                 powerService.UnregisterCable(ownedCableCells[i]);
         }
         cableCells.Clear();
         ownedCableCells.Clear();
+        endpointCells.Clear();
+        passThroughCells.Clear();
         registered = false;
+    }
+
+    void RegisterCableRoles(List<Vector2Int> path)
+    {
+        if (powerService == null || path == null || path.Count == 0) return;
+
+        var first = path[0];
+        powerService.RegisterCableEndpoint(first);
+        endpointCells.Add(first);
+
+        if (path.Count > 1)
+        {
+            var last = path[path.Count - 1];
+            if (last != first)
+            {
+                powerService.RegisterCableEndpoint(last);
+                endpointCells.Add(last);
+            }
+        }
+
+        for (int i = 1; i < path.Count - 1; i++)
+        {
+            var cell = path[i];
+            powerService.RegisterCablePassThrough(cell);
+            passThroughCells.Add(cell);
+        }
     }
 
     void EnsureLineRenderer()

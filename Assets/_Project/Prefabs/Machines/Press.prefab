@@ -81,7 +81,7 @@ SpriteRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 4
-  m_Sprite: {fileID: 4620696175837412934, guid: ca1567cb12f64ad4d95167457cf1e4c7, type: 3}
+  m_Sprite: {fileID: 5360528292533813526, guid: 3eb8f5711e8a83f4082717faf3afe070, type: 3}
   m_Color: {r: 0.5943396, g: 0.5943396, b: 0.5943396, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -175,8 +175,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a7d8daedd2478e146bb2881b028e4183, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  localOffset: {x: 0.35, y: 0.35, z: 0}
-  size: {x: 0.18, y: 0.18}
+  localOffset: {x: 0.6, y: 0.16, z: 0}
+  size: {x: 0.12, y: 0.12}
   runningColor: {r: 0.156, g: 0.922, b: 0.396, a: 1}
   jammedColor: {r: 0.922, g: 0.765, b: 0.165, a: 1}
   stoppedColor: {r: 0.922, g: 0.267, b: 0.255, a: 1}
@@ -209,8 +209,8 @@ Transform:
   m_GameObject: {fileID: 5489016681383822504}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.35, y: 0.35, z: 0}
-  m_LocalScale: {x: 0.18, y: 0.18, z: 1}
+  m_LocalPosition: {x: 0.6, y: 0.16, z: 0}
+  m_LocalScale: {x: 0.12, y: 0.12, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2379343749919079794}
