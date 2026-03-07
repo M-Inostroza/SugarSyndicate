@@ -1,5 +1,8 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public interface IMachineProgress
 {
@@ -7,6 +10,7 @@ public interface IMachineProgress
     bool IsProcessing { get; }
 }
 
+[ExecuteAlways]
 [DisallowMultipleComponent]
 public class MachineProgressDisplay : MonoBehaviour
 {
@@ -15,6 +19,8 @@ public class MachineProgressDisplay : MonoBehaviour
     [SerializeField] Color fillColor = new Color(0.2f, 0.9f, 0.2f, 1f);
     [SerializeField] Color backgroundColor = new Color(0f, 0f, 0f, 0.45f);
     [SerializeField] bool hideWhenIdle = true;
+    [SerializeField] bool showPreviewInEditMode = true;
+    [SerializeField, Range(0f, 1f)] float editModePreviewProgress = 0.65f;
     [SerializeField] int sortingOrderOffset = 9;
     [SerializeField] string sortingLayerName = "Default";
 
@@ -24,23 +30,93 @@ public class MachineProgressDisplay : MonoBehaviour
     SpriteRenderer bgRenderer;
     SpriteRenderer fillRenderer;
     float lastProgress = -1f;
+    bool editorRefreshQueued;
+    bool editorRefreshForce;
 
     static Sprite whiteSprite;
 
     void Awake()
     {
-        progress = GetComponent<IMachineProgress>() ?? GetComponentInParent<IMachineProgress>();
-        EnsureRenderers();
-        UpdateVisual(true);
-        UpdateTransform();
+        RequestRefresh(force: true);
+    }
+
+    void OnEnable()
+    {
+        RequestRefresh(force: true);
+    }
+
+    void OnDisable()
+    {
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            EditorApplication.delayCall -= FlushEditorRefresh;
+            editorRefreshQueued = false;
+            editorRefreshForce = false;
+        }
+#endif
     }
 
     void LateUpdate()
     {
-        if (progress == null || bgRenderer == null || fillRenderer == null) return;
-        UpdateVisual(false);
-        UpdateTransform();
+        if (!Application.isPlaying)
+            return;
+
+        Refresh(force: false);
     }
+
+    void OnValidate()
+    {
+        RequestRefresh(force: true);
+    }
+
+    void RequestRefresh(bool force)
+    {
+        if (Application.isPlaying)
+        {
+            Refresh(force);
+            return;
+        }
+
+#if UNITY_EDITOR
+        editorRefreshForce |= force;
+        if (editorRefreshQueued)
+            return;
+
+        editorRefreshQueued = true;
+        EditorApplication.delayCall -= FlushEditorRefresh;
+        EditorApplication.delayCall += FlushEditorRefresh;
+#endif
+    }
+
+    void Refresh(bool force)
+    {
+        ResolveTarget();
+        EnsureRenderers();
+        if (bgRenderer == null || fillRenderer == null) return;
+        UpdateVisual(force);
+        UpdateTransform();
+        ApplySorting(bgRenderer, fillRenderer);
+    }
+
+    void ResolveTarget()
+    {
+        progress = GetComponent<IMachineProgress>() ?? GetComponentInParent<IMachineProgress>();
+    }
+
+#if UNITY_EDITOR
+    void FlushEditorRefresh()
+    {
+        EditorApplication.delayCall -= FlushEditorRefresh;
+        if (this == null)
+            return;
+
+        editorRefreshQueued = false;
+        bool force = editorRefreshForce;
+        editorRefreshForce = false;
+        Refresh(force);
+    }
+#endif
 
     void EnsureRenderers()
     {
@@ -93,9 +169,7 @@ public class MachineProgressDisplay : MonoBehaviour
 
     void UpdateVisual(bool force)
     {
-        float p = 0f;
-        if (progress != null && progress.IsProcessing)
-            p = Mathf.Clamp01(progress.Progress01);
+        float p = GetDisplayProgress();
 
         if (!force && Mathf.Abs(p - lastProgress) < 0.001f)
             return;
@@ -105,6 +179,21 @@ public class MachineProgressDisplay : MonoBehaviour
         bool show = !hideWhenIdle || p > 0f;
         if (bgRenderer != null) bgRenderer.enabled = show;
         if (fillRenderer != null) fillRenderer.enabled = show;
+    }
+
+    float GetDisplayProgress()
+    {
+        if (Application.isPlaying)
+        {
+            if (progress != null && progress.IsProcessing)
+                return Mathf.Clamp01(progress.Progress01);
+            return 0f;
+        }
+
+        if (showPreviewInEditMode)
+            return Mathf.Clamp01(editModePreviewProgress);
+
+        return 0f;
     }
 
     void ApplySorting(SpriteRenderer bgSr, SpriteRenderer fillSr)

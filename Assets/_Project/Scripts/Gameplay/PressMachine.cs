@@ -5,6 +5,10 @@ using UnityEngine;
 // Simple press machine with processing time and gated input/output.
 public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress, IPowerConsumer, IMachineJammed, IMachineStoppable, IGhostState
 {
+    public event Action<int> InputBuffered;
+    public event Action<float> ProcessingStarted;
+    public event Action OutputProduced;
+
     [Header("Services")]
     [SerializeField] GridService grid;
     [SerializeField] BeltSimulationService belt;
@@ -373,6 +377,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
 
         bufferedInputs++;
         DLog($"[PressMachine] Input buffered at {cell}: {bufferedInputs}/{inputsPerProcess}");
+        int slotIndex = ((Mathf.Max(1, bufferedInputs) - 1) % Mathf.Max(1, inputsPerProcess)) + 1;
+        InputBuffered?.Invoke(slotIndex);
         TryBeginProcessingFromBuffer();
         return true;
     }
@@ -430,6 +436,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
                 waitingToOutput = false;
                 remainingTime = 0f;
                 hasInputThisCycle = false;
+                OutputProduced?.Invoke();
                 DLog($"[PressMachine] Cycle complete at {cell}");
                 TryBeginProcessingFromBuffer();
             }
@@ -447,6 +454,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         hasInputThisCycle = true;
         waitingToOutput = false;
         remainingTime = Mathf.Max(0f, processingSeconds);
+        ProcessingStarted?.Invoke(remainingTime);
         DLog($"[PressMachine] Processing started at {cell}. Processing for {remainingTime:0.###} sec... busy={busy}, buffered={bufferedInputs}");
     }
 
