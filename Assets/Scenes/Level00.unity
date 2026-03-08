@@ -9371,7 +9371,7 @@ MonoBehaviour:
   cableHintCooldownSeconds: 0.2
   useNodeLinkCables: 1
   cableLineWidth: 0.09
-  cableLineColor: {r: 0.5, g: 0.49129504, b: 0.4316038, a: 0.50980395}
+  cableLineColor: {r: 0.5, g: 0.49129504, b: 0.4316038, a: 1}
   cableLineMaterial: {fileID: 0}
   cableSortingLayerName: Default
   cableSortingOrder: 5000
