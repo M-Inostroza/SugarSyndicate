@@ -6,6 +6,8 @@ using DG.Tweening;
 
 public class MachineInspectUI : MonoBehaviour
 {
+    static MachineInspectUI persistentInstance;
+
     [Header("Zoom")]
     [SerializeField] float zoomSize = 2.8f;
     [SerializeField, Min(0.01f)] float zoomDuration = 0.35f;
@@ -65,7 +67,20 @@ public class MachineInspectUI : MonoBehaviour
 
     void Awake()
     {
-        if (persistAcrossScenes) DontDestroyOnLoad(gameObject);
+        if (persistAcrossScenes)
+        {
+            if (persistentInstance != null && persistentInstance != this)
+            {
+                var duplicateRoot = transform.root != null ? transform.root.gameObject : gameObject;
+                Destroy(duplicateRoot);
+                return;
+            }
+
+            persistentInstance = this;
+            var root = transform.root != null ? transform.root.gameObject : gameObject;
+            DontDestroyOnLoad(root);
+        }
+
         CacheUiReferences();
         WireUi(true);
         CachePanelBasePos();
@@ -84,6 +99,9 @@ public class MachineInspectUI : MonoBehaviour
 
     void OnDestroy()
     {
+        if (persistentInstance == this)
+            persistentInstance = null;
+
         if (isOpen)
             Time.timeScale = prevTimeScale;
         WireUi(false);

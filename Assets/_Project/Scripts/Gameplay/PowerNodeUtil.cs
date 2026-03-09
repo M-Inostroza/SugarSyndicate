@@ -91,6 +91,40 @@ public static class PowerNodeUtil
         return null;
     }
 
+    public static Component FindConnectableNodeAtWorld(Vector2 worldPosition)
+    {
+        var hits = Physics2D.OverlapPointAll(worldPosition);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            var hit = hits[i];
+            if (hit == null) continue;
+
+            var directPole = hit.GetComponent<PowerPole>();
+            if (IsConnectableNode(directPole))
+                return directPole;
+
+            var directBehaviours = hit.GetComponents<MonoBehaviour>();
+            for (int j = 0; j < directBehaviours.Length; j++)
+            {
+                var behaviour = directBehaviours[j];
+                if (IsConnectableNode(behaviour))
+                    return behaviour;
+            }
+
+            var parents = hit.GetComponentsInParent<MonoBehaviour>(true);
+            for (int j = 0; j < parents.Length; j++)
+            {
+                var behaviour = parents[j];
+                if (IsConnectableNode(behaviour))
+                    return behaviour;
+            }
+        }
+
+        var grid = GridService.Instance;
+        if (grid == null) return null;
+        return FindConnectableNodeAtCell(grid.WorldToCell(worldPosition));
+    }
+
     public static bool TryBuildCableCells(Component startNode, Component endNode, out List<Vector2Int> cableCells)
     {
         cableCells = null;

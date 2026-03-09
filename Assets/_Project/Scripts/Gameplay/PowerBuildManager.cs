@@ -428,9 +428,8 @@ public class PowerBuildManager : MonoBehaviour
         if (cam == null) cam = Camera.main;
         if (cam == null) return false;
 
-        var cell = GetMouseCell();
-        if (!cell.HasValue) return false;
-        return PowerNodeUtil.FindConnectableNodeAtCell(cell.Value) != null;
+        var mouseWorld = GetMouseWorldOnPlane(0f);
+        return PowerNodeUtil.FindConnectableNodeAtWorld(mouseWorld) != null;
     }
 
     void HandleNodeLinkCableInput()
@@ -511,7 +510,7 @@ public class PowerBuildManager : MonoBehaviour
             return;
         }
 
-        var node = PowerNodeUtil.FindConnectableNodeAtCell(cell.Value);
+        var node = PowerNodeUtil.FindConnectableNodeAtWorld(GetMouseWorldOnPlane(0f));
         if (node == null)
         {
             EndNodeLinkDrag(clearStartNode: true);
@@ -556,7 +555,7 @@ public class PowerBuildManager : MonoBehaviour
         var cell = GetMouseCell();
         if (cell.HasValue)
         {
-            var targetNode = PowerNodeUtil.FindConnectableNodeAtCell(cell.Value);
+            var targetNode = PowerNodeUtil.FindConnectableNodeAtWorld(GetMouseWorldOnPlane(0f));
             if (targetNode != null && targetNode != startNode)
                 TryPlaceNodeLink(startNode, targetNode, cell.Value);
         }

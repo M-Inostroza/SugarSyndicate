@@ -132,6 +132,8 @@ public class PowerLinkLine : MonoBehaviour
         foreach (var link in ActiveLinks)
         {
             if (link == null) continue;
+            if (!link.isActiveAndEnabled) continue;
+            if (link.GetComponent<BlueprintTask>() != null) continue;
             if (link.startNode == node || link.endNode == node)
                 count++;
         }

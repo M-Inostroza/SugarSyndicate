@@ -94,6 +94,21 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         powerService?.UnregisterConsumer(this);
     }
 
+    void OnDestroy()
+    {
+        if (isGhost) return;
+
+        var grid = GridService.Instance;
+        if (grid == null) return;
+
+        var baseCell = GetBaseCell(grid);
+        var dir = DirectionUtil.DirVec(outputDirection);
+        var headCell = baseCell + dir;
+
+        ClearMachineCell(grid, baseCell);
+        ClearMachineCell(grid, headCell);
+    }
+
     void Update()
     {
         if (isGhost) return;
@@ -296,6 +311,14 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
         if (drill != null) return;
         var t = transform.Find("drill");
         if (t != null) drill = t;
+    }
+
+    static void ClearMachineCell(GridService grid, Vector2Int cell)
+    {
+        if (grid == null) return;
+        grid.ClearCell(cell);
+        var gridCell = grid.GetCell(cell);
+        if (gridCell != null) gridCell.hasMachine = false;
     }
 
     bool TrySendToMachine(GridService gs, Vector2Int outCell, Vector2Int sourceCell, Item item)

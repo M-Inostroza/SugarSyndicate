@@ -1422,6 +1422,20 @@ public class ConveyorPlacer : MonoBehaviour
 
         try
         {
+            var solarPanel = FindSolarPanelAtCell(cell);
+            if (solarPanel != null) return solarPanel.gameObject;
+        }
+        catch { }
+
+        try
+        {
+            var mine = FindMineAtCell(cell);
+            if (mine != null) return mine.gameObject;
+        }
+        catch { }
+
+        try
+        {
             var presses = UnityEngine.Object.FindObjectsByType<PressMachine>(FindObjectsSortMode.None);
             foreach (var press in presses)
             {
@@ -1515,6 +1529,46 @@ public class ConveyorPlacer : MonoBehaviour
             }
         }
         catch { }
+
+        return null;
+    }
+
+    SolarPanelMachine FindSolarPanelAtCell(Vector2Int cell)
+    {
+        var panels = UnityEngine.Object.FindObjectsByType<SolarPanelMachine>(FindObjectsSortMode.None);
+        for (int i = 0; i < panels.Length; i++)
+        {
+            var panel = panels[i];
+            if (panel == null || panel.isGhost) continue;
+
+            var dir = panel.facingVec.x < 0 ? Vector2Int.left : Vector2Int.right;
+            var baseCell = panel.Cell;
+            if (cell == baseCell || cell == baseCell + dir || cell == baseCell + (dir * 2))
+                return panel;
+        }
+
+        return null;
+    }
+
+    SugarMine FindMineAtCell(Vector2Int cell)
+    {
+        var grid = GridService.Instance;
+        if (grid == null) return null;
+
+        var mines = UnityEngine.Object.FindObjectsByType<SugarMine>(FindObjectsSortMode.None);
+        for (int i = 0; i < mines.Length; i++)
+        {
+            var mine = mines[i];
+            if (mine == null || mine.isGhost) continue;
+
+            var dir = DirectionUtil.DirVec(mine.outputDirection);
+            dir = dir.x < 0 ? Vector2Int.left : Vector2Int.right;
+            float halfCell = grid.CellSize * 0.5f;
+            var baseCell = grid.WorldToCell(mine.transform.position - new Vector3(dir.x * halfCell, dir.y * halfCell, 0f));
+
+            if (cell == baseCell || cell == baseCell + dir)
+                return mine;
+        }
 
         return null;
     }
