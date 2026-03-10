@@ -6238,7 +6238,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cab33c2784cc9bf46bb089353338a381, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tutorialEnabled: 0
+  tutorialEnabled: 1
   autoStart: 1
   onlyInTutorialScene: 1
   tutorialSceneBuildIndex: 0
@@ -9371,7 +9371,7 @@ MonoBehaviour:
   cableHintCooldownSeconds: 0.2
   useNodeLinkCables: 1
   cableLineWidth: 0.09
-  cableLineColor: {r: 0.5, g: 0.49129504, b: 0.4316038, a: 1}
+  cableLineColor: {r: 0.80732, g: 0.86415094, b: 0.3179422, a: 1}
   cableLineMaterial: {fileID: 0}
   cableSortingLayerName: Default
   cableSortingOrder: 5000

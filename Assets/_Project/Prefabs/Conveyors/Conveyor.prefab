@@ -28,7 +28,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -2.5, y: 2, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 0}
@@ -103,6 +103,6 @@ MonoBehaviour:
   direction: 1
   ticksPerCell: 10
   spriteRenderer: {fileID: 4201051881256447682}
-  straightSprite: {fileID: 2673543848797807974, guid: d74c74c3b2e63e64cb03fd79e92db32f, type: 3}
-  curveSprite: {fileID: -3032575952981420478, guid: af58a6fb7e4e8234ca253465a17df83d, type: 3}
+  straightSprite: {fileID: 5281700639100347000, guid: effec5a47bed3c54abe402876ee27f0d, type: 3}
+  curveSprite: {fileID: 9113932122745101552, guid: 407c4a21b95a34e4fba45399cac742ae, type: 3}
   curveBaseCorner: 2
