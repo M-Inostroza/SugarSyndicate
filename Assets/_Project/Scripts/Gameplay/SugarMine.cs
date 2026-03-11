@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -61,6 +62,32 @@ public class SugarMine : MonoBehaviour, IPowerConsumer, IMachineJammed, IMachine
     public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
     public bool IsStopped => maintenance != null && maintenance.IsStopped;
     public bool IsJammed => outputBlocked;
+
+    public void GetOutputCellsForConnectivity(List<Vector2Int> results)
+    {
+        if (results == null) return;
+        results.Clear();
+
+        var gs = GridService.Instance;
+        if (gs == null) return;
+
+        var baseCell = GetBaseCell(gs);
+        var dir = DirectionUtil.DirVec(outputDirection);
+        var headOutputCell = baseCell + dir * 2;
+        var baseOutputCell = baseCell;
+
+        if (preferHeadCell)
+        {
+            results.Add(headOutputCell);
+            if (!requireFreeHeadCell && baseOutputCell != headOutputCell)
+                results.Add(baseOutputCell);
+            return;
+        }
+
+        results.Add(baseOutputCell);
+        if (!requireFreeHeadCell && headOutputCell != baseOutputCell)
+            results.Add(headOutputCell);
+    }
 
     void OnEnable()
     {

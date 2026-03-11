@@ -209,8 +209,8 @@ MonoBehaviour:
     trigger: 9
     hideUiAfterCompletion: 0
     messages:
-    - Now connect your mines to the presses with conveyor belts.
-    - Every mine should connect to every press.
+    - Now connect your mine to the press with conveyor belts.
+    - Make sure the mine feeds directly into the press.
     completionMessages:
     - Perfect. The presses can finally chew through sugar.
     requiredDroneCount: 3

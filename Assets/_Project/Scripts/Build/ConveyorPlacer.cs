@@ -370,14 +370,29 @@ public class ConveyorPlacer : MonoBehaviour
             return true;
         }
 
-        // Set up for a drag, but DO NOT place the initial belt or set lastDragCell.
-        // This will be handled on the first actual drag movement.
         isDragging = true; 
         dragStartCell = cell; 
-        lastDragCell = new Vector2Int(int.MinValue, int.MinValue); // Keep lastDragCell invalid
+        lastDragCell = new Vector2Int(int.MinValue, int.MinValue);
         dragStartWorld = world;
         dragStartUnscaledTime = Time.unscaledTime;
         dragPath.Clear();
+
+        var outDirName = RotationToDirectionName(rotation);
+        if (!IsCellBlockedForBelt(dragStartCell) && PlaceBeltAtCell(dragStartCell, outDirName))
+        {
+            var outDir = DirectionFromName(outDirName);
+            var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, outDir, null);
+            if (autoIncoming.HasValue && !WouldCreateOpposingPair(autoIncoming, outDirName))
+                UpdateBeltDirectionFast(dragStartCell, outDirName, autoIncoming);
+        }
+        else
+        {
+            isDragging = false;
+            dragStartCell = new Vector2Int(int.MinValue, int.MinValue);
+            dragStartWorld = Vector3.zero;
+            dragStartUnscaledTime = -1f;
+            return false;
+        }
         
         return true;
     }
@@ -396,18 +411,10 @@ public class ConveyorPlacer : MonoBehaviour
             CommitMarkedDeletions(); RestoreGhostVisuals(false); deleteMarkedCells.Clear(); lastDragCell = dragStartCell = new Vector2Int(int.MinValue, int.MinValue); dragPath.Clear(); return true;
         }
         
-        // If the drag never moved, it's a single click. Place a single belt now.
+        // If the drag never moved, commit the initial preview belt as a single placement.
         if (!dragHasMoved)
         {
-            RestoreGhostVisuals(false); 
-            var outDirName = RotationToDirectionName(rotation);
-            if (PlaceBeltAtCell(dragStartCell, outDirName))
-            {
-                var outDir = DirectionFromName(outDirName);
-                var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, outDir, null);
-                if (autoIncoming.HasValue && !WouldCreateOpposingPair(autoIncoming, outDirName))
-                    UpdateBeltDirectionFast(dragStartCell, outDirName, autoIncoming);
-            }
+            RestoreGhostVisuals(true);
             FlushDeferredRegistrations();
             // Prevent an instant chain pull on the very next step
             BeltSimulationService.Instance?.SuppressNextStepPulls();
@@ -588,28 +595,20 @@ public class ConveyorPlacer : MonoBehaviour
             // Don't do anything if the mouse is still in the start cell
             if (cell == dragStartCell) return;
 
-            // This is the first actual movement. Place the STARTING belt now,
-            // oriented towards the current cell.
+            // This is the first actual movement. Reorient the existing starting ghost
+            // toward the current cell, then place the next belt cell.
             var delta = cell - dragStartCell;
             Vector2Int step = Mathf.Abs(delta.x) >= Mathf.Abs(delta.y) ? new Vector2Int(Math.Sign(delta.x), 0) : new Vector2Int(0, Math.Sign(delta.y));
             var dirName = DirectionNameFromDelta(step);
             if (dirName == null) return;
 
-            // Place the very first belt and add it to the path
-            if (IsCellBlockedForBelt(dragStartCell)) return;
             dragHasMoved = true;
-            if (PlaceBeltAtCell(dragStartCell, dirName))
-            {
-                dragPath.Add(dragStartCell);
-                var startOutDir = DirectionFromName(dirName);
-                var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, startOutDir, null);
-                if (autoIncoming.HasValue && !WouldCreateOpposingPair(autoIncoming, dirName))
-                    UpdateBeltDirectionFast(dragStartCell, dirName, autoIncoming);
-            }
-            else
-            {
+            dragPath.Add(dragStartCell);
+            var startOutDir = DirectionFromName(dirName);
+            var autoIncoming = ResolveIncomingDirectionForNewBelt(dragStartCell, startOutDir, null);
+            if (WouldCreateOpposingPair(autoIncoming, dirName))
                 return;
-            }
+            UpdateBeltDirectionFast(dragStartCell, dirName, autoIncoming);
             
             // Now, place the second belt to start the chain
             var nextCell = dragStartCell + step;

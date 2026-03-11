@@ -61,6 +61,7 @@ public class BlueprintTask : DroneTaskTarget
     public BlueprintType Type => blueprintType;
     public bool IsHqBlueprint => blueprintType == BlueprintType.DroneHQ;
     public GameObject BuildPrefab => buildPrefab;
+    public IReadOnlyList<Vector2Int> FootprintCells => footprintCells;
     public bool IsNodeLinkCableBlueprint => blueprintType == BlueprintType.Cable && nodeLinkCable;
 
     public void InitializeBelt(Vector2Int cell, Direction outDir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 // Simple press machine with processing time and gated input/output.
 public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachineProgress, IPowerConsumer, IMachineJammed, IMachineStoppable, IGhostState
@@ -52,6 +53,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     [Header("Debug")]
     [Tooltip("Enable verbose debug logs for PressMachine.")]
     [SerializeField] bool enableDebugLogs = false;
+    [SerializeField] int itemOcclusionSortingBoost = 8;
 
     [NonSerialized] public bool isGhost = false; // builder sets this before enabling
     public bool IsGhost => isGhost;
@@ -59,6 +61,9 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     public Vector2Int InputVec => new Vector2Int(-facingVec.x, -facingVec.y);
     public Vector2Int OutputVec => facingVec;
     public Vector2Int Cell => cell;
+    public Vector2Int InputPortCell => cell + InputVec;
+    public Vector2Int OutputSourceCell => cell + OutputVec;
+    public Vector2Int OutputPortCell => cell + OutputVec * 2;
     public float Maintenance01 => maintenance != null ? maintenance.Level01 : 1f;
     public bool IsStopped => maintenance != null && maintenance.IsStopped;
     public bool IsJammed => waitingToOutput;
@@ -155,6 +160,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
 
         TryRegisterAsMachineAndSnap();
         DLog($"[PressMachine] Registered at cell {cell} facing {OutputVec}");
+        EnsureRendersAboveItems();
 
         if (powerService == null) powerService = PowerService.Instance ?? PowerService.EnsureInstance();
         powerService?.RegisterConsumer(this);
@@ -331,6 +337,32 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         if (c != null) c.hasMachine = false;
     }
 
+    void EnsureRendersAboveItems()
+    {
+        if (itemOcclusionSortingBoost == 0)
+            return;
+
+        var groups = GetComponentsInChildren<SortingGroup>(true);
+        if (groups != null && groups.Length > 0)
+        {
+            for (int i = 0; i < groups.Length; i++)
+            {
+                var group = groups[i];
+                if (group == null) continue;
+                group.sortingOrder += itemOcclusionSortingBoost;
+            }
+            return;
+        }
+
+        var srs = GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < srs.Length; i++)
+        {
+            var sr = srs[i];
+            if (sr == null) continue;
+            sr.sortingOrder += itemOcclusionSortingBoost;
+        }
+    }
+
     void EnsureStorageDisplay()
     {
         if (GetComponent<MachineStorageDisplay>() != null) return;
@@ -371,7 +403,6 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         }
 
         if (maintenance != null && !maintenance.TryConsume(1)) return false;
-
         bufferedInputs++;
         DLog($"[PressMachine] Input buffered at {cell}: {bufferedInputs}/{inputsPerProcess}");
         int slotIndex = ((Mathf.Max(1, bufferedInputs) - 1) % Mathf.Max(1, inputsPerProcess)) + 1;
@@ -560,9 +591,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             return false;
         }
 
-        // Output starts at the T arm and ejects one cell beyond it.
-        var outputSourceCell = cell + OutputVec;
-        var outCell = outputSourceCell + OutputVec;
+        var outputSourceCell = OutputSourceCell;
+        var outCell = OutputPortCell;
 
         if (!TryResolveOutputTarget(outCell, outputSourceCell, out var targetMachine))
         {

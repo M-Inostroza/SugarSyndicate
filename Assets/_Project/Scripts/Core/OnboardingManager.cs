@@ -171,6 +171,12 @@ public class OnboardingManager : MonoBehaviour
     [SerializeField] bool requireMachineOverviewClosedForBuyStep = true;
     [SerializeField] MachineInspectUI machineInspectUi;
 
+#if UNITY_EDITOR
+    [Header("Editor Gizmos")]
+    [SerializeField] bool showGridCodesWhenSelected = true;
+    [SerializeField] Color onboardingGridCodeColor = Color.white;
+#endif
+
     int currentStepIndex = -1;
     readonly HashSet<string> completedSteps = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
     bool isActive;
@@ -332,6 +338,54 @@ public class OnboardingManager : MonoBehaviour
         stepsAsset = existing;
         EditorUtility.SetDirty(this);
     }
+
+    void OnDrawGizmosSelected()
+    {
+        if (!showGridCodesWhenSelected)
+            return;
+
+        var grid = GridService.Instance;
+        if (grid == null)
+            grid = FindFirstObjectByType<GridService>(FindObjectsInactive.Include);
+        if (grid == null)
+            return;
+
+        var labelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleCenter
+        };
+        labelStyle.normal.textColor = onboardingGridCodeColor;
+
+        Handles.color = onboardingGridCodeColor;
+        var gridSize = grid.GridSize;
+        for (int x = 0; x < gridSize.x; x++)
+        {
+            for (int y = 0; y < gridSize.y; y++)
+            {
+                var cell = new Vector2Int(x, y);
+                Handles.Label(grid.CellToWorld(cell, 0f), FormatGridCoordinateLabel(cell), labelStyle);
+            }
+        }
+    }
+
+    static string FormatGridCoordinateLabel(Vector2Int cell)
+    {
+        return $"{IndexToLetters(cell.x)}{cell.y + 1}";
+    }
+
+    static string IndexToLetters(int index)
+    {
+        if (index < 0) return "?";
+        string result = string.Empty;
+        int n = index;
+        while (n >= 0)
+        {
+            int rem = n % 26;
+            result = (char)('A' + rem) + result;
+            n = (n / 26) - 1;
+        }
+        return result;
+    }
 #endif
 
     static List<Step> BuildDefaultSteps()
@@ -470,8 +524,8 @@ public class OnboardingManager : MonoBehaviour
                 speaker = "Pig Boss",
                 messages = new List<string>
                 {
-                    "Now connect your mines to the presses with conveyor belts.",
-                    "Every mine should connect to every press."
+                    "Now connect your mine to the press with conveyor belts.",
+                    "Make sure the mine feeds directly into the press."
                 },
                 completionMessages = new List<string>
                 {
@@ -557,6 +611,11 @@ public class OnboardingManager : MonoBehaviour
         if (step.trigger == StepTrigger.BuyDrones)
         {
             EvaluateBuyDronesStep(step);
+            UpdateGoalUi(step);
+        }
+        else if (step.trigger == StepTrigger.MinesConnectedToPresses)
+        {
+            TryCompleteMinesConnected(step);
             UpdateGoalUi(step);
         }
 
@@ -901,6 +960,7 @@ public class OnboardingManager : MonoBehaviour
     {
         step ??= GetCurrentStep();
         if (step == null || !isActive) return;
+        if (!string.IsNullOrWhiteSpace(step.id) && completedSteps.Contains(step.id)) return;
 
         if (pendingStepCompletionRoutine != null)
         {
@@ -1651,6 +1711,7 @@ public class OnboardingManager : MonoBehaviour
         UpdatePlacementHighlight(step);
         if (step.trigger == StepTrigger.DroneHqBlueprintPlaced && type == BlueprintTask.BlueprintType.DroneHQ)
             RequestCompleteCurrentStep(step);
+        UpdateGoalUi(step);
     }
 
     void HandleBlueprintCompleted(BlueprintTask.BlueprintType type, BlueprintTask task)
@@ -1857,12 +1918,7 @@ public class OnboardingManager : MonoBehaviour
         if (nextIndex >= 0) StartStep(nextIndex);
         else
         {
-            var step = GetCurrentStep();
-            if (step != null && step.hideUiAfterCompletion) HideUi();
-            if (goalUi != null) goalUi.Hide();
-            HidePlacementHighlight();
-            ApplySolarStepPowerButtonVisibility(null);
-            ApplyTutorialUiLocks();
+            DisableTutorialRestrictions();
         }
     }
 
@@ -2206,9 +2262,11 @@ public class OnboardingManager : MonoBehaviour
             case StepTrigger.MinesConnectedToPresses:
                 {
                     GetMinePressConnectionProgress(trackedMines, trackedPresses, out var connected, out var total);
-                    string label = total > 0
-                        ? $"Connect mines to presses ({connected}/{total})"
-                        : "Connect mines to presses";
+                    string label = total == 1
+                        ? $"Connect the mine to the press ({connected}/{total})"
+                        : total > 0
+                            ? $"Connect mines to presses ({connected}/{total})"
+                            : "Connect the mine to the press";
                     items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && connected >= total));
                 }
                 break;
@@ -2448,8 +2506,8 @@ public class OnboardingManager : MonoBehaviour
         var grid = GridService.Instance;
         if (grid == null) return;
 
-        var pressByCell = BuildPressLookup(presses);
-        if (pressByCell.Count == 0) return;
+        var pressInputByCell = BuildPressInputLookup(presses);
+        if (pressInputByCell.Count == 0) return;
 
         int mineCount = 0;
         for (int i = 0; i < mines.Count; i++)
@@ -2459,18 +2517,26 @@ public class OnboardingManager : MonoBehaviour
             mineCount++;
         }
 
-        total = mineCount * pressByCell.Count;
+        int pressCount = 0;
+        for (int i = 0; i < presses.Count; i++)
+        {
+            var press = presses[i];
+            if (press == null || press.isGhost) continue;
+            pressCount++;
+        }
+
+        total = mineCount * pressCount;
         if (total == 0) return;
 
         for (int i = 0; i < mines.Count; i++)
         {
             var mine = mines[i];
             if (mine == null || mine.isGhost) continue;
-            connected += CountReachablePresses(grid, mine, pressByCell);
+            connected += CountReachablePresses(grid, mine, pressInputByCell);
         }
     }
 
-    Dictionary<Vector2Int, PressMachine> BuildPressLookup(List<PressMachine> presses)
+    Dictionary<Vector2Int, PressMachine> BuildPressInputLookup(List<PressMachine> presses)
     {
         var lookup = new Dictionary<Vector2Int, PressMachine>();
         if (presses == null) return lookup;
@@ -2478,7 +2544,7 @@ public class OnboardingManager : MonoBehaviour
         {
             var press = presses[i];
             if (press == null || press.isGhost) continue;
-            lookup[press.Cell] = press;
+            lookup[press.InputPortCell] = press;
         }
         return lookup;
     }
@@ -2496,61 +2562,56 @@ public class OnboardingManager : MonoBehaviour
         => c != null && !c.isBlueprint && !c.isBroken
            && (c.type == GridService.CellType.Belt || c.type == GridService.CellType.Junction || c.hasConveyor || c.conveyor != null);
 
-    int CountReachablePresses(GridService grid, SugarMine mine, Dictionary<Vector2Int, PressMachine> pressByCell)
+    int CountReachablePresses(GridService grid, SugarMine mine, Dictionary<Vector2Int, PressMachine> pressInputByCell)
     {
-        if (grid == null || mine == null || pressByCell == null || pressByCell.Count == 0) return 0;
-        var baseCell = grid.WorldToCell(mine.transform.position);
-        var startCell = baseCell + DirectionUtil.DirVec(mine.outputDirection);
-        var start = grid.GetCell(startCell);
-        if (!IsBeltLike(start)) return 0;
+        if (grid == null || mine == null || pressInputByCell == null || pressInputByCell.Count == 0) return 0;
+        var reached = new HashSet<PressMachine>();
+        var startCells = new List<Vector2Int>(2);
+        mine.GetOutputCellsForConnectivity(startCells);
 
-        var visited = new HashSet<Vector2Int>();
-        var queue = new Queue<Vector2Int>();
-        visited.Add(startCell);
-        queue.Enqueue(startCell);
-        var reached = new HashSet<Vector2Int>();
-
-        bool TryStep(Vector2Int cellPos, Direction dir)
+        for (int startIndex = 0; startIndex < startCells.Count; startIndex++)
         {
-            if (!DirectionUtil.IsCardinal(dir)) return false;
-            var nextPos = cellPos + DirectionUtil.DirVec(dir);
-            if (!grid.InBounds(nextPos)) return false;
+            var startCell = startCells[startIndex];
+            if (!grid.InBounds(startCell)) continue;
+            var start = grid.GetCell(startCell);
+            if (!IsBeltLike(start)) continue;
 
-            if (pressByCell.TryGetValue(nextPos, out var press) && press != null && !press.isGhost)
+            var visited = new HashSet<Vector2Int>();
+            var queue = new Queue<Vector2Int>();
+            visited.Add(startCell);
+            queue.Enqueue(startCell);
+
+            while (queue.Count > 0)
             {
-                var approachFromVec = cellPos - nextPos;
-                if (approachFromVec == press.InputVec)
+                var cellPos = queue.Dequeue();
+                var cell = grid.GetCell(cellPos);
+                if (cell == null) continue;
+
+                if (pressInputByCell.TryGetValue(cellPos, out var press) && press != null && !press.isGhost)
                 {
-                    reached.Add(nextPos);
-                    if (reached.Count == pressByCell.Count) return true;
+                    reached.Add(press);
+                    if (reached.Count >= pressInputByCell.Count)
+                        return reached.Count;
                 }
-            }
 
-            var nextCell = grid.GetCell(nextPos);
-            if (IsBeltLike(nextCell) && visited.Add(nextPos))
-                queue.Enqueue(nextPos);
-            return false;
-        }
+                var neighborDirs = new[]
+                {
+                    Vector2Int.up,
+                    Vector2Int.right,
+                    Vector2Int.down,
+                    Vector2Int.left,
+                };
 
-        while (queue.Count > 0)
-        {
-            var cellPos = queue.Dequeue();
-            var cell = grid.GetCell(cellPos);
-            if (cell == null) continue;
+                for (int i = 0; i < neighborDirs.Length; i++)
+                {
+                    var nextPos = cellPos + neighborDirs[i];
+                    if (!grid.InBounds(nextPos) || !visited.Add(nextPos))
+                        continue;
 
-            if (cell.type == GridService.CellType.Belt)
-            {
-                if (TryStep(cellPos, cell.outA)) break;
-            }
-            else if (cell.type == GridService.CellType.Junction)
-            {
-                if (TryStep(cellPos, cell.outA)) break;
-                if (TryStep(cellPos, cell.outB)) break;
-            }
-            else if (cell.conveyor != null)
-            {
-                var dir = DirectionFromVecOrNone(cell.conveyor.DirVec());
-                if (TryStep(cellPos, dir)) break;
+                    var nextCell = grid.GetCell(nextPos);
+                    if (IsBeltLike(nextCell))
+                        queue.Enqueue(nextPos);
+                }
             }
         }
 

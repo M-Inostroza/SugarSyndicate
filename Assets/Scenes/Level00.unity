@@ -6448,8 +6448,8 @@ MonoBehaviour:
     trigger: 9
     hideUiAfterCompletion: 0
     messages:
-    - Now connect your mines to the presses with conveyor belts.
-    - Every mine should connect to every press.
+    - Now connect your mine to the press with conveyor belts.
+    - Make sure the mine feeds directly into the press.
     completionMessages:
     - Perfect. The presses can finally chew through sugar.
     requiredDroneCount: 3
@@ -6475,15 +6475,15 @@ MonoBehaviour:
     Place it where I tell you, you'll have more freedom later on to play around.
   highlightDroneHqCell: 1
   forceSolarPanelPlacement: 1
-  solarPanelRequiredCells: N8,O8,P8
+  solarPanelRequiredCells: N9,O9,P9
   solarPanelWrongCellMessage: Place the Solar Panel on the highlighted cells.
   highlightSolarPanelCells: 1
   forcePressPlacement: 1
-  pressRequiredCells: L7,L6,M6
+  pressRequiredCells: J8, J7, K7
   pressWrongCellMessage: Place the Press on the highlighted cells.
   highlightPressCells: 1
   forcePolePlacement: 1
-  poleRequiredCell: L10
+  poleRequiredCell: K9
   poleWrongCellMessage: Place the Power Pole on the highlighted cell.
   highlightPoleCell: 1
   poleStepLimitMessage: Build only one Power Pole for now.
@@ -6518,6 +6518,8 @@ MonoBehaviour:
   poleButtonFallbackName: Pole
   requireMachineOverviewClosedForBuyStep: 1
   machineInspectUi: {fileID: 0}
+  showGridCodesWhenSelected: 1
+  onboardingGridCodeColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!4 &860314671
 Transform:
   m_ObjectHideFlags: 0
@@ -9383,7 +9385,7 @@ MonoBehaviour:
   cableHintCooldownSeconds: 0.2
   useNodeLinkCables: 1
   cableLineWidth: 0.09
-  cableLineColor: {r: 0.80732, g: 0.86415094, b: 0.3179422, a: 1}
+  cableLineColor: {r: 0.8627451, g: 0.8226044, b: 0.317647, a: 0.78431374}
   cableLineMaterial: {fileID: 0}
   cableSortingLayerName: Default
   cableSortingOrder: 5000
@@ -9395,6 +9397,19 @@ MonoBehaviour:
   powerNodeMaxConnections: 4
   powerNodeLimitMessage: This power node can only connect up to 4 cables.
   surfaceOnlyMessage: Power lines and nodes can only be built on the surface.
+  previewUsesSagCurve: 1
+  previewSagSegments: 10
+  previewBaseSag: 0.12
+  previewSagPerUnit: 0.075
+  previewMaxSag: 0.6
+  assistCameraWhileNodeLinkDragging: 1
+  assistCamera: {fileID: 519420031}
+  assistStartDelay: 0.05
+  assistEdgeThreshold: 0.18
+  assistPanSpeed: 6
+  assistConstrainToGrid: 1
+  assistEdgePadding: 0.1
+  ignoredBuildMenuAlpha: 0.35
 --- !u!4 &1195365099
 Transform:
   m_ObjectHideFlags: 0

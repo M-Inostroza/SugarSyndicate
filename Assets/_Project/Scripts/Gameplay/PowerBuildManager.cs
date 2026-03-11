@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class PowerBuildManager : MonoBehaviour
 {
@@ -54,6 +55,7 @@ public class PowerBuildManager : MonoBehaviour
     [SerializeField, Min(0f)] float assistPanSpeed = 6f;
     [SerializeField] bool assistConstrainToGrid = true;
     [SerializeField, Min(0f)] float assistEdgePadding = 0.1f;
+    [SerializeField, Range(0.05f, 1f)] float ignoredBuildMenuAlpha = 0.35f;
 
     enum Mode { None, Cable, Pole }
     Mode mode = Mode.None;
@@ -72,6 +74,8 @@ public class PowerBuildManager : MonoBehaviour
     bool isNodeLinkDragging;
     LineRenderer nodeLinkPreviewLine;
     float nodeLinkDragStartTime = -1f;
+    CanvasGroup ignoredBuildMenuGroup;
+    float ignoredBuildMenuOriginalAlpha = 1f;
     static PowerBuildManager activeInstance;
 
     public static bool AllowCameraPanWithCableTool { get; private set; }
@@ -452,14 +456,17 @@ public class PowerBuildManager : MonoBehaviour
 
     void HandleNodeLinkCableInput()
     {
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+        bool pointerOverUi = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+        if (pointerOverUi)
         {
-            if (isNodeLinkDragging && Input.GetMouseButtonUp(0))
-                EndNodeLinkDrag(clearStartNode: true);
-            return;
+            UpdateIgnoredBuildMenuFeedback();
+        }
+        else
+        {
+            RestoreIgnoredBuildMenuFeedback();
         }
 
-        if (Input.GetMouseButtonDown(0))
+        if (Input.GetMouseButtonDown(0) && !pointerOverUi)
             TryBeginNodeLinkDrag();
 
         if (isNodeLinkDragging && Input.GetMouseButton(0))
@@ -583,6 +590,7 @@ public class PowerBuildManager : MonoBehaviour
         isNodeLinkDragging = false;
         nodeLinkDragStartTime = -1f;
         IsCameraPanBlockedByCableDrag = false;
+        RestoreIgnoredBuildMenuFeedback();
         if (clearStartNode)
             pendingCableStartNode = null;
         if (nodeLinkPreviewLine != null)
@@ -662,6 +670,69 @@ public class PowerBuildManager : MonoBehaviour
         else pos.x = Mathf.Clamp(pos.x, clampMinX, clampMaxX);
         if (clampMinY > clampMaxY) pos.y = (minY + maxY) * 0.5f;
         else pos.y = Mathf.Clamp(pos.y, clampMinY, clampMaxY);
+    }
+
+    void UpdateIgnoredBuildMenuFeedback()
+    {
+        var menu = FindHoveredBuildMenu();
+        var group = ResolveIgnoredBuildMenuGroup(menu);
+        if (group == ignoredBuildMenuGroup)
+            return;
+
+        RestoreIgnoredBuildMenuFeedback();
+        if (group == null)
+            return;
+
+        ignoredBuildMenuGroup = group;
+        ignoredBuildMenuOriginalAlpha = group.alpha;
+        ignoredBuildMenuGroup.alpha = Mathf.Min(ignoredBuildMenuOriginalAlpha, ignoredBuildMenuAlpha);
+    }
+
+    void RestoreIgnoredBuildMenuFeedback()
+    {
+        if (ignoredBuildMenuGroup == null)
+            return;
+
+        ignoredBuildMenuGroup.alpha = ignoredBuildMenuOriginalAlpha;
+        ignoredBuildMenuGroup = null;
+        ignoredBuildMenuOriginalAlpha = 1f;
+    }
+
+    BuildMenuController FindHoveredBuildMenu()
+    {
+        if (EventSystem.current == null)
+            return null;
+
+        var pointer = new PointerEventData(EventSystem.current)
+        {
+            position = Input.mousePosition
+        };
+
+        var results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointer, results);
+        for (int i = 0; i < results.Count; i++)
+        {
+            var go = results[i].gameObject;
+            if (go == null)
+                continue;
+
+            var menu = go.GetComponentInParent<BuildMenuController>(true);
+            if (menu != null)
+                return menu;
+        }
+
+        return null;
+    }
+
+    CanvasGroup ResolveIgnoredBuildMenuGroup(BuildMenuController menu)
+    {
+        if (menu == null)
+            return null;
+
+        var group = menu.GetComponent<CanvasGroup>();
+        if (group == null)
+            group = menu.gameObject.AddComponent<CanvasGroup>();
+        return group;
     }
 
     Vector3 GetMouseWorldOnPlane(float zPlane)
