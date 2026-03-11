@@ -76,11 +76,11 @@ MonoBehaviour:
     hideUiAfterCompletion: 0
     messages:
     - Good. Now we need more hands.
-    - Select the Drone HQ and buy three drones and three crawlers.
+    - Select the Drone HQ and buy three drones.
     completionMessages:
     - Perfect. That should keep the place running.
     requiredDroneCount: 3
-    requiredCrawlerCount: 3
+    requiredCrawlerCount: 0
     requiredMineCount: 1
     requiredPressCount: 1
     requireCameraMove: 0
@@ -135,7 +135,7 @@ MonoBehaviour:
     - Nice. That'll keep the sweets flowing.
     requiredDroneCount: 3
     requiredCrawlerCount: 0
-    requiredMineCount: 2
+    requiredMineCount: 1
     requiredPressCount: 1
     requireCameraMove: 0
     requireZoomIn: 0
@@ -151,15 +151,42 @@ MonoBehaviour:
     disableSelectables: []
     showObjects: []
     hideObjects: []
-  - id: power-mines
+  - id: build-presses
     speaker: Pig Boss
-    trigger: 6
+    trigger: 7
     hideUiAfterCompletion: 0
     messages:
-    - Now connect the generator to your mines with power cables.
-    - All current mines need electricity.
+    - Time to make sugar cubes.
+    - Build one Press on the highlighted cells.
     completionMessages:
-    - Good. The mines are powered.
+    - Nice. You're ready to scale production.
+    requiredDroneCount: 3
+    requiredCrawlerCount: 0
+    requiredMineCount: 1
+    requiredPressCount: 1
+    requireCameraMove: 0
+    requireZoomIn: 0
+    requireZoomOut: 0
+    highlightTargets: []
+    openCategory: Processing
+    allowedCategories:
+    - Essential
+    - Processing
+    hideDisallowedCategories: 1
+    disableDisallowedCategories: 1
+    enableSelectables: []
+    disableSelectables: []
+    showObjects: []
+    hideObjects: []
+  - id: power-machines
+    speaker: Pig Boss
+    trigger: 13
+    hideUiAfterCompletion: 0
+    messages:
+    - Set up power for both machines.
+    - Build a Power Pole on the highlighted cell, connect the Solar Panel to it, then connect the Sugar Mine and the Press.
+    completionMessages:
+    - Great. Both machines are powered.
     requiredDroneCount: 3
     requiredCrawlerCount: 0
     requiredMineCount: 1
@@ -170,35 +197,7 @@ MonoBehaviour:
     highlightTargets: []
     openCategory: Power
     allowedCategories:
-    - Essential
     - Power
-    hideDisallowedCategories: 1
-    disableDisallowedCategories: 1
-    enableSelectables: []
-    disableSelectables: []
-    showObjects: []
-    hideObjects: []
-  - id: build-presses
-    speaker: Pig Boss
-    trigger: 7
-    hideUiAfterCompletion: 0
-    messages:
-    - Time to make sugar cubes.
-    - Build two Presses.
-    completionMessages:
-    - Nice. You're ready to scale production.
-    requiredDroneCount: 3
-    requiredCrawlerCount: 0
-    requiredMineCount: 1
-    requiredPressCount: 2
-    requireCameraMove: 0
-    requireZoomIn: 0
-    requireZoomOut: 0
-    highlightTargets: []
-    openCategory: Processing
-    allowedCategories:
-    - Essential
-    - Processing
     hideDisallowedCategories: 1
     disableDisallowedCategories: 1
     enableSelectables: []
@@ -226,33 +225,6 @@ MonoBehaviour:
     allowedCategories:
     - Essential
     - Transport
-    hideDisallowedCategories: 1
-    disableDisallowedCategories: 1
-    enableSelectables: []
-    disableSelectables: []
-    showObjects: []
-    hideObjects: []
-  - id: power-presses
-    speaker: Pig Boss
-    trigger: 10
-    hideUiAfterCompletion: 0
-    messages:
-    - Now provide electricity to your presses.
-    - All current presses need power.
-    completionMessages:
-    - Great. The presses are powered.
-    requiredDroneCount: 3
-    requiredCrawlerCount: 0
-    requiredMineCount: 1
-    requiredPressCount: 1
-    requireCameraMove: 0
-    requireZoomIn: 0
-    requireZoomOut: 0
-    highlightTargets: []
-    openCategory: Power
-    allowedCategories:
-    - Essential
-    - Power
     hideDisallowedCategories: 1
     disableDisallowedCategories: 1
     enableSelectables: []

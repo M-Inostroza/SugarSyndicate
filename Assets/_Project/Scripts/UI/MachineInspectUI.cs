@@ -460,10 +460,10 @@ public class MachineInspectUI : MonoBehaviour
     void UpdateDroneHqUi()
     {
         bool isHq = currentMachine is DroneHQ;
+        if (buyCrawlerButton != null) buyCrawlerButton.gameObject.SetActive(false);
         if (!isHq)
         {
             if (buyDroneButton != null) buyDroneButton.gameObject.SetActive(false);
-            if (buyCrawlerButton != null) buyCrawlerButton.gameObject.SetActive(false);
             return;
         }
 
@@ -472,11 +472,6 @@ public class MachineInspectUI : MonoBehaviour
         {
             buyDroneButton.gameObject.SetActive(true);
             buyDroneButton.interactable = service != null && service.CanAddDrone;
-        }
-        if (buyCrawlerButton != null)
-        {
-            buyCrawlerButton.gameObject.SetActive(true);
-            buyCrawlerButton.interactable = service != null && service.CanAddCrawler;
         }
     }
 

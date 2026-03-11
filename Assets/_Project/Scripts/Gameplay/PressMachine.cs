@@ -107,6 +107,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
     Vector2Int outputFootprintCell;
     Vector2Int sideCellA;
     Vector2Int sideCellB;
+    bool hasSideCellB;
     bool registered;
     readonly List<FootprintBlocker> footprintBlockers = new();
 
@@ -205,7 +206,8 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
                 ClearMachineCell(cell);
                 ClearMachineCell(outputFootprintCell);
                 ClearMachineCell(sideCellA);
-                ClearMachineCell(sideCellB);
+                if (hasSideCellB)
+                    ClearMachineCell(sideCellB);
             }
         }
         catch { }
@@ -237,7 +239,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         return queryCell == cell
             || queryCell == outputFootprintCell
             || queryCell == sideCellA
-            || queryCell == sideCellB;
+            || (hasSideCellB && queryCell == sideCellB);
     }
 
     public bool CanAcceptFrom(Vector2Int approachFromVec)
@@ -273,22 +275,21 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
             facingVec = NormalizeFacing(facingVec);
             cell = ComputeCenterCellFromTransform();
 
-            var sideDir = PerpendicularClockwise(OutputVec);
+            var sideDir = PerpendicularCounterClockwise(OutputVec);
             outputFootprintCell = cell + OutputVec;
             sideCellA = cell + sideDir;
-            sideCellB = cell - sideDir;
+            sideCellB = default;
+            hasSideCellB = false;
 
             grid.SetMachineCell(cell);
             grid.SetMachineCell(outputFootprintCell);
             grid.SetMachineCell(sideCellA);
-            grid.SetMachineCell(sideCellB);
 
             transform.position = GetFootprintCenterWorld(transform.position.z);
 
             MachineRegistry.Register(this);
             RegisterFootprintBlocker(outputFootprintCell);
             RegisterFootprintBlocker(sideCellA);
-            RegisterFootprintBlocker(sideCellB);
             registered = true;
         }
         catch (Exception ex) { DWarn($"[PressMachine] Registration failed: {ex.Message}"); }
@@ -296,9 +297,7 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
 
     Vector2Int ComputeCenterCellFromTransform()
     {
-        float half = grid.CellSize * 0.5f;
-        var offset = new Vector3(OutputVec.x * half, OutputVec.y * half, 0f);
-        return grid.WorldToCell(transform.position - offset);
+        return grid.WorldToCell(transform.position);
     }
 
     static Vector2Int NormalizeFacing(Vector2Int dir)
@@ -308,16 +307,14 @@ public class PressMachine : MonoBehaviour, IMachine, IMachineStorage, IMachinePr
         return dir.y < 0 ? Vector2Int.down : Vector2Int.up;
     }
 
-    static Vector2Int PerpendicularClockwise(Vector2Int dir)
+    static Vector2Int PerpendicularCounterClockwise(Vector2Int dir)
     {
-        return new Vector2Int(dir.y, -dir.x);
+        return new Vector2Int(-dir.y, dir.x);
     }
 
     Vector3 GetFootprintCenterWorld(float z)
     {
-        var center = grid.CellToWorld(cell, z);
-        float half = grid.CellSize * 0.5f;
-        return center + new Vector3(OutputVec.x * half, OutputVec.y * half, 0f);
+        return grid.CellToWorld(cell, z);
     }
 
     void RegisterFootprintBlocker(Vector2Int blockerCell)

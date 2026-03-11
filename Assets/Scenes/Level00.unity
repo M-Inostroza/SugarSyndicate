@@ -6314,11 +6314,11 @@ MonoBehaviour:
     hideUiAfterCompletion: 0
     messages:
     - Good. Now we need more hands.
-    - Select the Drone HQ and buy three drones and three crawlers.
+    - Select the Drone HQ and buy three drones.
     completionMessages:
     - Perfect. That should keep the place running.
     requiredDroneCount: 3
-    requiredCrawlerCount: 3
+    requiredCrawlerCount: 0
     requiredMineCount: 1
     requiredPressCount: 1
     requireCameraMove: 0
@@ -6373,7 +6373,7 @@ MonoBehaviour:
     - Nice. That'll keep the sweets flowing.
     requiredDroneCount: 3
     requiredCrawlerCount: 0
-    requiredMineCount: 2
+    requiredMineCount: 1
     requiredPressCount: 1
     requireCameraMove: 0
     requireZoomIn: 0
@@ -6422,13 +6422,13 @@ MonoBehaviour:
     hideUiAfterCompletion: 0
     messages:
     - Time to make sugar cubes.
-    - Build two Presses.
+    - Build one Press on the highlighted cells.
     completionMessages:
     - Nice. You're ready to scale production.
     requiredDroneCount: 3
     requiredCrawlerCount: 0
     requiredMineCount: 1
-    requiredPressCount: 2
+    requiredPressCount: 1
     requireCameraMove: 0
     requireZoomIn: 0
     requireZoomOut: 0
@@ -6475,8 +6475,20 @@ MonoBehaviour:
     Place it where I tell you, you'll have more freedom later on to play around.
   highlightDroneHqCell: 1
   forceSolarPanelPlacement: 1
-  solarPanelRequiredCells: O8,N8
+  solarPanelRequiredCells: N8,O8,P8
+  solarPanelWrongCellMessage: Place the Solar Panel on the highlighted cells.
   highlightSolarPanelCells: 1
+  forcePressPlacement: 1
+  pressRequiredCells: L7,L6,M6
+  pressWrongCellMessage: Place the Press on the highlighted cells.
+  highlightPressCells: 1
+  forcePolePlacement: 1
+  poleRequiredCell: L10
+  poleWrongCellMessage: Place the Power Pole on the highlighted cell.
+  highlightPoleCell: 1
+  poleStepLimitMessage: Build only one Power Pole for now.
+  mineStepLimitMessage: Build only one Sugar Mine for now.
+  pressStepLimitMessage: Build only one Press for now.
   focusCameraOnMineSelection: 1
   mineFocusDuration: 0.6
   mineFocusEase: 4
@@ -16423,7 +16435,7 @@ MonoBehaviour:
   sugarOverlay: {fileID: 0}
   ghostSortingOrder: 10000
   mineSortingOrder: 1100
-  ghostRotationSpeedDegPerSec: 1080
+  ghostRotationSpeedDegPerSec: 2880
   ghostTint: {r: 0.3607843, g: 0.6973558, b: 0.94509804, a: 0.78039217}
   blockedGhostTint: {r: 1, g: 0.25, b: 0.25, a: 0.75}
   blueprintTint: {r: 0.25, g: 0.8321123, b: 1, a: 0.6}

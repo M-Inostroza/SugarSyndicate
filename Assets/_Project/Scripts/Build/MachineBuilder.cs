@@ -34,7 +34,7 @@ public class MachineBuilder : MonoBehaviour
     [SerializeField] SugarZoneOverlay sugarOverlay;
     [SerializeField] int ghostSortingOrder = 10000;
     [SerializeField] int mineSortingOrder = 1100;
-    [SerializeField, Min(0f)] float ghostRotationSpeedDegPerSec = 1620f;
+    [SerializeField, Min(0f)] float ghostRotationSpeedDegPerSec = 2880f;
     [SerializeField] Color ghostTint = new Color(0.15f, 0.4f, 0.85f, 0.7f);
     [SerializeField] Color blockedGhostTint = new Color(1f, 0.25f, 0.25f, 0.75f);
     [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
@@ -888,9 +888,10 @@ public class MachineBuilder : MonoBehaviour
     {
         Debug.Log($"[MachineBuilder] Committing {activeName} at cell {cell} facing {outputDir}");
 
+        var onboarding = OnboardingManager.Instance;
+
         if (activeName == "DroneHQ")
         {
-            var onboarding = OnboardingManager.Instance;
             if (onboarding != null && onboarding.ShouldBlockDroneHqPlacement(cell))
             {
                 if (ghostGO != null) Destroy(ghostGO);
@@ -923,9 +924,26 @@ public class MachineBuilder : MonoBehaviour
             ClearPreviewState(clearActiveSelection: false);
             return;
         }
+        if (activeName == "Mine")
+        {
+            if (onboarding != null && onboarding.ShouldBlockMinePlacement())
+            {
+                if (ghostGO != null) Destroy(ghostGO);
+                ClearPreviewState(clearActiveSelection: false);
+                return;
+            }
+        }
+        if (activeName == "PressMachine")
+        {
+            if (onboarding != null && onboarding.ShouldBlockPressPlacement(footprint))
+            {
+                if (ghostGO != null) Destroy(ghostGO);
+                ClearPreviewState(clearActiveSelection: false);
+                return;
+            }
+        }
         if (activeName == "SolarPanel")
         {
-            var onboarding = OnboardingManager.Instance;
             if (onboarding != null && onboarding.ShouldBlockSolarPanelPlacement(footprint))
             {
                 if (ghostGO != null) Destroy(ghostGO);
@@ -1177,8 +1195,8 @@ public class MachineBuilder : MonoBehaviour
             else
                 dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
 
-            var side = new Vector2Int(dir.y, -dir.x);
-            return new List<Vector2Int> { origin, origin + side, origin - side, origin + dir };
+            var corner = new Vector2Int(-dir.y, dir.x);
+            return new List<Vector2Int> { origin, origin + dir, origin + corner };
         }
 
         if (activeName == "StorageContainer" || activeName == "Mine")
@@ -1192,7 +1210,7 @@ public class MachineBuilder : MonoBehaviour
         {
             var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
             dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
-            return new List<Vector2Int> { origin, origin + dir, origin + (dir * 2) };
+            return new List<Vector2Int> { origin - dir, origin, origin + dir };
         }
         return new List<Vector2Int> { origin };
     }
@@ -1201,16 +1219,7 @@ public class MachineBuilder : MonoBehaviour
     {
         if (activeName == "PressMachine" && miCellToWorld != null)
         {
-            var dir = facing == Vector2Int.zero ? GetDefaultFacing() : facing;
-            if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
-                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
-            else
-                dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
-
-            var center = (Vector3)miCellToWorld.Invoke(grid, new object[] { origin, 0f });
-            var gs = grid as GridService ?? GridService.Instance;
-            float half = gs != null ? gs.CellSize * 0.5f : 0.5f;
-            return center + new Vector3(dir.x * half, dir.y * half, 0f);
+            return (Vector3)miCellToWorld.Invoke(grid, new object[] { origin, 0f });
         }
 
         var cells = GetFootprintCells(origin, facing);

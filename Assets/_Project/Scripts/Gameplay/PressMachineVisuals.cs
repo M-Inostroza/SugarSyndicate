@@ -6,25 +6,17 @@ public class PressMachineVisuals : MonoBehaviour
 {
     const string UpperLeftPressName = "Press up left";
     const string UpperRightPressName = "Press up right";
-    const string LowerLeftPressName = "Press down left";
-    const string LowerRightPressName = "Press down right";
 
     [Header("References")]
     [SerializeField] PressMachine pressMachine;
     [SerializeField] Transform upperLeftPress;
     [SerializeField] Transform upperRightPress;
-    [SerializeField] Transform lowerLeftPress;
-    [SerializeField] Transform lowerRightPress;
 
     [Header("Press X Positions")]
     [SerializeField] float upperLeftIdleX = -1.1f;
     [SerializeField] float upperLeftPressedX = -0.76f;
     [SerializeField] float upperRightIdleX = 0.14f;
     [SerializeField] float upperRightPressedX = -0.24f;
-    [SerializeField] float lowerLeftIdleX = -1.1f;
-    [SerializeField] float lowerLeftPressedX = -0.76f;
-    [SerializeField] float lowerRightIdleX = 0.14f;
-    [SerializeField] float lowerRightPressedX = -0.24f;
 
     [Header("Timing")]
     [SerializeField, Min(1)] int pressCycles = 2;
@@ -58,8 +50,7 @@ public class PressMachineVisuals : MonoBehaviour
     {
         AutoAssignReferences();
         CacheVisualData();
-        if (!Application.isPlaying)
-            ApplyIdleVisualState();
+        ApplyIdleVisualState();
     }
 
     void Update()
@@ -110,10 +101,6 @@ public class PressMachineVisuals : MonoBehaviour
             upperLeftPress = FindNamedChild(UpperLeftPressName);
         if (upperRightPress == null)
             upperRightPress = FindNamedChild(UpperRightPressName);
-        if (lowerLeftPress == null)
-            lowerLeftPress = FindNamedChild(LowerLeftPressName);
-        if (lowerRightPress == null)
-            lowerRightPress = FindNamedChild(LowerRightPressName);
     }
 
     void CacheVisualData()
@@ -121,9 +108,7 @@ public class PressMachineVisuals : MonoBehaviour
         presses = new[]
         {
             upperLeftPress,
-            upperRightPress,
-            lowerLeftPress,
-            lowerRightPress
+            upperRightPress
         };
 
         idlePressPositions = new Vector3[presses.Length];
@@ -131,8 +116,6 @@ public class PressMachineVisuals : MonoBehaviour
 
         CachePressPose(0, upperLeftPress, upperLeftIdleX, upperLeftPressedX);
         CachePressPose(1, upperRightPress, upperRightIdleX, upperRightPressedX);
-        CachePressPose(2, lowerLeftPress, lowerLeftIdleX, lowerLeftPressedX);
-        CachePressPose(3, lowerRightPress, lowerRightIdleX, lowerRightPressedX);
     }
 
     void CachePressPose(int index, Transform target, float idleX, float pressedX)

@@ -32,7 +32,10 @@ public class OnboardingManager : MonoBehaviour
         PressBuilt = 7,
         CameraMoveZoom = 8,
         MinesConnectedToPresses = 9,
-        PressesPowered = 10
+        PressesPowered = 10,
+        PoleBuilt = 11,
+        PolePowered = 12,
+        MachinesPowered = 13
     }
 
     [System.Serializable]
@@ -92,8 +95,26 @@ public class OnboardingManager : MonoBehaviour
         "Can you follow orders or do I need to find another engineer? Place it where I tell you, you'll have more freedom later on to play around.";
     [SerializeField] bool highlightDroneHqCell = true;
     [SerializeField] bool forceSolarPanelPlacement = true;
-    [SerializeField] string solarPanelRequiredCells = "O8,N8";
+    [SerializeField] string solarPanelRequiredCells = "N8,O8,P8";
+    [SerializeField, TextArea(2, 4)] string solarPanelWrongCellMessage =
+        "Place the Solar Panel on the highlighted cells.";
     [SerializeField] bool highlightSolarPanelCells = true;
+    [SerializeField] bool forcePressPlacement = true;
+    [SerializeField] string pressRequiredCells = "L7,L6,M6";
+    [SerializeField, TextArea(2, 4)] string pressWrongCellMessage =
+        "Place the Press on the highlighted cells.";
+    [SerializeField] bool highlightPressCells = true;
+    [SerializeField] bool forcePolePlacement = true;
+    [SerializeField] string poleRequiredCell = "L10";
+    [SerializeField, TextArea(2, 4)] string poleWrongCellMessage =
+        "Place the Power Pole on the highlighted cell.";
+    [SerializeField] bool highlightPoleCell = true;
+    [SerializeField, TextArea(2, 4)] string poleStepLimitMessage =
+        "Build only one Power Pole for now.";
+    [SerializeField, TextArea(2, 4)] string mineStepLimitMessage =
+        "Build only one Sugar Mine for now.";
+    [SerializeField, TextArea(2, 4)] string pressStepLimitMessage =
+        "Build only one Press for now.";
     [SerializeField] bool focusCameraOnMineSelection = true;
     [SerializeField, Min(0.05f)] float mineFocusDuration = 0.6f;
     [SerializeField] Ease mineFocusEase = Ease.InOutSine;
@@ -221,12 +242,22 @@ public class OnboardingManager : MonoBehaviour
     void EnsureRequiredSteps(List<Step> list)
     {
         if (list == null) return;
-        if (!HasStepId(list, "power-presses"))
+        int legacyPowerPressesIndex = FindStepIndex(list, "power-presses");
+        int machinesPoweredIndex = FindStepIndex(list, "power-machines");
+        if (machinesPoweredIndex < 0)
         {
-            var insertIndex = FindStepIndex(list, "connect-mines-presses");
-            if (insertIndex < 0) insertIndex = list.Count - 1;
-            if (insertIndex < 0) insertIndex = 0;
-            list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), CreatePressesPoweredStep());
+            var replacement = CreateMachinesPoweredStep();
+            if (legacyPowerPressesIndex >= 0 && legacyPowerPressesIndex < list.Count)
+                list[legacyPowerPressesIndex] = replacement;
+            else
+            {
+                var insertIndex = FindStepIndex(list, "connect-solar-to-pole");
+                if (insertIndex < 0) insertIndex = FindStepIndex(list, "build-power-pole");
+                if (insertIndex < 0) insertIndex = FindStepIndex(list, "build-presses");
+                if (insertIndex < 0) insertIndex = list.Count - 1;
+                if (insertIndex < 0) insertIndex = 0;
+                list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), replacement);
+            }
         }
     }
 
@@ -258,11 +289,8 @@ public class OnboardingManager : MonoBehaviour
     void OnValidate()
     {
         if (Application.isPlaying)
-        {
-            if (!tutorialEnabled)
-                DisableTutorialRestrictions();
             return;
-        }
+
         TryAutoCreateStepsAsset();
     }
 
@@ -355,7 +383,7 @@ public class OnboardingManager : MonoBehaviour
                 messages = new List<string>
                 {
                     "Good. Now we need more hands.",
-                    "Select the Drone HQ and buy three drones and three crawlers."
+                    "Select the Drone HQ and buy three drones."
                 },
                 completionMessages = new List<string>
                 {
@@ -363,7 +391,6 @@ public class OnboardingManager : MonoBehaviour
                 },
                 trigger = StepTrigger.BuyDrones,
                 requiredDroneCount = 3,
-                requiredCrawlerCount = 3,
                 allowedCategories = new List<string> { "Essential" }
             },
             new Step
@@ -398,26 +425,9 @@ public class OnboardingManager : MonoBehaviour
                     "Nice. That'll keep the sweets flowing."
                 },
                 trigger = StepTrigger.SugarMineBuilt,
-                requiredMineCount = 2,
+                requiredMineCount = 1,
                 openCategory = "Extraction",
                 allowedCategories = new List<string> { "Extraction" }
-            },
-            new Step
-            {
-                id = "power-mines",
-                speaker = "Pig Boss",
-                messages = new List<string>
-                {
-                    "Now connect the generator to your mines with power cables.",
-                    "All current mines need electricity."
-                },
-                completionMessages = new List<string>
-                {
-                    "Good. The mines are powered."
-                },
-                trigger = StepTrigger.MinesPowered,
-                openCategory = "Power",
-                allowedCategories = new List<string> { "Power" }
             },
             new Step
             {
@@ -426,16 +436,33 @@ public class OnboardingManager : MonoBehaviour
                 messages = new List<string>
                 {
                     "Time to make sugar cubes.",
-                    "Build two Presses."
+                    "Build one Press."
                 },
                 completionMessages = new List<string>
                 {
                     "Nice. You're ready to scale production."
                 },
                 trigger = StepTrigger.PressBuilt,
-                requiredPressCount = 2,
+                requiredPressCount = 1,
                 openCategory = "Processing",
                 allowedCategories = new List<string> { "Essential", "Processing" }
+            },
+            new Step
+            {
+                id = "power-machines",
+                speaker = "Pig Boss",
+                messages = new List<string>
+                {
+                    "Set up power for both machines.",
+                    "Build a Power Pole on the highlighted cell, connect the Solar Panel to it, then connect the Sugar Mine and the Press."
+                },
+                completionMessages = new List<string>
+                {
+                    "Great. Both machines are powered."
+                },
+                trigger = StepTrigger.MachinesPowered,
+                openCategory = "Power",
+                allowedCategories = new List<string> { "Power" }
             },
             new Step
             {
@@ -453,29 +480,28 @@ public class OnboardingManager : MonoBehaviour
                 trigger = StepTrigger.MinesConnectedToPresses,
                 openCategory = "Essential",
                 allowedCategories = new List<string> { "Essential" }
-            },
-            CreatePressesPoweredStep()
+            }
         };
     }
 
-    static Step CreatePressesPoweredStep()
+    static Step CreateMachinesPoweredStep()
     {
         return new Step
         {
-            id = "power-presses",
+            id = "power-machines",
             speaker = "Pig Boss",
             messages = new List<string>
             {
-                "Now provide electricity to your presses.",
-                "All current presses need power."
+                "Set up power for both machines.",
+                "Build a Power Pole on the highlighted cell, connect the Solar Panel to it, then connect the Sugar Mine and the Press."
             },
             completionMessages = new List<string>
             {
-                "Great. The presses are powered."
+                "Great. Both machines are powered."
             },
-            trigger = StepTrigger.PressesPowered,
+            trigger = StepTrigger.MachinesPowered,
             openCategory = "Power",
-            allowedCategories = new List<string> { "Essential", "Power" }
+            allowedCategories = new List<string> { "Power" }
         };
     }
 
@@ -781,6 +807,12 @@ public class OnboardingManager : MonoBehaviour
                 return AreAllMinesPowered(GetCurrentMines(), true);
             case StepTrigger.PressBuilt:
                 return GetPressCount() >= Mathf.Max(0, step.requiredPressCount);
+            case StepTrigger.PoleBuilt:
+                return GetPoleCount() > 0;
+            case StepTrigger.PolePowered:
+                return HasPoweredPole();
+            case StepTrigger.MachinesPowered:
+                return HasPoweredPole() && AreAllTrackedMachinesPoweredFromPole(GetCurrentMines(), GetCurrentPresses(), true);
             case StepTrigger.MinesConnectedToPresses:
                 return AreAllMinesConnectedToPresses(GetCurrentMines(), GetCurrentPresses(), true);
             case StepTrigger.PressesPowered:
@@ -805,6 +837,8 @@ public class OnboardingManager : MonoBehaviour
         dialogueMode = DialogueMode.Intro;
         if (step.trigger == StepTrigger.MinesPowered)
             CaptureTrackedMines();
+        if (step.trigger == StepTrigger.MachinesPowered)
+            CaptureTrackedMinesAndPresses();
         if (step.trigger == StepTrigger.MinesConnectedToPresses)
             CaptureTrackedMinesAndPresses();
         if (step.trigger == StepTrigger.PressesPowered)
@@ -824,6 +858,10 @@ public class OnboardingManager : MonoBehaviour
         }
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.PolePowered)
+            TryCompletePolePowered(step);
+        if (step.trigger == StepTrigger.MachinesPowered)
+            TryCompleteMachinesPowered(step);
         if (step.trigger == StepTrigger.MinesConnectedToPresses)
             TryCompleteMinesConnected(step);
         if (step.trigger == StepTrigger.PressesPowered)
@@ -843,7 +881,7 @@ public class OnboardingManager : MonoBehaviour
 
         if (highlighter != null)
             highlighter.ClearTargets();
-        if (IsDroneHqPlacementStep(step) || IsSolarPanelPlacementStep(step))
+        if (IsDroneHqPlacementStep(step) || IsSolarPanelPlacementStep(step) || IsPressPlacementStep(step))
             HidePlacementHighlight();
         if (goalUi != null) goalUi.Hide();
         var completion = GetCompletionMessages(step);
@@ -1044,6 +1082,9 @@ public class OnboardingManager : MonoBehaviour
             case StepTrigger.SugarMineBuilt:
             case StepTrigger.MinesPowered:
             case StepTrigger.PressBuilt:
+            case StepTrigger.PoleBuilt:
+            case StepTrigger.PolePowered:
+            case StepTrigger.MachinesPowered:
             case StepTrigger.MinesConnectedToPresses:
             case StepTrigger.PressesPowered:
                 return true;
@@ -1189,6 +1230,24 @@ public class OnboardingManager : MonoBehaviour
             }
         }
 
+        if (IsPressPlacementStep(step) && highlightPressCells && forcePressPlacement)
+        {
+            if (TryGetPressRequiredCells(out var cells))
+            {
+                ShowPlacementHighlight(cells);
+                return;
+            }
+        }
+
+        if (IsPolePlacementStep(step) && highlightPoleCell && forcePolePlacement && GetPolePlacementCount() <= 0)
+        {
+            if (TryGetPoleRequiredCell(out var cell))
+            {
+                ShowPlacementHighlight(new[] { cell });
+                return;
+            }
+        }
+
         if (IsBuyDronesStep(step) && highlightDroneHqDuringBuyStep)
         {
             if (TryGetDroneHqCell(out var hqCell))
@@ -1222,6 +1281,16 @@ public class OnboardingManager : MonoBehaviour
     bool IsSolarPanelPlacementStep(Step step)
     {
         return step != null && step.trigger == StepTrigger.SolarPanelBuilt;
+    }
+
+    bool IsPolePlacementStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.MachinesPowered;
+    }
+
+    bool IsPressPlacementStep(Step step)
+    {
+        return step != null && step.trigger == StepTrigger.PressBuilt;
     }
 
     static bool IsBuyDronesStep(Step step)
@@ -1281,6 +1350,34 @@ public class OnboardingManager : MonoBehaviour
         return cells != null && cells.Count > 0;
     }
 
+    bool TryGetPressRequiredCells(out List<Vector2Int> cells)
+    {
+        cells = null;
+        if (!forcePressPlacement) return false;
+        if (!TryParseCellList(pressRequiredCells, out cells)) return false;
+
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid != null)
+        {
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (!grid.InBounds(cells[i])) return false;
+            }
+        }
+        return cells != null && cells.Count > 0;
+    }
+
+    bool TryGetPoleRequiredCell(out Vector2Int cell)
+    {
+        cell = default;
+        if (!forcePolePlacement) return false;
+        if (!TryParseCellLabel(poleRequiredCell, out cell)) return false;
+
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid != null && !grid.InBounds(cell)) return false;
+        return true;
+    }
+
     bool TryGetDroneHqCell(out Vector2Int cell)
     {
         cell = default;
@@ -1338,9 +1435,77 @@ public class OnboardingManager : MonoBehaviour
         if (!TryGetSolarPanelRequiredCells(out var requiredCells)) return false;
         if (MatchesRequiredCells(footprint, requiredCells)) return false;
 
-        ShowOneOffMessage(droneHqWrongCellMessage);
+        ShowOneOffMessage(solarPanelWrongCellMessage);
         if (highlightSolarPanelCells)
             ShowPlacementHighlight(requiredCells);
+        return true;
+    }
+
+    public bool ShouldBlockMinePlacement()
+    {
+        if (!isActive) return false;
+        var step = GetCurrentStep();
+        if (!IsSugarMinePlacementStep(step)) return false;
+        int required = Mathf.Max(0, step.requiredMineCount);
+        if (required <= 0) return false;
+        if (GetMinePlacementCount() < required) return false;
+
+        ShowOneOffMessage(mineStepLimitMessage);
+        return true;
+    }
+
+    public bool ShouldBlockPressPlacement(IReadOnlyList<Vector2Int> footprint)
+    {
+        if (!isActive) return false;
+        var step = GetCurrentStep();
+        if (!IsPressPlacementStep(step)) return false;
+
+        if (forcePressPlacement)
+        {
+            if (footprint == null || footprint.Count == 0) return false;
+            if (!TryGetPressRequiredCells(out var requiredCells)) return false;
+            if (!MatchesRequiredCells(footprint, requiredCells))
+            {
+                ShowOneOffMessage(pressWrongCellMessage);
+                if (highlightPressCells)
+                    ShowPlacementHighlight(requiredCells);
+                return true;
+            }
+        }
+
+        int required = Mathf.Max(0, step.requiredPressCount);
+        if (required <= 0) return false;
+        if (GetPressPlacementCount() < required) return false;
+
+        ShowOneOffMessage(pressStepLimitMessage);
+        if (highlightPressCells && forcePressPlacement && TryGetPressRequiredCells(out var highlightCells))
+            ShowPlacementHighlight(highlightCells);
+        return true;
+    }
+
+    public bool ShouldBlockPolePlacement(Vector2Int cell)
+    {
+        if (!isActive) return false;
+        var step = GetCurrentStep();
+        if (!IsPolePlacementStep(step)) return false;
+
+        if (forcePolePlacement && GetPolePlacementCount() <= 0)
+        {
+            if (!TryGetPoleRequiredCell(out var requiredCell)) return false;
+            if (cell != requiredCell)
+            {
+                ShowOneOffMessage(poleWrongCellMessage);
+                if (highlightPoleCell)
+                    ShowPlacementHighlight(new[] { requiredCell });
+                return true;
+            }
+        }
+
+        if (GetPolePlacementCount() <= 0) return false;
+
+        ShowOneOffMessage(poleStepLimitMessage);
+        if (highlightPoleCell && forcePolePlacement && TryGetPoleRequiredCell(out var highlightCell))
+            ShowPlacementHighlight(new[] { highlightCell });
         return true;
     }
 
@@ -1507,6 +1672,11 @@ public class OnboardingManager : MonoBehaviour
             if (GetPressCount() >= Mathf.Max(0, step.requiredPressCount))
                 RequestCompleteCurrentStep(step);
         }
+        else if (step.trigger == StepTrigger.PoleBuilt && type == BlueprintTask.BlueprintType.Pole)
+        {
+            if (GetPoleCount() > 0)
+                RequestCompleteCurrentStep(step);
+        }
         else if (step.trigger == StepTrigger.MinesConnectedToPresses)
         {
             if (type == BlueprintTask.BlueprintType.Belt
@@ -1519,6 +1689,14 @@ public class OnboardingManager : MonoBehaviour
         else if (step.trigger == StepTrigger.MinesPowered)
         {
             TryCompleteMinesPowered(step);
+        }
+        else if (step.trigger == StepTrigger.PolePowered)
+        {
+            TryCompletePolePowered(step);
+        }
+        else if (step.trigger == StepTrigger.MachinesPowered)
+        {
+            TryCompleteMachinesPowered(step);
         }
         UpdateGoalUi(step);
     }
@@ -1550,6 +1728,10 @@ public class OnboardingManager : MonoBehaviour
         if (step == null) return;
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.PolePowered)
+            TryCompletePolePowered(step);
+        if (step.trigger == StepTrigger.MachinesPowered)
+            TryCompleteMachinesPowered(step);
         if (step.trigger == StepTrigger.PressesPowered)
             TryCompletePressesPowered(step);
         UpdateGoalUi(step);
@@ -1562,6 +1744,10 @@ public class OnboardingManager : MonoBehaviour
         if (step == null) return;
         if (step.trigger == StepTrigger.MinesPowered)
             TryCompleteMinesPowered(step);
+        if (step.trigger == StepTrigger.PolePowered)
+            TryCompletePolePowered(step);
+        if (step.trigger == StepTrigger.MachinesPowered)
+            TryCompleteMachinesPowered(step);
         if (step.trigger == StepTrigger.PressesPowered)
             TryCompletePressesPowered(step);
         UpdateGoalUi(step);
@@ -1766,6 +1952,11 @@ public class OnboardingManager : MonoBehaviour
         return count;
     }
 
+    int GetMinePlacementCount()
+    {
+        return GetMineCount() + CountPendingMachineBlueprints(IsSugarMineTask);
+    }
+
     int GetPressCount()
     {
         var presses = FindObjectsByType<PressMachine>(FindObjectsSortMode.None);
@@ -1777,6 +1968,29 @@ public class OnboardingManager : MonoBehaviour
             if (press != null && !press.isGhost) count++;
         }
         return count;
+    }
+
+    int GetPressPlacementCount()
+    {
+        return GetPressCount() + CountPendingMachineBlueprints(IsPressTask);
+    }
+
+    int GetPoleCount()
+    {
+        var poles = FindObjectsByType<PowerPole>(FindObjectsSortMode.None);
+        if (poles == null || poles.Length == 0) return 0;
+        int count = 0;
+        for (int i = 0; i < poles.Length; i++)
+        {
+            var pole = poles[i];
+            if (pole != null && !pole.isGhost) count++;
+        }
+        return count;
+    }
+
+    int GetPolePlacementCount()
+    {
+        return GetPoleCount() + CountPendingBlueprints(BlueprintTask.BlueprintType.Pole);
     }
 
     List<SugarMine> GetCurrentMines()
@@ -1817,6 +2031,37 @@ public class OnboardingManager : MonoBehaviour
         if (droneService == null && autoFindReferences)
             droneService = FindAnyObjectByType<DroneTaskService>();
         return droneService != null ? droneService.TotalCrawlers : 0;
+    }
+
+    int CountPendingMachineBlueprints(System.Func<BlueprintTask, bool> predicate)
+    {
+        if (predicate == null) return 0;
+        var tasks = FindObjectsByType<BlueprintTask>(FindObjectsSortMode.None);
+        if (tasks == null || tasks.Length == 0) return 0;
+
+        int count = 0;
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            var task = tasks[i];
+            if (task == null || task.Type != BlueprintTask.BlueprintType.Machine) continue;
+            if (predicate(task)) count++;
+        }
+        return count;
+    }
+
+    int CountPendingBlueprints(BlueprintTask.BlueprintType type)
+    {
+        var tasks = FindObjectsByType<BlueprintTask>(FindObjectsSortMode.None);
+        if (tasks == null || tasks.Length == 0) return 0;
+
+        int count = 0;
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            var task = tasks[i];
+            if (task == null || task.Type != type) continue;
+            count++;
+        }
+        return count;
     }
 
     bool MeetsBuyCrewStep(Step step)
@@ -1927,6 +2172,37 @@ public class OnboardingManager : MonoBehaviour
                     items.Add(new TutorialGoalUI.ChecklistItem(label, required <= 0 || current >= required));
                 }
                 break;
+            case StepTrigger.PoleBuilt:
+                {
+                    int current = GetPoleCount();
+                    string label = FormatCountLabel("Build", "power pole", current, 1);
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, current >= 1));
+                }
+                break;
+            case StepTrigger.PolePowered:
+                {
+                    GetPolePowerProgress(out var powered, out var total);
+                    string label = total > 0
+                        ? $"Connect the solar panel to a power pole ({powered}/{total})"
+                        : "Connect the solar panel to a power pole";
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, powered > 0));
+                }
+                break;
+            case StepTrigger.MachinesPowered:
+                {
+                    int poles = GetPoleCount();
+                    items.Add(new TutorialGoalUI.ChecklistItem("Build a power pole", poles > 0));
+
+                    bool polePowered = HasPoweredPole();
+                    items.Add(new TutorialGoalUI.ChecklistItem("Connect the solar panel to the power pole", polePowered));
+
+                    GetMachinesPoweredFromPoleProgress(trackedMines, trackedPresses, out var powered, out var total);
+                    string label = total > 0
+                        ? $"Connect the Sugar Mine and Press to the pole ({powered}/{total})"
+                        : "Connect the Sugar Mine and Press to the pole";
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && powered >= total));
+                }
+                break;
             case StepTrigger.MinesConnectedToPresses:
                 {
                     GetMinePressConnectionProgress(trackedMines, trackedPresses, out var connected, out var total);
@@ -1998,6 +2274,21 @@ public class OnboardingManager : MonoBehaviour
             RequestCompleteCurrentStep(step);
     }
 
+    void TryCompletePolePowered(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.PolePowered) return;
+        if (HasPoweredPole())
+            RequestCompleteCurrentStep(step);
+    }
+
+    void TryCompleteMachinesPowered(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.MachinesPowered) return;
+        if (trackedMines.Count == 0 || trackedPresses.Count == 0) return;
+        if (HasPoweredPole() && AreAllTrackedMachinesPoweredFromPole(trackedMines, trackedPresses, true))
+            RequestCompleteCurrentStep(step);
+    }
+
     void TryCompletePressesPowered(Step step)
     {
         if (step == null || step.trigger != StepTrigger.PressesPowered) return;
@@ -2053,6 +2344,20 @@ public class OnboardingManager : MonoBehaviour
         return powered >= total;
     }
 
+    bool AreAllTrackedMachinesPowered(List<SugarMine> mines, List<PressMachine> presses, bool requireAny)
+    {
+        GetMachinesPowerProgress(mines, presses, out var powered, out var total);
+        if (total == 0) return !requireAny;
+        return powered >= total;
+    }
+
+    bool AreAllTrackedMachinesPoweredFromPole(List<SugarMine> mines, List<PressMachine> presses, bool requireAny)
+    {
+        GetMachinesPoweredFromPoleProgress(mines, presses, out var powered, out var total);
+        if (total == 0) return !requireAny;
+        return powered >= total;
+    }
+
     void GetMinePowerProgress(List<SugarMine> mines, out int powered, out int total)
     {
         powered = 0;
@@ -2088,6 +2393,51 @@ public class OnboardingManager : MonoBehaviour
             if (power.IsCellPoweredOrAdjacent(press.Cell))
                 powered++;
         }
+    }
+
+    void GetPolePowerProgress(out int powered, out int total)
+    {
+        powered = 0;
+        total = 0;
+        var poles = FindObjectsByType<PowerPole>(FindObjectsSortMode.None);
+        if (poles == null || poles.Length == 0) return;
+        var grid = GridService.Instance;
+        var power = PowerService.Instance;
+        if (grid == null || power == null) return;
+
+        for (int i = 0; i < poles.Length; i++)
+        {
+            var pole = poles[i];
+            if (pole == null || pole.isGhost) continue;
+            total++;
+            var cell = grid.WorldToCell(pole.transform.position);
+            if (power.IsPolePowered(cell))
+                powered++;
+        }
+    }
+
+    bool HasPoweredPole()
+    {
+        GetPolePowerProgress(out var powered, out var total);
+        return total > 0 && powered > 0;
+    }
+
+    void GetMachinesPowerProgress(List<SugarMine> mines, List<PressMachine> presses, out int powered, out int total)
+    {
+        powered = 0;
+        total = 0;
+        GetMinePowerProgress(mines, out var minesPowered, out var mineTotal);
+        GetPressPowerProgress(presses, out var pressesPowered, out var pressTotal);
+        powered = minesPowered + pressesPowered;
+        total = mineTotal + pressTotal;
+    }
+
+    void GetMachinesPoweredFromPoleProgress(List<SugarMine> mines, List<PressMachine> presses, out int powered, out int total)
+    {
+        powered = 0;
+        total = 0;
+        if (!HasPoweredPole()) return;
+        GetMachinesPowerProgress(mines, presses, out powered, out total);
     }
 
     void GetMinePressConnectionProgress(List<SugarMine> mines, List<PressMachine> presses, out int connected, out int total)

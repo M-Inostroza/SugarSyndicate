@@ -46,6 +46,12 @@ public class DroneTaskTarget : MonoBehaviour
         }
     }
 
+    protected void SetWorkPosition(Vector3 targetPosition)
+    {
+        workPosition = targetPosition;
+        hasWorkPosition = true;
+    }
+
     protected void CancelTask()
     {
         if (registered)
@@ -80,7 +86,7 @@ public class DroneTaskTarget : MonoBehaviour
         if (assignedWorker == crawler) assignedWorker = null;
     }
 
-    public void ApplyWork(float deltaSeconds)
+    public virtual void ApplyWork(float deltaSeconds)
     {
         if (!registered || remainingSeconds <= 0f) return;
         remainingSeconds -= Mathf.Max(0f, deltaSeconds);

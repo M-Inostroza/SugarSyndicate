@@ -4,6 +4,11 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class PowerLinkLine : MonoBehaviour
 {
+    public const int DefaultSagSegments = 10;
+    public const float DefaultBaseSag = 0.12f;
+    public const float DefaultSagPerUnit = 0.075f;
+    public const float DefaultMaxSag = 0.6f;
+
     [SerializeField] Component startNode;
     [SerializeField] Component endNode;
     [SerializeField] LineRenderer lineRenderer;
@@ -239,57 +244,65 @@ public class PowerLinkLine : MonoBehaviour
         if (lineRenderer == null)
             lineRenderer = gameObject.AddComponent<LineRenderer>();
 
-        lineRenderer.positionCount = useSagCurve ? Mathf.Max(3, sagSegments) : 2;
-        lineRenderer.useWorldSpace = true;
-        lineRenderer.numCapVertices = 3;
-        lineRenderer.numCornerVertices = 2;
-        lineRenderer.startWidth = lineWidth;
-        lineRenderer.endWidth = lineWidth;
-        lineRenderer.startColor = lineColor;
-        lineRenderer.endColor = lineColor;
-        if (!string.IsNullOrWhiteSpace(lineSortingLayerName))
-            lineRenderer.sortingLayerName = lineSortingLayerName;
-        lineRenderer.sortingOrder = lineSortingOrder;
-
-        if (lineMaterial != null)
-        {
-            lineRenderer.sharedMaterial = lineMaterial;
-        }
-        else if (lineRenderer.sharedMaterial == null)
-        {
-            var defaultShader = Shader.Find("Sprites/Default");
-            if (defaultShader != null)
-                lineRenderer.sharedMaterial = new Material(defaultShader);
-        }
+        ConfigureLineRenderer(lineRenderer, lineWidth, lineColor, lineMaterial, lineSortingLayerName, lineSortingOrder, useSagCurve, sagSegments);
     }
 
     void UpdateVisual()
     {
         if (lineRenderer == null) return;
 
-        lineRenderer.startWidth = lineWidth;
-        lineRenderer.endWidth = lineWidth;
-        lineRenderer.startColor = lineColor;
-        lineRenderer.endColor = lineColor;
-        if (!string.IsNullOrWhiteSpace(lineSortingLayerName))
-            lineRenderer.sortingLayerName = lineSortingLayerName;
-        lineRenderer.sortingOrder = lineSortingOrder;
+        ConfigureLineRenderer(lineRenderer, lineWidth, lineColor, lineMaterial, lineSortingLayerName, lineSortingOrder, useSagCurve, sagSegments);
 
         float z = transform.position.z;
         var startPos = PowerNodeUtil.GetNodeWorldPosition(startNode, z);
         var endPos = PowerNodeUtil.GetNodeWorldPosition(endNode, z);
+        UpdateLinePositions(lineRenderer, startPos, endPos, useSagCurve, sagSegments, baseSag, sagPerUnit, maxSag);
+    }
+
+    public static void ConfigureLineRenderer(LineRenderer line, float width, Color color, Material material, string sortingLayerName, int sortingOrder, bool useSagCurve = true, int sagSegments = DefaultSagSegments)
+    {
+        if (line == null) return;
+
+        line.positionCount = useSagCurve ? Mathf.Max(3, sagSegments) : 2;
+        line.useWorldSpace = true;
+        line.numCapVertices = 3;
+        line.numCornerVertices = 2;
+        line.startWidth = width;
+        line.endWidth = width;
+        line.startColor = color;
+        line.endColor = color;
+        if (!string.IsNullOrWhiteSpace(sortingLayerName))
+            line.sortingLayerName = sortingLayerName;
+        line.sortingOrder = sortingOrder;
+
+        if (material != null)
+        {
+            line.sharedMaterial = material;
+        }
+        else if (line.sharedMaterial == null)
+        {
+            var defaultShader = Shader.Find("Sprites/Default");
+            if (defaultShader != null)
+                line.sharedMaterial = new Material(defaultShader);
+        }
+    }
+
+    public static void UpdateLinePositions(LineRenderer line, Vector3 startPos, Vector3 endPos, bool useSagCurve = true, int sagSegments = DefaultSagSegments, float baseSag = DefaultBaseSag, float sagPerUnit = DefaultSagPerUnit, float maxSag = DefaultMaxSag)
+    {
+        if (line == null) return;
 
         if (!useSagCurve)
         {
-            lineRenderer.positionCount = 2;
-            lineRenderer.SetPosition(0, startPos);
-            lineRenderer.SetPosition(1, endPos);
+            if (line.positionCount != 2)
+                line.positionCount = 2;
+            line.SetPosition(0, startPos);
+            line.SetPosition(1, endPos);
             return;
         }
 
         int segments = Mathf.Max(3, sagSegments);
-        if (lineRenderer.positionCount != segments)
-            lineRenderer.positionCount = segments;
+        if (line.positionCount != segments)
+            line.positionCount = segments;
 
         float distance = Vector2.Distance(startPos, endPos);
         float sag = Mathf.Min(maxSag, baseSag + distance * sagPerUnit);
@@ -298,7 +311,7 @@ public class PowerLinkLine : MonoBehaviour
         for (int i = 0; i < segments; i++)
         {
             float t = segments <= 1 ? 0f : (float)i / (segments - 1);
-            lineRenderer.SetPosition(i, EvaluateQuadraticBezier(startPos, controlPos, endPos, t));
+            line.SetPosition(i, EvaluateQuadraticBezier(startPos, controlPos, endPos, t));
         }
     }
 

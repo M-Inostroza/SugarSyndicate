@@ -33,11 +33,27 @@ public class BlueprintTask : DroneTaskTarget
     [SerializeField, Min(0)] int buildCost = 0;
     [SerializeField] bool keepVisualOnComplete = false;
     [SerializeField] int sortingOrderOverride = int.MinValue;
+    [SerializeField] bool nodeLinkCable = false;
+    [SerializeField] Component cableStartNode;
+    [SerializeField] Component cableEndNode;
+    [SerializeField] float linkLineWidth = 0.09f;
+    [SerializeField] Color linkLineColor = new Color(1f, 0.92f, 0.35f, 0.95f);
+    [SerializeField] Material linkLineMaterial;
+    [SerializeField] string linkSortingLayerName = "Default";
+    [SerializeField] int linkSortingOrder = 5000;
+    [SerializeField, Range(0.05f, 0.95f)] float nodeLinkCarryProgressThreshold = 0.35f;
+    [SerializeField] bool blueprintLinkUsesSagCurve = true;
+    [SerializeField, Min(3)] int blueprintLinkSagSegments = PowerLinkLine.DefaultSagSegments;
+    [SerializeField, Min(0f)] float blueprintLinkBaseSag = PowerLinkLine.DefaultBaseSag;
+    [SerializeField, Min(0f)] float blueprintLinkSagPerUnit = PowerLinkLine.DefaultSagPerUnit;
+    [SerializeField, Min(0f)] float blueprintLinkMaxSag = PowerLinkLine.DefaultMaxSag;
 
     [Header("Visuals")]
     [SerializeField] Color blueprintTint = new Color(0.35f, 0.75f, 1f, 0.6f);
 
     bool countedAsHq;
+    bool nodeLinkCarryStarted;
+    LineRenderer blueprintLinkRenderer;
     List<Color> cachedColors;
     List<SpriteRenderer> cachedRenderers;
 
@@ -45,6 +61,7 @@ public class BlueprintTask : DroneTaskTarget
     public BlueprintType Type => blueprintType;
     public bool IsHqBlueprint => blueprintType == BlueprintType.DroneHQ;
     public GameObject BuildPrefab => buildPrefab;
+    public bool IsNodeLinkCableBlueprint => blueprintType == BlueprintType.Cable && nodeLinkCable;
 
     public void InitializeBelt(Vector2Int cell, Direction outDir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
     {
@@ -64,6 +81,10 @@ public class BlueprintTask : DroneTaskTarget
     public void InitializeCable(Vector2Int cell, Direction dir, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
     {
         blueprintType = BlueprintType.Cable;
+        nodeLinkCable = false;
+        nodeLinkCarryStarted = false;
+        cableStartNode = null;
+        cableEndNode = null;
         footprintCells = new[] { cell };
         cableDirection = dir;
         cableIsCurve = false;
@@ -72,6 +93,27 @@ public class BlueprintTask : DroneTaskTarget
         buildCost = cost;
         keepVisualOnComplete = true;
         RegisterBlueprint(buildSeconds);
+    }
+
+    public void InitializeNodeLinkCable(Component fromNode, Component toNode, IReadOnlyList<Vector2Int> cableCells, float width, Color color, Material material, string sortingLayerName, int sortingOrder, int cost, float buildSeconds)
+    {
+        blueprintType = BlueprintType.Cable;
+        nodeLinkCable = true;
+        nodeLinkCarryStarted = false;
+        cableStartNode = fromNode;
+        cableEndNode = toNode;
+        linkLineWidth = Mathf.Max(0.01f, width);
+        linkLineColor = color;
+        linkLineMaterial = material;
+        linkSortingLayerName = sortingLayerName;
+        linkSortingOrder = sortingOrder;
+        footprintCells = cableCells != null ? new List<Vector2Int>(cableCells).ToArray() : new Vector2Int[0];
+        buildRotation = Quaternion.identity;
+        buildPrefab = null;
+        buildCost = cost;
+        keepVisualOnComplete = false;
+        RegisterBlueprint(buildSeconds);
+        SetWorkPosition(ResolveNodeWorldPosition(cableStartNode, transform.position.z));
     }
 
     public void InitializePole(Vector2Int cell, Quaternion rotation, GameObject prefab, int cost, float buildSeconds)
@@ -163,6 +205,7 @@ public class BlueprintTask : DroneTaskTarget
 
         var workPos = ComputeFootprintCenter();
         BeginTask(DroneTaskType.Build, buildSeconds, DroneTaskPriority.Normal, workPos);
+        EnsureNodeLinkBlueprintVisual();
     }
 
     public void UpdateBeltDirection(Direction newDirection, Quaternion rotation)
@@ -199,6 +242,30 @@ public class BlueprintTask : DroneTaskTarget
         cableCurveTo = toDirection;
         cableDirection = toDirection;
         buildRotation = rotation;
+    }
+
+    public bool TryGetDroneCableCarryVisual(out Vector3 anchorWorld, out float width, out Color color, out Material material, out string sortingLayerName, out int sortingOrder)
+    {
+        anchorWorld = Vector3.zero;
+        width = 0f;
+        color = Color.white;
+        material = null;
+        sortingLayerName = linkSortingLayerName;
+        sortingOrder = linkSortingOrder;
+
+        if (!IsNodeLinkCableBlueprint || !nodeLinkCarryStarted || IsComplete)
+            return false;
+
+        anchorWorld = ResolveNodeWorldPosition(cableStartNode, transform.position.z);
+        width = linkLineWidth;
+        color = linkLineColor;
+        material = linkLineMaterial;
+        return true;
+    }
+
+    void LateUpdate()
+    {
+        UpdateNodeLinkBlueprintVisual();
     }
 
     void MarkBlueprintCells(bool enabled)
@@ -289,8 +356,24 @@ public class BlueprintTask : DroneTaskTarget
     {
         CancelTask();
         MarkBlueprintCells(false);
+        if (blueprintLinkRenderer != null)
+            blueprintLinkRenderer.enabled = false;
         if (buildCost > 0) GameManager.Instance?.AddSweetCredits(buildCost);
         Destroy(gameObject);
+    }
+
+    public override void ApplyWork(float deltaSeconds)
+    {
+        base.ApplyWork(deltaSeconds);
+
+        if (!IsNodeLinkCableBlueprint || nodeLinkCarryStarted || IsComplete)
+            return;
+
+        if (Progress01 < Mathf.Clamp01(nodeLinkCarryProgressThreshold))
+            return;
+
+        nodeLinkCarryStarted = true;
+        SetWorkPosition(ResolveNodeWorldPosition(cableEndNode, transform.position.z));
     }
 
     protected override void OnTaskCompleted()
@@ -370,6 +453,12 @@ public class BlueprintTask : DroneTaskTarget
 
     void CompleteCable()
     {
+        if (IsNodeLinkCableBlueprint)
+        {
+            CompleteNodeLinkCable();
+            return;
+        }
+
         if (footprintCells == null || footprintCells.Length == 0)
             return;
 
@@ -402,6 +491,35 @@ public class BlueprintTask : DroneTaskTarget
             else
                 powerCable.SetDirection(cableDirection);
         }
+    }
+
+    void CompleteNodeLinkCable()
+    {
+        if (!PowerNodeUtil.IsConnectableNode(cableStartNode) || !PowerNodeUtil.IsConnectableNode(cableEndNode))
+            return;
+
+        if (PowerLinkLine.HasLinkBetween(cableStartNode, cableEndNode))
+            return;
+
+        List<Vector2Int> path = null;
+        if (footprintCells != null && footprintCells.Length > 0)
+            path = new List<Vector2Int>(footprintCells);
+        if ((path == null || path.Count == 0) && !PowerNodeUtil.TryBuildCableCells(cableStartNode, cableEndNode, out path))
+            return;
+
+        var go = new GameObject($"PowerLink_{cableStartNode.name}_{cableEndNode.name}");
+        if (transform.parent != null)
+            go.transform.SetParent(transform.parent, true);
+
+        float z = Mathf.Min(cableStartNode.transform.position.z, cableEndNode.transform.position.z);
+        go.transform.position = new Vector3(0f, 0f, z);
+
+        var tag = go.AddComponent<BuildCostTag>();
+        tag.Cost = buildCost;
+
+        var link = go.AddComponent<PowerLinkLine>();
+        if (!link.Initialize(cableStartNode, cableEndNode, linkLineWidth, linkLineColor, linkLineMaterial, linkSortingLayerName, linkSortingOrder, path))
+            Destroy(go);
     }
 
     void CompletePole()
@@ -443,17 +561,6 @@ public class BlueprintTask : DroneTaskTarget
             return;
 
         var pos = ComputeFootprintCenter();
-        if (buildPrefab.GetComponent<PressMachine>() != null)
-        {
-            var center = grid.CellToWorld(footprintCells[0], transform.position.z);
-            float half = grid.CellSize * 0.5f;
-            var dir = facingVec;
-            if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y))
-                dir = dir.x >= 0 ? Vector2Int.right : Vector2Int.left;
-            else
-                dir = dir.y >= 0 ? Vector2Int.up : Vector2Int.down;
-            pos = center + new Vector3(dir.x * half, dir.y * half, 0f);
-        }
         var go = Instantiate(buildPrefab, pos, buildRotation);
         var tag = go.GetComponent<BuildCostTag>();
         if (tag == null) tag = go.AddComponent<BuildCostTag>();
@@ -553,7 +660,53 @@ public class BlueprintTask : DroneTaskTarget
 
     protected override void OnDestroy()
     {
+        if (blueprintLinkRenderer != null)
+            Destroy(blueprintLinkRenderer.gameObject);
         base.OnDestroy();
         if (countedAsHq) hqBlueprintCount = Mathf.Max(0, hqBlueprintCount - 1);
+    }
+
+    Vector3 ResolveNodeWorldPosition(Component node, float fallbackZ)
+    {
+        if (node == null)
+            return transform.position;
+
+        float z = node.transform.position.z;
+        if (Mathf.Approximately(z, 0f))
+            z = fallbackZ;
+        return PowerNodeUtil.GetNodeWorldPosition(node, z);
+    }
+
+    void EnsureNodeLinkBlueprintVisual()
+    {
+        if (!IsNodeLinkCableBlueprint || blueprintLinkRenderer != null)
+            return;
+
+        var lineObject = new GameObject("NodeLinkBlueprintVisual");
+        lineObject.transform.SetParent(transform, false);
+        blueprintLinkRenderer = lineObject.AddComponent<LineRenderer>();
+        PowerLinkLine.ConfigureLineRenderer(blueprintLinkRenderer, linkLineWidth, blueprintTint, linkLineMaterial, linkSortingLayerName, linkSortingOrder, blueprintLinkUsesSagCurve, blueprintLinkSagSegments);
+        blueprintLinkRenderer.enabled = true;
+    }
+
+    void UpdateNodeLinkBlueprintVisual()
+    {
+        if (!IsNodeLinkCableBlueprint || IsComplete)
+        {
+            if (blueprintLinkRenderer != null)
+                blueprintLinkRenderer.enabled = false;
+            return;
+        }
+
+        EnsureNodeLinkBlueprintVisual();
+        if (blueprintLinkRenderer == null || !PowerNodeUtil.IsConnectableNode(cableStartNode) || !PowerNodeUtil.IsConnectableNode(cableEndNode))
+            return;
+
+        float z = transform.position.z;
+        var startPos = ResolveNodeWorldPosition(cableStartNode, z);
+        var endPos = ResolveNodeWorldPosition(cableEndNode, z);
+        PowerLinkLine.ConfigureLineRenderer(blueprintLinkRenderer, linkLineWidth, blueprintTint, linkLineMaterial, linkSortingLayerName, linkSortingOrder, blueprintLinkUsesSagCurve, blueprintLinkSagSegments);
+        PowerLinkLine.UpdateLinePositions(blueprintLinkRenderer, startPos, endPos, blueprintLinkUsesSagCurve, blueprintLinkSagSegments, blueprintLinkBaseSag, blueprintLinkSagPerUnit, blueprintLinkMaxSag);
+        blueprintLinkRenderer.enabled = true;
     }
 }

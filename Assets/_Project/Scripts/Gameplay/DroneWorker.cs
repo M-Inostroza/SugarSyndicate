@@ -17,6 +17,13 @@ public class DroneWorker : MonoBehaviour
     [SerializeField] bool enforceSortingOrder = true;
     [Tooltip("Sorting order offset applied to the drone visuals.")]
     [SerializeField] int sortingOrderOffset = 2000;
+    [Tooltip("Show a temporary line from the source node to the drone while it carries a node-based cable build.")]
+    [SerializeField] bool showCableCarryLine = true;
+    [SerializeField] bool cableCarryUsesSagCurve = true;
+    [SerializeField, Min(3)] int cableCarrySagSegments = PowerLinkLine.DefaultSagSegments;
+    [SerializeField, Min(0f)] float cableCarryBaseSag = PowerLinkLine.DefaultBaseSag;
+    [SerializeField, Min(0f)] float cableCarrySagPerUnit = PowerLinkLine.DefaultSagPerUnit;
+    [SerializeField, Min(0f)] float cableCarryMaxSag = PowerLinkLine.DefaultMaxSag;
 
     [Header("Progress Bar")]
     [Tooltip("Show a small progress bar below the drone while it is working.")]
@@ -53,6 +60,7 @@ public class DroneWorker : MonoBehaviour
     SpriteRenderer barBackground;
     SpriteRenderer barFill;
     bool barVisible;
+    LineRenderer cableCarryLine;
     UnityEngine.Rendering.SortingGroup sortingGroup;
     SpriteRenderer[] cachedRenderers;
 
@@ -83,6 +91,7 @@ public class DroneWorker : MonoBehaviour
     {
         if (isBootstrap)
         {
+            SetCableCarryVisible(false);
             UpdateBootstrap();
             return;
         }
@@ -90,6 +99,7 @@ public class DroneWorker : MonoBehaviour
         var service = DroneTaskService.Instance;
         if (service == null)
         {
+            SetCableCarryVisible(false);
             UpdateProgressBar(false);
             return;
         }
@@ -97,6 +107,7 @@ public class DroneWorker : MonoBehaviour
         if (GameManager.Instance != null && GameManager.Instance.State != GameState.Play)
         {
             isPaused = true;
+            SetCableCarryVisible(false);
             UpdateProgressBar(false);
             return;
         }
@@ -105,6 +116,7 @@ public class DroneWorker : MonoBehaviour
         {
             isPaused = true;
             StopMovement();
+            SetCableCarryVisible(false);
             UpdateProgressBar(false);
             return;
         }
@@ -124,6 +136,7 @@ public class DroneWorker : MonoBehaviour
                     SetMoveTarget(service.GetHqPosition());
                 else
                     StopMovement();
+                SetCableCarryVisible(false);
                 UpdateProgressBar(false);
                 return;
             }
@@ -131,6 +144,7 @@ public class DroneWorker : MonoBehaviour
 
         if (currentTask == null)
         {
+            SetCableCarryVisible(false);
             UpdateProgressBar(false);
             return;
         }
@@ -141,6 +155,7 @@ public class DroneWorker : MonoBehaviour
             currentTask.ClearAssignment(this);
             currentTask = null;
             StopMovement();
+            SetCableCarryVisible(false);
             UpdateProgressBar(false);
             return;
         }
@@ -554,31 +569,95 @@ public class DroneWorker : MonoBehaviour
     void LateUpdate()
     {
         if (isPaused) return;
-        if (!isMoving || !hasTarget) return;
-        float dt = Time.deltaTime;
-        if (dt <= 0f) return;
-
-        moveElapsed += dt;
-        float t = moveDuration <= 0.0001f ? 1f : Mathf.Clamp01(moveElapsed / moveDuration);
-        float eval = useFlightCurve && flightCurve != null ? flightCurve.Evaluate(t) : t;
-        float progress = eval;
-        if (useFlightCurve && flightCurve != null && hasCurveRange)
+        if (isMoving && hasTarget)
         {
-            progress = Mathf.InverseLerp(curveStart, curveEnd, eval);
-        }
-        transform.position = Vector3.LerpUnclamped(moveStart, currentTarget, progress);
+            float dt = Time.deltaTime;
+            if (dt > 0f)
+            {
+                moveElapsed += dt;
+                float t = moveDuration <= 0.0001f ? 1f : Mathf.Clamp01(moveElapsed / moveDuration);
+                float eval = useFlightCurve && flightCurve != null ? flightCurve.Evaluate(t) : t;
+                float progress = eval;
+                if (useFlightCurve && flightCurve != null && hasCurveRange)
+                    progress = Mathf.InverseLerp(curveStart, curveEnd, eval);
 
-        if (t >= 1f || IsAt(currentTarget))
-        {
-            transform.position = currentTarget;
-            StopMovement();
+                transform.position = Vector3.LerpUnclamped(moveStart, currentTarget, progress);
+
+                if (t >= 1f || IsAt(currentTarget))
+                {
+                    transform.position = currentTarget;
+                    StopMovement();
+                }
+            }
         }
+
+        UpdateCableCarryVisual();
     }
 
     void OnDisable()
     {
         UndergroundVisibilityRegistry.UnregisterDrone(this);
         ReleaseProgressBar();
+        SetCableCarryVisible(false);
         StopMovement();
+    }
+
+    void UpdateCableCarryVisual()
+    {
+        if (!showCableCarryLine || !AreVisualsVisible())
+        {
+            SetCableCarryVisible(false);
+            return;
+        }
+
+        if (!(currentTask is BlueprintTask blueprintTask)
+            || !blueprintTask.TryGetDroneCableCarryVisual(out var anchorWorld, out var width, out var color, out var material, out var sortingLayerName, out var sortingOrder))
+        {
+            SetCableCarryVisible(false);
+            return;
+        }
+
+        EnsureCableCarryLine();
+        if (cableCarryLine == null)
+            return;
+
+        cableCarryLine.startWidth = width;
+        cableCarryLine.endWidth = width;
+        cableCarryLine.startColor = color;
+        cableCarryLine.endColor = color;
+        if (!string.IsNullOrWhiteSpace(sortingLayerName))
+            cableCarryLine.sortingLayerName = sortingLayerName;
+        cableCarryLine.sortingOrder = sortingOrder + 1;
+        if (material != null)
+            cableCarryLine.sharedMaterial = material;
+
+        var tipPosition = transform.position;
+        tipPosition.z = anchorWorld.z;
+        PowerLinkLine.ConfigureLineRenderer(cableCarryLine, width, color, material, sortingLayerName, sortingOrder + 1, cableCarryUsesSagCurve, cableCarrySagSegments);
+        PowerLinkLine.UpdateLinePositions(cableCarryLine, anchorWorld, tipPosition, cableCarryUsesSagCurve, cableCarrySagSegments, cableCarryBaseSag, cableCarrySagPerUnit, cableCarryMaxSag);
+        SetCableCarryVisible(true);
+    }
+
+    void EnsureCableCarryLine()
+    {
+        if (cableCarryLine != null)
+            return;
+
+        var lineObject = new GameObject("DroneCableCarryLine");
+        lineObject.transform.SetParent(transform, false);
+        cableCarryLine = lineObject.AddComponent<LineRenderer>();
+        PowerLinkLine.ConfigureLineRenderer(cableCarryLine, 0.08f, Color.white, null, "Default", 0, cableCarryUsesSagCurve, cableCarrySagSegments);
+        var shader = Shader.Find("Sprites/Default");
+        if (shader != null)
+            cableCarryLine.sharedMaterial = new Material(shader);
+        cableCarryLine.enabled = false;
+    }
+
+    void SetCableCarryVisible(bool visible)
+    {
+        if (cableCarryLine == null)
+            return;
+
+        cableCarryLine.enabled = visible;
     }
 }

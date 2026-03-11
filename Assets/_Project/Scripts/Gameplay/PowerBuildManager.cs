@@ -39,6 +39,22 @@ public class PowerBuildManager : MonoBehaviour
     [SerializeField, TextArea(1, 2)] string powerNodeLimitMessage = "This power node can only connect up to 4 cables.";
     [SerializeField, TextArea(1, 2)] string surfaceOnlyMessage = "Power lines and nodes can only be built on the surface.";
 
+    [Header("Node Link Preview")]
+    [SerializeField] bool previewUsesSagCurve = true;
+    [SerializeField, Min(3)] int previewSagSegments = PowerLinkLine.DefaultSagSegments;
+    [SerializeField, Min(0f)] float previewBaseSag = PowerLinkLine.DefaultBaseSag;
+    [SerializeField, Min(0f)] float previewSagPerUnit = PowerLinkLine.DefaultSagPerUnit;
+    [SerializeField, Min(0f)] float previewMaxSag = PowerLinkLine.DefaultMaxSag;
+
+    [Header("Node Link Camera Assist")]
+    [SerializeField] bool assistCameraWhileNodeLinkDragging = true;
+    [SerializeField] Camera assistCamera;
+    [SerializeField, Min(0f)] float assistStartDelay = 0.05f;
+    [SerializeField, Range(0.01f, 0.5f)] float assistEdgeThreshold = 0.18f;
+    [SerializeField, Min(0f)] float assistPanSpeed = 6f;
+    [SerializeField] bool assistConstrainToGrid = true;
+    [SerializeField, Min(0f)] float assistEdgePadding = 0.1f;
+
     enum Mode { None, Cable, Pole }
     Mode mode = Mode.None;
 
@@ -55,6 +71,7 @@ public class PowerBuildManager : MonoBehaviour
     Component pendingCableStartNode;
     bool isNodeLinkDragging;
     LineRenderer nodeLinkPreviewLine;
+    float nodeLinkDragStartTime = -1f;
     static PowerBuildManager activeInstance;
 
     public static bool AllowCameraPanWithCableTool { get; private set; }
@@ -78,6 +95,7 @@ public class PowerBuildManager : MonoBehaviour
     void Awake()
     {
         activeInstance = this;
+        useNodeLinkCables = true;
         cam = Camera.main;
         if (cam == null) cam = Camera.current;
     }
@@ -116,7 +134,7 @@ public class PowerBuildManager : MonoBehaviour
         if (cam == null) cam = Camera.main;
         if (cam == null) return;
 
-        if (mode == Mode.Cable && useNodeLinkCables)
+        if (mode == Mode.Cable)
         {
             HandleNodeLinkCableInput();
             return;
@@ -445,7 +463,10 @@ public class PowerBuildManager : MonoBehaviour
             TryBeginNodeLinkDrag();
 
         if (isNodeLinkDragging && Input.GetMouseButton(0))
+        {
             UpdateNodeLinkPreviewToMouse();
+            UpdateNodeLinkCameraAssist();
+        }
 
         if (isNodeLinkDragging && Input.GetMouseButtonUp(0))
             TryCompleteNodeLinkDrag();
@@ -476,25 +497,18 @@ public class PowerBuildManager : MonoBehaviour
             return false;
 
         var parent = placeParent != null ? placeParent : null;
-        var go = new GameObject($"PowerLink_{fromNode.name}_{toNode.name}");
+        var go = new GameObject($"PowerLinkBlueprint_{fromNode.name}_{toNode.name}");
         if (parent != null)
             go.transform.SetParent(parent, true);
 
         float z = Mathf.Min(fromNode.transform.position.z, toNode.transform.position.z);
-        go.transform.position = new Vector3(0f, 0f, z);
+        go.transform.position = PowerNodeUtil.GetNodeWorldPosition(fromNode, z);
 
         var tag = go.AddComponent<BuildCostTag>();
         tag.Cost = cableCost;
 
-        var link = go.AddComponent<PowerLinkLine>();
-        bool initialized = link.Initialize(fromNode, toNode, cableLineWidth, cableLineColor, cableLineMaterial, cableSortingLayerName, cableSortingOrder, cableCells);
-        if (!initialized)
-        {
-            RefundCost(cableCost);
-            Destroy(go);
-            ShowPlacementHint(hintCell, cableNodeRequiredMessage);
-            return false;
-        }
+        var task = go.AddComponent<BlueprintTask>();
+        task.InitializeNodeLinkCable(fromNode, toNode, cableCells, cableLineWidth, cableLineColor, cableLineMaterial, cableSortingLayerName, cableSortingOrder, cableCost, cableBuildSeconds);
 
         return true;
     }
@@ -519,6 +533,7 @@ public class PowerBuildManager : MonoBehaviour
 
         pendingCableStartNode = node;
         isNodeLinkDragging = true;
+        nodeLinkDragStartTime = Time.unscaledTime;
         IsCameraPanBlockedByCableDrag = true;
         EnsureNodeLinkPreviewLine();
         UpdateNodeLinkPreviewToMouse();
@@ -539,8 +554,8 @@ public class PowerBuildManager : MonoBehaviour
         var startPos = PowerNodeUtil.GetNodeWorldPosition(pendingCableStartNode, z);
         var endPos = GetMouseWorldOnPlane(z);
         nodeLinkPreviewLine.enabled = true;
-        nodeLinkPreviewLine.SetPosition(0, startPos);
-        nodeLinkPreviewLine.SetPosition(1, endPos);
+        PowerLinkLine.ConfigureLineRenderer(nodeLinkPreviewLine, cableLineWidth, cableLineColor, cableLineMaterial, cableSortingLayerName, cableSortingOrder + 1, previewUsesSagCurve, previewSagSegments);
+        PowerLinkLine.UpdateLinePositions(nodeLinkPreviewLine, startPos, endPos, previewUsesSagCurve, previewSagSegments, previewBaseSag, previewSagPerUnit, previewMaxSag);
     }
 
     void TryCompleteNodeLinkDrag()
@@ -566,6 +581,7 @@ public class PowerBuildManager : MonoBehaviour
     void EndNodeLinkDrag(bool clearStartNode)
     {
         isNodeLinkDragging = false;
+        nodeLinkDragStartTime = -1f;
         IsCameraPanBlockedByCableDrag = false;
         if (clearStartNode)
             pendingCableStartNode = null;
@@ -580,28 +596,72 @@ public class PowerBuildManager : MonoBehaviour
         var previewGo = new GameObject("PowerLinkPreview");
         previewGo.transform.SetParent(transform, false);
         nodeLinkPreviewLine = previewGo.AddComponent<LineRenderer>();
-        nodeLinkPreviewLine.positionCount = 2;
-        nodeLinkPreviewLine.useWorldSpace = true;
-        nodeLinkPreviewLine.numCapVertices = 3;
-        nodeLinkPreviewLine.numCornerVertices = 2;
-        nodeLinkPreviewLine.startWidth = cableLineWidth;
-        nodeLinkPreviewLine.endWidth = cableLineWidth;
-        nodeLinkPreviewLine.startColor = cableLineColor;
-        nodeLinkPreviewLine.endColor = cableLineColor;
-        if (!string.IsNullOrWhiteSpace(cableSortingLayerName))
-            nodeLinkPreviewLine.sortingLayerName = cableSortingLayerName;
-        nodeLinkPreviewLine.sortingOrder = cableSortingOrder + 1;
-        if (cableLineMaterial != null)
-        {
-            nodeLinkPreviewLine.sharedMaterial = cableLineMaterial;
-        }
-        else
-        {
-            var shader = Shader.Find("Sprites/Default");
-            if (shader != null)
-                nodeLinkPreviewLine.sharedMaterial = new Material(shader);
-        }
+        PowerLinkLine.ConfigureLineRenderer(nodeLinkPreviewLine, cableLineWidth, cableLineColor, cableLineMaterial, cableSortingLayerName, cableSortingOrder + 1, previewUsesSagCurve, previewSagSegments);
         nodeLinkPreviewLine.enabled = false;
+    }
+
+    void UpdateNodeLinkCameraAssist()
+    {
+        if (!assistCameraWhileNodeLinkDragging || !isNodeLinkDragging || !Input.GetMouseButton(0)) return;
+        if (nodeLinkDragStartTime >= 0f && Time.unscaledTime - nodeLinkDragStartTime < assistStartDelay) return;
+        if (assistCamera == null) assistCamera = cam != null ? cam : Camera.main;
+        if (assistCamera == null) return;
+
+        var vp = assistCamera.ScreenToViewportPoint(Input.mousePosition);
+        float edge = Mathf.Clamp(assistEdgeThreshold, 0.01f, 0.5f);
+        float left = edge;
+        float right = 1f - edge;
+        float bottom = edge;
+        float top = 1f - edge;
+
+        float xDir = 0f;
+        if (vp.x < left) xDir = -Mathf.InverseLerp(left, 0f, vp.x);
+        else if (vp.x > right) xDir = Mathf.InverseLerp(right, 1f, vp.x);
+
+        float yDir = 0f;
+        if (vp.y < bottom) yDir = -Mathf.InverseLerp(bottom, 0f, vp.y);
+        else if (vp.y > top) yDir = Mathf.InverseLerp(top, 1f, vp.y);
+
+        if (Mathf.Approximately(xDir, 0f) && Mathf.Approximately(yDir, 0f)) return;
+
+        xDir = Mathf.Sign(xDir) * xDir * xDir;
+        yDir = Mathf.Sign(yDir) * yDir * yDir;
+
+        var delta = new Vector3(xDir, yDir, 0f) * assistPanSpeed * Time.deltaTime;
+        var pos = assistCamera.transform.position + delta;
+        ClampAssistCameraToGrid(ref pos);
+        assistCamera.transform.position = pos;
+    }
+
+    void ClampAssistCameraToGrid(ref Vector3 pos)
+    {
+        if (!assistConstrainToGrid) return;
+        if (assistCamera == null || !assistCamera.orthographic) return;
+
+        var grid = GridService.Instance;
+        if (grid == null) return;
+
+        var origin = (Vector2)grid.Origin;
+        var size = grid.GridSize;
+        float cs = grid.CellSize;
+        float minX = origin.x;
+        float minY = origin.y;
+        float maxX = origin.x + size.x * cs;
+        float maxY = origin.y + size.y * cs;
+
+        float halfH = assistCamera.orthographicSize;
+        float halfW = halfH * assistCamera.aspect;
+        float pad = assistEdgePadding;
+
+        float clampMinX = minX + halfW + pad;
+        float clampMaxX = maxX - halfW - pad;
+        float clampMinY = minY + halfH + pad;
+        float clampMaxY = maxY - halfH - pad;
+
+        if (clampMinX > clampMaxX) pos.x = (minX + maxX) * 0.5f;
+        else pos.x = Mathf.Clamp(pos.x, clampMinX, clampMaxX);
+        if (clampMinY > clampMaxY) pos.y = (minY + maxY) * 0.5f;
+        else pos.y = Mathf.Clamp(pos.y, clampMinY, clampMaxY);
     }
 
     Vector3 GetMouseWorldOnPlane(float zPlane)
@@ -762,6 +822,8 @@ public class PowerBuildManager : MonoBehaviour
             ShowPlacementHint(cell, surfaceOnlyMessage);
             return false;
         }
+        if (OnboardingManager.Instance != null && OnboardingManager.Instance.ShouldBlockPolePlacement(cell))
+            return false;
         if (!CanPlacePoleAt(cell)) return false;
         if (polePrefab == null)
         {
