@@ -13,6 +13,7 @@ public class GameManager : MonoBehaviour
 {
     const string SaveResetVersionKey = "Save.ResetVersion";
     const int SaveResetVersion = 1;
+    const int TutorialSceneBuildIndex = 0;
 
     public static GameManager Instance { get; private set; }
 
@@ -54,7 +55,14 @@ public class GameManager : MonoBehaviour
 
         ResetAllMoneyOnce();
         LoadSucra();
-        TryApplyTutorialStartMoney(SceneManager.GetActiveScene());
+        var activeScene = SceneManager.GetActiveScene();
+        ApplySceneTimeState(activeScene);
+        TryApplyTutorialStartMoney(activeScene);
+    }
+
+    void Start()
+    {
+        ApplySceneTimeState(SceneManager.GetActiveScene());
     }
 
     void ResetAllMoneyOnce()
@@ -113,29 +121,39 @@ public class GameManager : MonoBehaviour
 
     void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        ApplySceneTimeState(scene);
+        TryApplyTutorialStartMoney(scene);
+    }
+
+    void ApplySceneTimeState(Scene scene)
+    {
         // Menu scenes should never inherit Build/Delete state from a previous level.
         // Otherwise persistent overlays/tools (DontDestroyOnLoad) can bleed into menus.
         bool isLevelSelection = string.Equals(scene.name, "Level selection", StringComparison.OrdinalIgnoreCase);
         bool isPlayableLevel = scene.name.StartsWith("Level", StringComparison.OrdinalIgnoreCase) && !isLevelSelection;
+        bool isTutorialLevel = scene.buildIndex == TutorialSceneBuildIndex;
         if (isLevelSelection)
         {
             try { SetState(GameState.Play); } catch { }
-            try { if (TimeManager.Instance != null) TimeManager.Instance.SetRunning(false); } catch { }
             try { BuildModeController.SetToolActive(false); } catch { }
             try { BuildSelectionNotifier.Notify(null); } catch { }
         }
-        else if (isPlayableLevel)
-        {
-            try { if (TimeManager.Instance != null) TimeManager.Instance.SetRunning(true); } catch { }
-        }
 
-        TryApplyTutorialStartMoney(scene);
+        try
+        {
+            if (TimeManager.Instance != null)
+            {
+                TimeManager.Instance.SetForcedDay(isPlayableLevel && isTutorialLevel);
+                TimeManager.Instance.SetRunning(isPlayableLevel);
+            }
+        }
+        catch { }
     }
 
     void TryApplyTutorialStartMoney(Scene scene)
     {
         if (!applyTutorialStartSweetCredits) return;
-        if (scene.buildIndex != 0) return;
+        if (scene.buildIndex != TutorialSceneBuildIndex) return;
         SetSweetCredits(tutorialStartingSweetCredits);
     }
 

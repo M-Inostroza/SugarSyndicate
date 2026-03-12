@@ -35,7 +35,8 @@ public class OnboardingManager : MonoBehaviour
         PressesPowered = 10,
         PoleBuilt = 11,
         PolePowered = 12,
-        MachinesPowered = 13
+        MachinesPowered = 13,
+        PressesConnectedToTruckDocks = 14
     }
 
     [System.Serializable]
@@ -264,6 +265,17 @@ public class OnboardingManager : MonoBehaviour
                 if (insertIndex < 0) insertIndex = 0;
                 list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), replacement);
             }
+        }
+
+        if (!HasStepId(list, "connect-presses-trucks"))
+        {
+            var step = CreatePressesConnectedToTruckDocksStep();
+            int insertIndex = FindStepIndex(list, "connect-mines-presses");
+            if (insertIndex < 0) insertIndex = FindStepIndex(list, "power-machines");
+            if (insertIndex < 0) insertIndex = FindStepIndex(list, "build-presses");
+            if (insertIndex < 0) insertIndex = list.Count - 1;
+            if (insertIndex < 0) insertIndex = 0;
+            list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), step);
         }
     }
 
@@ -534,7 +546,29 @@ public class OnboardingManager : MonoBehaviour
                 trigger = StepTrigger.MinesConnectedToPresses,
                 openCategory = "Essential",
                 allowedCategories = new List<string> { "Essential" }
-            }
+            },
+            CreatePressesConnectedToTruckDocksStep()
+        };
+    }
+
+    static Step CreatePressesConnectedToTruckDocksStep()
+    {
+        return new Step
+        {
+            id = "connect-presses-trucks",
+            speaker = "Pig Boss",
+            messages = new List<string>
+            {
+                "Now give those sugar cubes a way out.",
+                "Connect the output of the Press to any truck dock with conveyor belts."
+            },
+            completionMessages = new List<string>
+            {
+                "Good. The cubes can reach the docks now."
+            },
+            trigger = StepTrigger.PressesConnectedToTruckDocks,
+            openCategory = "Essential",
+            allowedCategories = new List<string> { "Essential" }
         };
     }
 
@@ -616,6 +650,11 @@ public class OnboardingManager : MonoBehaviour
         else if (step.trigger == StepTrigger.MinesConnectedToPresses)
         {
             TryCompleteMinesConnected(step);
+            UpdateGoalUi(step);
+        }
+        else if (step.trigger == StepTrigger.PressesConnectedToTruckDocks)
+        {
+            TryCompletePressesConnectedToTruckDocks(step);
             UpdateGoalUi(step);
         }
 
@@ -874,6 +913,8 @@ public class OnboardingManager : MonoBehaviour
                 return HasPoweredPole() && AreAllTrackedMachinesPoweredFromPole(GetCurrentMines(), GetCurrentPresses(), true);
             case StepTrigger.MinesConnectedToPresses:
                 return AreAllMinesConnectedToPresses(GetCurrentMines(), GetCurrentPresses(), true);
+            case StepTrigger.PressesConnectedToTruckDocks:
+                return AreAllPressesConnectedToTruckDocks(GetCurrentPresses(), true);
             case StepTrigger.PressesPowered:
                 return AreAllPressesPowered(GetCurrentPresses(), true);
             case StepTrigger.CameraMoveZoom:
@@ -900,6 +941,8 @@ public class OnboardingManager : MonoBehaviour
             CaptureTrackedMinesAndPresses();
         if (step.trigger == StepTrigger.MinesConnectedToPresses)
             CaptureTrackedMinesAndPresses();
+        if (step.trigger == StepTrigger.PressesConnectedToTruckDocks)
+            CaptureTrackedPresses();
         if (step.trigger == StepTrigger.PressesPowered)
             CaptureTrackedPresses();
         if (step.trigger == StepTrigger.CameraMoveZoom)
@@ -923,6 +966,8 @@ public class OnboardingManager : MonoBehaviour
             TryCompleteMachinesPowered(step);
         if (step.trigger == StepTrigger.MinesConnectedToPresses)
             TryCompleteMinesConnected(step);
+        if (step.trigger == StepTrigger.PressesConnectedToTruckDocks)
+            TryCompletePressesConnectedToTruckDocks(step);
         if (step.trigger == StepTrigger.PressesPowered)
             TryCompletePressesPowered(step);
         ApplyTutorialUiLocks();
@@ -1146,6 +1191,7 @@ public class OnboardingManager : MonoBehaviour
             case StepTrigger.PolePowered:
             case StepTrigger.MachinesPowered:
             case StepTrigger.MinesConnectedToPresses:
+            case StepTrigger.PressesConnectedToTruckDocks:
             case StepTrigger.PressesPowered:
                 return true;
             default:
@@ -1747,6 +1793,14 @@ public class OnboardingManager : MonoBehaviour
                 TryCompleteMinesConnected(step);
             }
         }
+        else if (step.trigger == StepTrigger.PressesConnectedToTruckDocks)
+        {
+            if (type == BlueprintTask.BlueprintType.Belt
+                || type == BlueprintTask.BlueprintType.Junction)
+            {
+                TryCompletePressesConnectedToTruckDocks(step);
+            }
+        }
         else if (step.trigger == StepTrigger.MinesPowered)
         {
             TryCompleteMinesPowered(step);
@@ -2270,6 +2324,17 @@ public class OnboardingManager : MonoBehaviour
                     items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && connected >= total));
                 }
                 break;
+            case StepTrigger.PressesConnectedToTruckDocks:
+                {
+                    GetPressTruckDockConnectionProgress(trackedPresses, out var connected, out var total);
+                    string label = total == 1
+                        ? $"Connect the press to a truck dock ({connected}/{total})"
+                        : total > 0
+                            ? $"Connect presses to truck docks ({connected}/{total})"
+                            : "Connect the press to a truck dock";
+                    items.Add(new TutorialGoalUI.ChecklistItem(label, total > 0 && connected >= total));
+                }
+                break;
             case StepTrigger.PressesPowered:
                 {
                     GetPressPowerProgress(trackedPresses, out var powered, out var total);
@@ -2347,6 +2412,14 @@ public class OnboardingManager : MonoBehaviour
             RequestCompleteCurrentStep(step);
     }
 
+    void TryCompletePressesConnectedToTruckDocks(Step step)
+    {
+        if (step == null || step.trigger != StepTrigger.PressesConnectedToTruckDocks) return;
+        if (trackedPresses.Count == 0) return;
+        if (AreAllPressesConnectedToTruckDocks(trackedPresses, true))
+            RequestCompleteCurrentStep(step);
+    }
+
     void TryCompletePressesPowered(Step step)
     {
         if (step == null || step.trigger != StepTrigger.PressesPowered) return;
@@ -2400,6 +2473,13 @@ public class OnboardingManager : MonoBehaviour
         GetPressPowerProgress(presses, out var powered, out var total);
         if (total == 0) return !requireAny;
         return powered >= total;
+    }
+
+    bool AreAllPressesConnectedToTruckDocks(List<PressMachine> presses, bool requireAny)
+    {
+        GetPressTruckDockConnectionProgress(presses, out var connected, out var total);
+        if (total == 0) return !requireAny;
+        return connected >= total;
     }
 
     bool AreAllTrackedMachinesPowered(List<SugarMine> mines, List<PressMachine> presses, bool requireAny)
@@ -2536,6 +2616,27 @@ public class OnboardingManager : MonoBehaviour
         }
     }
 
+    void GetPressTruckDockConnectionProgress(List<PressMachine> presses, out int connected, out int total)
+    {
+        connected = 0;
+        total = 0;
+        if (presses == null || presses.Count == 0) return;
+        var grid = GridService.Instance;
+        if (grid == null) return;
+
+        var truckDockCells = BuildTruckDockLookup();
+        if (truckDockCells.Count == 0) return;
+
+        for (int i = 0; i < presses.Count; i++)
+        {
+            var press = presses[i];
+            if (press == null || press.isGhost) continue;
+            total++;
+            if (CountReachableTruckDocks(grid, press, truckDockCells) > 0)
+                connected++;
+        }
+    }
+
     Dictionary<Vector2Int, PressMachine> BuildPressInputLookup(List<PressMachine> presses)
     {
         var lookup = new Dictionary<Vector2Int, PressMachine>();
@@ -2545,6 +2646,20 @@ public class OnboardingManager : MonoBehaviour
             var press = presses[i];
             if (press == null || press.isGhost) continue;
             lookup[press.InputPortCell] = press;
+        }
+        return lookup;
+    }
+
+    HashSet<Vector2Int> BuildTruckDockLookup()
+    {
+        var lookup = new HashSet<Vector2Int>();
+        var trucks = FindObjectsByType<Truck>(FindObjectsSortMode.None);
+        if (trucks == null) return lookup;
+        for (int i = 0; i < trucks.Length; i++)
+        {
+            var truck = trucks[i];
+            if (truck == null || truck.IsGhost) continue;
+            lookup.Add(truck.Cell);
         }
         return lookup;
     }
@@ -2616,6 +2731,49 @@ public class OnboardingManager : MonoBehaviour
         }
 
         return reached.Count;
+    }
+
+    int CountReachableTruckDocks(GridService grid, PressMachine press, HashSet<Vector2Int> truckDockCells)
+    {
+        if (grid == null || press == null || truckDockCells == null || truckDockCells.Count == 0) return 0;
+
+        var startCell = press.OutputPortCell;
+        if (!grid.InBounds(startCell)) return 0;
+        if (truckDockCells.Contains(startCell)) return 1;
+
+        var start = grid.GetCell(startCell);
+        if (!IsBeltLike(start)) return 0;
+
+        var visited = new HashSet<Vector2Int>();
+        var queue = new Queue<Vector2Int>();
+        visited.Add(startCell);
+        queue.Enqueue(startCell);
+
+        while (queue.Count > 0)
+        {
+            var cellPos = queue.Dequeue();
+            var neighborDirs = new[]
+            {
+                Vector2Int.up,
+                Vector2Int.right,
+                Vector2Int.down,
+                Vector2Int.left,
+            };
+
+            for (int i = 0; i < neighborDirs.Length; i++)
+            {
+                var nextPos = cellPos + neighborDirs[i];
+                if (!grid.InBounds(nextPos)) continue;
+                if (truckDockCells.Contains(nextPos)) return 1;
+                if (!visited.Add(nextPos)) continue;
+
+                var nextCell = grid.GetCell(nextPos);
+                if (IsBeltLike(nextCell))
+                    queue.Enqueue(nextPos);
+            }
+        }
+
+        return 0;
     }
 
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -30,6 +31,8 @@ public class PowerLinkLine : MonoBehaviour
     readonly List<Vector2Int> passThroughCells = new List<Vector2Int>();
     static readonly HashSet<PowerLinkLine> ActiveLinks = new HashSet<PowerLinkLine>();
 
+    public static event Action ActiveLinksChanged;
+
     PowerService powerService;
     bool registered;
 
@@ -49,18 +52,21 @@ public class PowerLinkLine : MonoBehaviour
         UpdateVisual();
         if (startNode != null && endNode != null && !registered)
             TryRegisterCableCells();
+        NotifyActiveLinksChanged();
     }
 
     void OnDisable()
     {
         ActiveLinks.Remove(this);
         UnregisterCableCells();
+        NotifyActiveLinksChanged();
     }
 
     void OnDestroy()
     {
         ActiveLinks.Remove(this);
         UnregisterCableCells();
+        NotifyActiveLinksChanged();
     }
 
     void LateUpdate()
@@ -86,7 +92,9 @@ public class PowerLinkLine : MonoBehaviour
 
         EnsureLineRenderer();
         UpdateVisual();
-        return TryRegisterCableCells(precomputedCells);
+        bool initialized = TryRegisterCableCells(precomputedCells);
+        NotifyActiveLinksChanged();
+        return initialized;
     }
 
     public bool Connects(Component a, Component b)
@@ -319,5 +327,10 @@ public class PowerLinkLine : MonoBehaviour
     {
         float u = 1f - t;
         return u * u * a + 2f * u * t * b + t * t * c;
+    }
+
+    static void NotifyActiveLinksChanged()
+    {
+        ActiveLinksChanged?.Invoke();
     }
 }

@@ -1448,7 +1448,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -2490680633440378980, guid: db3bf9bcff0ab9d4484242fedb1db48d, type: 3}
+  m_Sprite: {fileID: -7368492045954477146, guid: e3612ab36b4c70742a4628f4d813db25, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -1922,7 +1922,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 8820978091977198850, guid: 956b8b3deffe51e49b5d1e360134a289, type: 3}
+  m_Sprite: {fileID: -605947145190789836, guid: 8ef725be5ea56624dac86b9ae6e4491b, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -2352,7 +2352,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -4759930823582833215, guid: 2eebd8804833eb947b65a9ddc136bfe3, type: 3}
+  m_Sprite: {fileID: -2223898504301826281, guid: 4360e0f2798d29041b0d7de104559df4, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -5632,7 +5632,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 2530086582174172366, guid: c39de14778407e643be4e084fda2a67b, type: 3}
+  m_Sprite: {fileID: -540626325033273647, guid: 560d1d868cc2adb40995f060c9426092, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -6470,20 +6470,20 @@ MonoBehaviour:
     showObjects: []
     hideObjects: []
   forceDroneHqPlacement: 1
-  droneHqRequiredCell: O7
+  droneHqRequiredCell: R7
   droneHqWrongCellMessage: Can you follow orders or do I need to find another engineer?
     Place it where I tell you, you'll have more freedom later on to play around.
   highlightDroneHqCell: 1
   forceSolarPanelPlacement: 1
-  solarPanelRequiredCells: N9,O9,P9
+  solarPanelRequiredCells: Q9, R9, S9
   solarPanelWrongCellMessage: Place the Solar Panel on the highlighted cells.
   highlightSolarPanelCells: 1
   forcePressPlacement: 1
-  pressRequiredCells: J8, J7, K7
+  pressRequiredCells: K6, K5, L5
   pressWrongCellMessage: Place the Press on the highlighted cells.
   highlightPressCells: 1
   forcePolePlacement: 1
-  poleRequiredCell: K9
+  poleRequiredCell: M9
   poleWrongCellMessage: Place the Power Pole on the highlighted cell.
   highlightPoleCell: 1
   poleStepLimitMessage: Build only one Power Pole for now.
@@ -7076,7 +7076,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -4963935807285971671, guid: 4c5c9114cc8fd8e4ab1460eb4edb6a0d, type: 3}
+  m_Sprite: {fileID: 1696555567004137589, guid: d65d3b473d7997d419421818a7b174a0, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -7904,7 +7904,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -4804258156668088979, guid: 2db14687eb5bf004cb1d0fb1aa1ea65b, type: 3}
+  m_Sprite: {fileID: 7397441520399235622, guid: 326c05b0156b22d44989cc6ef6bcf131, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -9231,7 +9231,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -499557590448303725, guid: bcf16ddd84c436b44b413af7b45aab7f, type: 3}
+  m_Sprite: {fileID: 4112356383579328530, guid: e0210a75cc9bdc9488ff5499366cb50b, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -11659,7 +11659,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: -4555435246908645576, guid: 8d51933ae4bf1f344a92ed139a629c7d, type: 3}
+  m_Sprite: {fileID: -1061382581022701807, guid: f2f41e8736a611645a7e6a86d75b205b, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -15921,7 +15921,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 2832598090735094491, guid: faab3bd40b3e6064ca81c2ad71d1b27f, type: 3}
+  m_Sprite: {fileID: 1262544686593892823, guid: f93c596b68819a24c99fa564b920b049, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -16393,6 +16393,7 @@ MonoBehaviour:
   dayCount: 1
   currentPhase: 0
   running: 1
+  forcedDay: 0
 --- !u!4 &2053252687
 Transform:
   m_ObjectHideFlags: 0

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: f030217a0b984a44f91aefa58f9877c0
+guid: 2a1496e1eb997974da6700fad6b070e7
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -5845625990195753523
-    second: Splitter_0
+      213: 1016682784616665977
+    second: Mini Btn (6)_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -122,30 +122,17 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
-  - serializedVersion: 4
-    buildTarget: Android
-    maxTextureSize: 2048
-    resizeAlgorithm: 0
-    textureFormat: -1
-    textureCompression: 1
-    compressionQuality: 50
-    crunchedCompression: 0
-    allowsAlphaSplitting: 0
-    overridden: 0
-    ignorePlatformSupport: 0
-    androidETC2FallbackOverride: 0
-    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Splitter_0
+      name: Mini Btn (6)_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 100
-        height: 100
+        width: 200
+        height: 200
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: dcd4794222a20eea0800000000000000
-      internalID: -5845625990195753523
+      spriteID: 973d4522b9bfb1e00800000000000000
+      internalID: 1016682784616665977
       vertices: []
       indices: 
       edges: []
@@ -173,8 +160,7 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable:
-      Splitter_0: -5845625990195753523
+    nameFileIdTable: {}
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
