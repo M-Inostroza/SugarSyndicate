@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
 /// Runtime overlay that drops a simple SpriteRenderer on every sugar zone cell.
@@ -16,6 +19,10 @@ public class SugarZoneOverlay : MonoBehaviour
     [Tooltip("If true, color blends from outer to center based on sugar amount.")]
     [SerializeField] bool colorByEfficiency = true;
     [SerializeField] bool highlightCenter = true;
+    [SerializeField] Sprite[] depositSprites = new Sprite[0];
+    [SerializeField] bool randomizeSpritePerCell = true;
+    [SerializeField] bool randomizeRotationPerCell = true;
+    [SerializeField] int visualSeed = 1337;
     [SerializeField, Min(0f)] float padding = 0.05f;
     [SerializeField] float zOffset = 0.05f; // base world Z for overlays
     [SerializeField] string sortingLayerName = "Default";
@@ -46,6 +53,13 @@ public class SugarZoneOverlay : MonoBehaviour
         if (grid == null) grid = GridService.Instance != null ? GridService.Instance : GetComponent<GridService>();
         if (matchGridLayer && grid != null) gameObject.layer = grid.gameObject.layer;
         EnsureSprite();
+    }
+
+    void OnValidate()
+    {
+        sortingLayerId = SortingLayer.NameToID(sortingLayerName);
+        if (sortingLayerId == 0) sortingLayerId = SortingLayer.NameToID("Default");
+        TryAutoAssignDepositSprites();
     }
 
     void Start()
@@ -103,27 +117,27 @@ public class SugarZoneOverlay : MonoBehaviour
                 {
                     color = centerColor;
                 }
-                AddSprite(world, final, color);
+                AddSprite(c, world, final, color);
             }
         }
     }
 
-    void AddSprite(Vector3 worldPos, float size, Color color)
+    void AddSprite(Vector2Int cell, Vector3 worldPos, float size, Color color)
     {
         EnsureSprite();
         var go = new GameObject("SugarZoneOverlay");
         go.transform.SetParent(transform, false);
         go.layer = gameObject.layer;
         go.transform.position = worldPos;
-        go.transform.localScale = Vector3.one;
 
         var sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = quadSprite;
+        sr.sprite = GetSpriteForCell(cell);
         sr.color = color;
         sr.sortingLayerID = sortingLayerId;
         sr.sortingOrder = sortingOrder;
         sr.drawMode = SpriteDrawMode.Simple;
-        sr.size = new Vector2(size, size);
+        go.transform.localRotation = Quaternion.Euler(0f, 0f, GetRotationForCell(cell));
+        go.transform.localScale = GetScaleForSprite(sr.sprite, size);
         sprites.Add(sr);
     }
 
@@ -159,4 +173,90 @@ public class SugarZoneOverlay : MonoBehaviour
         }
         return z;
     }
+
+    Sprite GetSpriteForCell(Vector2Int cell)
+    {
+        if (depositSprites == null || depositSprites.Length == 0)
+            return quadSprite;
+        if (!randomizeSpritePerCell)
+            return depositSprites[0] != null ? depositSprites[0] : quadSprite;
+
+        int hash = GetCellVisualHash(cell);
+        for (int i = 0; i < depositSprites.Length; i++)
+        {
+            var sprite = depositSprites[(hash + i) % depositSprites.Length];
+            if (sprite != null)
+                return sprite;
+        }
+        return quadSprite;
+    }
+
+    float GetRotationForCell(Vector2Int cell)
+    {
+        if (!randomizeRotationPerCell) return 0f;
+        int hash = GetCellVisualHash(cell);
+        int rotationIndex = ((hash / 31) & 3);
+        return rotationIndex * 90f;
+    }
+
+    Vector3 GetScaleForSprite(Sprite sprite, float targetSize)
+    {
+        sprite ??= quadSprite;
+        if (sprite == null) return Vector3.one;
+
+        var bounds = sprite.bounds.size;
+        float width = Mathf.Max(0.0001f, bounds.x);
+        float height = Mathf.Max(0.0001f, bounds.y);
+        float scale = targetSize / Mathf.Max(width, height);
+        return new Vector3(scale, scale, 1f);
+    }
+
+    int GetCellVisualHash(Vector2Int cell)
+    {
+        unchecked
+        {
+            int hash = visualSeed;
+            hash = (hash * 397) ^ cell.x;
+            hash = (hash * 397) ^ cell.y;
+            return hash & int.MaxValue;
+        }
+    }
+
+    void TryAutoAssignDepositSprites()
+    {
+#if UNITY_EDITOR
+        bool needsAssignment = depositSprites == null || depositSprites.Length == 0;
+        if (!needsAssignment)
+        {
+            for (int i = 0; i < depositSprites.Length; i++)
+            {
+                if (depositSprites[i] == null)
+                {
+                    needsAssignment = true;
+                    break;
+                }
+            }
+        }
+
+        if (!needsAssignment) return;
+
+        var sprites = new List<Sprite>(2);
+        AddEditorSpriteIfFound(sprites, "Assets/_Project/Art/Sugar depo v1.png");
+        AddEditorSpriteIfFound(sprites, "Assets/_Project/Art/Sugar depo v1-2.png");
+        if (sprites.Count <= 0) return;
+
+        depositSprites = sprites.ToArray();
+        EditorUtility.SetDirty(this);
+#endif
+    }
+
+#if UNITY_EDITOR
+    static void AddEditorSpriteIfFound(List<Sprite> destination, string assetPath)
+    {
+        if (destination == null || string.IsNullOrWhiteSpace(assetPath)) return;
+        var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (sprite != null)
+            destination.Add(sprite);
+    }
+#endif
 }

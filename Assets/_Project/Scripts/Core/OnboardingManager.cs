@@ -116,6 +116,7 @@ public class OnboardingManager : MonoBehaviour
         "Build only one Sugar Mine for now.";
     [SerializeField, TextArea(2, 4)] string pressStepLimitMessage =
         "Build only one Press for now.";
+    [SerializeField] bool focusCameraOnStepHighlights = true;
     [SerializeField] bool focusCameraOnMineSelection = true;
     [SerializeField, Min(0.05f)] float mineFocusDuration = 0.6f;
     [SerializeField] Ease mineFocusEase = Ease.InOutSine;
@@ -198,6 +199,7 @@ public class OnboardingManager : MonoBehaviour
     int pendingStepCompletionIndex = -1;
     string pendingStepCompletionId;
     readonly Dictionary<GameObject, bool> cachedPowerButtonVisibility = new Dictionary<GameObject, bool>();
+    readonly List<Vector2Int> resolvedHighlightCells = new List<Vector2Int>(4);
 
     enum DialogueMode
     {
@@ -277,6 +279,10 @@ public class OnboardingManager : MonoBehaviour
             if (insertIndex < 0) insertIndex = 0;
             list.Insert(Mathf.Clamp(insertIndex + 1, 0, list.Count), step);
         }
+
+        int pressesToTrucksIndex = FindStepIndex(list, "connect-presses-trucks");
+        if (pressesToTrucksIndex >= 0 && pressesToTrucksIndex < list.Count)
+            NormalizeTruckDockConnectionStep(list[pressesToTrucksIndex]);
     }
 
     static bool HasStepId(List<Step> list, string id)
@@ -553,7 +559,7 @@ public class OnboardingManager : MonoBehaviour
 
     static Step CreatePressesConnectedToTruckDocksStep()
     {
-        return new Step
+        var step = new Step
         {
             id = "connect-presses-trucks",
             speaker = "Pig Boss",
@@ -566,10 +572,19 @@ public class OnboardingManager : MonoBehaviour
             {
                 "Good. The cubes can reach the docks now."
             },
-            trigger = StepTrigger.PressesConnectedToTruckDocks,
-            openCategory = "Essential",
-            allowedCategories = new List<string> { "Essential" }
+            trigger = StepTrigger.PressesConnectedToTruckDocks
         };
+
+        NormalizeTruckDockConnectionStep(step);
+        return step;
+    }
+
+    static void NormalizeTruckDockConnectionStep(Step step)
+    {
+        if (step == null) return;
+
+        step.openCategory = "Transport";
+        step.allowedCategories = new List<string> { "Transport" };
     }
 
     static Step CreateMachinesPoweredStep()
@@ -1067,6 +1082,7 @@ public class OnboardingManager : MonoBehaviour
         EnsureHighlighter();
         ApplyHighlighterTargets(step);
         UpdatePlacementHighlight(step);
+        ApplyStepHighlightCameraFocus(step);
 
         if (buildMenu == null)
             buildMenu = FindAnyObjectByType<BuildMenuController>();
@@ -1318,49 +1334,10 @@ public class OnboardingManager : MonoBehaviour
 
     void UpdatePlacementHighlight(Step step)
     {
-        if (IsDroneHqPlacementStep(step) && highlightDroneHqCell && forceDroneHqPlacement)
+        if (TryGetPlacementHighlightCells(step, resolvedHighlightCells))
         {
-            if (TryGetDroneHqRequiredCell(out var cell))
-            {
-                ShowPlacementHighlight(new[] { cell });
-                return;
-            }
-        }
-
-        if (IsSolarPanelPlacementStep(step) && highlightSolarPanelCells && forceSolarPanelPlacement)
-        {
-            if (TryGetSolarPanelRequiredCells(out var cells))
-            {
-                ShowPlacementHighlight(cells);
-                return;
-            }
-        }
-
-        if (IsPressPlacementStep(step) && highlightPressCells && forcePressPlacement)
-        {
-            if (TryGetPressRequiredCells(out var cells))
-            {
-                ShowPlacementHighlight(cells);
-                return;
-            }
-        }
-
-        if (IsPolePlacementStep(step) && highlightPoleCell && forcePolePlacement && GetPolePlacementCount() <= 0)
-        {
-            if (TryGetPoleRequiredCell(out var cell))
-            {
-                ShowPlacementHighlight(new[] { cell });
-                return;
-            }
-        }
-
-        if (IsBuyDronesStep(step) && highlightDroneHqDuringBuyStep)
-        {
-            if (TryGetDroneHqCell(out var hqCell))
-            {
-                ShowPlacementHighlight(new[] { hqCell });
-                return;
-            }
+            ShowPlacementHighlight(resolvedHighlightCells);
+            return;
         }
 
         HidePlacementHighlight();
@@ -1402,6 +1379,59 @@ public class OnboardingManager : MonoBehaviour
     static bool IsBuyDronesStep(Step step)
     {
         return step != null && step.trigger == StepTrigger.BuyDrones;
+    }
+
+    bool TryGetPlacementHighlightCells(Step step, List<Vector2Int> destination)
+    {
+        if (destination == null) return false;
+        destination.Clear();
+
+        if (IsDroneHqPlacementStep(step) && highlightDroneHqCell && forceDroneHqPlacement)
+        {
+            if (TryGetDroneHqRequiredCell(out var cell))
+            {
+                destination.Add(cell);
+                return true;
+            }
+        }
+
+        if (IsSolarPanelPlacementStep(step) && highlightSolarPanelCells && forceSolarPanelPlacement)
+        {
+            if (TryGetSolarPanelRequiredCells(out var cells))
+            {
+                destination.AddRange(cells);
+                return destination.Count > 0;
+            }
+        }
+
+        if (IsPressPlacementStep(step) && highlightPressCells && forcePressPlacement)
+        {
+            if (TryGetPressRequiredCells(out var cells))
+            {
+                destination.AddRange(cells);
+                return destination.Count > 0;
+            }
+        }
+
+        if (IsPolePlacementStep(step) && highlightPoleCell && forcePolePlacement && GetPolePlacementCount() <= 0)
+        {
+            if (TryGetPoleRequiredCell(out var cell))
+            {
+                destination.Add(cell);
+                return true;
+            }
+        }
+
+        if (IsBuyDronesStep(step) && highlightDroneHqDuringBuyStep)
+        {
+            if (TryGetDroneHqCell(out var hqCell))
+            {
+                destination.Add(hqCell);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void UnlockCategories(IReadOnlyList<string> categories)
@@ -1632,6 +1662,13 @@ public class OnboardingManager : MonoBehaviour
         ShowOneOffMessage(mineWrongCellMessage);
     }
 
+    void ApplyStepHighlightCameraFocus(Step step)
+    {
+        if (!isActive || !focusCameraOnStepHighlights) return;
+        if (!TryGetPlacementHighlightCells(step, resolvedHighlightCells)) return;
+        TryFocusCameraOnCells(resolvedHighlightCells);
+    }
+
     bool TryFocusCameraOnSugarDeposit()
     {
         var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
@@ -1659,7 +1696,41 @@ public class OnboardingManager : MonoBehaviour
         }
 
         var targetWorld = grid.CellToWorld(bestCell, camPos.z);
-        var targetPos = new Vector3(targetWorld.x, targetWorld.y, camPos.z);
+        return TryFocusCameraOnWorldPosition(new Vector3(targetWorld.x, targetWorld.y, camPos.z), cam, grid);
+    }
+
+    bool TryFocusCameraOnCells(IReadOnlyList<Vector2Int> cells)
+    {
+        if (cells == null || cells.Count == 0) return false;
+
+        var grid = GridService.Instance ?? FindAnyObjectByType<GridService>();
+        if (grid == null) return false;
+        var cam = Camera.main;
+        if (cam == null) cam = FindAnyObjectByType<Camera>();
+        if (cam == null) return false;
+
+        var camPos = cam.transform.position;
+        Vector3 min = new Vector3(float.MaxValue, float.MaxValue, camPos.z);
+        Vector3 max = new Vector3(float.MinValue, float.MinValue, camPos.z);
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            var world = grid.CellToWorld(cells[i], camPos.z);
+            if (world.x < min.x) min.x = world.x;
+            if (world.y < min.y) min.y = world.y;
+            if (world.x > max.x) max.x = world.x;
+            if (world.y > max.y) max.y = world.y;
+        }
+
+        var targetPos = new Vector3((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f, camPos.z);
+        return TryFocusCameraOnWorldPosition(targetPos, cam, grid);
+    }
+
+    bool TryFocusCameraOnWorldPosition(Vector3 targetPos, Camera cam, GridService grid)
+    {
+        if (cam == null) return false;
+
+        targetPos.z = cam.transform.position.z;
         targetPos = GetClampedMineFocusTarget(cam, grid, targetPos);
         mineFocusTween?.Kill();
         mineFocusTween = cam.transform.DOMove(targetPos, mineFocusDuration)
@@ -2794,7 +2865,13 @@ public class OnboardingManager : MonoBehaviour
     void ApplyTutorialTruckCompassVisibility()
     {
         if (!hideTruckCompassesDuringTutorial) return;
-        Truck.SetCompassIndicatorsSuppressed(isActive);
+
+        bool suppressCompasses = isActive;
+        var step = GetCurrentStep();
+        if (step != null && step.trigger == StepTrigger.PressesConnectedToTruckDocks)
+            suppressCompasses = false;
+
+        Truck.SetCompassIndicatorsSuppressed(suppressCompasses);
     }
 
     bool ShouldShowBuildControls()
