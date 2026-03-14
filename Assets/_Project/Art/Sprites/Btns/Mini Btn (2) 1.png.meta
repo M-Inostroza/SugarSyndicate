@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 9b0106b0131573a4bbd852efe6ad1bf3
+guid: 52a57d621ba6b894e92dbc0774fc8dd7
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 4530889871290327903
-    second: Processing_0
+      213: -3839219639932840846
+    second: Mini Btn (2) 1_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -97,7 +97,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: WebGL
+    buildTarget: Android
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -123,7 +123,7 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
-    buildTarget: Android
+    buildTarget: WebGL
     maxTextureSize: 2048
     resizeAlgorithm: 0
     textureFormat: -1
@@ -139,13 +139,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Processing_0
+      name: Mini Btn (2) 1_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 100
-        height: 100
+        width: 200
+        height: 200
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -154,8 +154,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: f53ecae0554f0ee30800000000000000
-      internalID: 4530889871290327903
+      spriteID: 274991b141a58bac0800000000000000
+      internalID: -3839219639932840846
       vertices: []
       indices: 
       edges: []
@@ -174,7 +174,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Processing_0: 4530889871290327903
+      Mini Btn (2) 1_0: -3839219639932840846
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

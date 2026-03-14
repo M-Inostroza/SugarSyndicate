@@ -10,6 +10,11 @@ public class Conveyor : MonoBehaviour, IConveyor
     [SerializeField] Sprite straightSprite;
     [SerializeField] Sprite curveSprite;
     [SerializeField] CurveCorner curveBaseCorner = CurveCorner.LeftUp;
+    [Header("Arrow Visual")]
+    [SerializeField] Transform arrowVisual;
+    [SerializeField, Min(0.01f)] float arrowCycleSeconds = 0.45f;
+    [SerializeField] int arrowSortingOrderOffset = 1;
+    [SerializeField, Min(0f)] float arrowCellPadding = 0.01f;
 
     [System.NonSerialized] bool isCurve;
     [System.NonSerialized] Direction curveFrom = Direction.None;
@@ -17,6 +22,9 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     Vector2Int lastCell;
     GridService grid;
+    SpriteRenderer arrowSpriteRenderer;
+    Vector3 arrowBaseLocalPosition;
+    bool arrowBaseCached;
     
     // Flag to mark this conveyor as a ghost (visual only, should not be registered)
     [System.NonSerialized]
@@ -37,6 +45,11 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void Awake()
     {
+        ResolveArrowVisual();
+        ResolveArrowSpriteRenderer();
+        CacheArrowBaseLocalPosition();
+        RefreshArrowVisualState(false);
+
         if (spriteRenderer == null)
             spriteRenderer = GetComponentInChildren<SpriteRenderer>(true);
         if (straightSprite == null && spriteRenderer != null)
@@ -55,6 +68,7 @@ public class Conveyor : MonoBehaviour, IConveyor
     {
         ApplyStraightSprite(newDirection);
         ApplyRotation(rotationOffset);
+        RefreshArrowVisualState(false);
     }
 
     public void SetCurve(Direction fromDirection, Direction toDirection, float rotationOffset = 0f)
@@ -63,10 +77,12 @@ public class Conveyor : MonoBehaviour, IConveyor
         {
             ApplyStraightSprite(toDirection);
             ApplyRotation(rotationOffset);
+            RefreshArrowVisualState(false);
             return;
         }
         ApplyCurveSprite(fromDirection, toDirection);
         ApplyCurveRotation(fromDirection, toDirection, rotationOffset);
+        RefreshArrowVisualState(false);
     }
 
     public void ApplyStraightSprite(Direction newDirection)
@@ -77,6 +93,7 @@ public class Conveyor : MonoBehaviour, IConveyor
         curveTo = Direction.None;
         if (spriteRenderer != null && straightSprite != null)
             spriteRenderer.sprite = straightSprite;
+        RefreshArrowVisualState(false);
     }
 
     public void ApplyCurveSprite(Direction fromDirection, Direction toDirection)
@@ -92,6 +109,7 @@ public class Conveyor : MonoBehaviour, IConveyor
         curveFrom = fromDirection;
         curveTo = toDirection;
         spriteRenderer.sprite = curveSprite;
+        RefreshArrowVisualState(false);
     }
 
     void ApplyRotation(float rotationOffset)
@@ -188,6 +206,11 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void Update()
     {
+        ResolveArrowVisual();
+        ResolveArrowSpriteRenderer();
+        CacheArrowBaseLocalPosition();
+        RefreshArrowVisualState(Application.isPlaying);
+
         // Don't update grid registration for ghost conveyors
         if (isGhost) return;
         
@@ -231,6 +254,11 @@ public class Conveyor : MonoBehaviour, IConveyor
 #if UNITY_EDITOR
     void OnValidate()
     {
+        ResolveArrowVisual();
+        ResolveArrowSpriteRenderer();
+        CacheArrowBaseLocalPosition();
+        RefreshArrowVisualState(false);
+
         if (UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode) return;
         var gs = GetGridService();
         if (gs == null) return;
@@ -319,5 +347,126 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (grid == null)
             grid = FindAnyObjectByType<GridService>();
         return grid;
+    }
+
+    void ResolveArrowVisual()
+    {
+        if (arrowVisual != null) return;
+
+        foreach (var child in GetComponentsInChildren<Transform>(true))
+        {
+            if (child == transform) continue;
+            if (!child.name.Equals("Arrow", System.StringComparison.OrdinalIgnoreCase)) continue;
+            arrowVisual = child;
+            break;
+        }
+    }
+
+    void ResolveArrowSpriteRenderer()
+    {
+        if (arrowSpriteRenderer != null) return;
+        if (arrowVisual == null) return;
+        arrowSpriteRenderer = arrowVisual.GetComponentInChildren<SpriteRenderer>(true);
+    }
+
+    void CacheArrowBaseLocalPosition()
+    {
+        if (arrowVisual == null) return;
+        if (arrowBaseCached && !Application.isPlaying) arrowBaseLocalPosition = arrowVisual.localPosition;
+        else if (!arrowBaseCached) arrowBaseLocalPosition = arrowVisual.localPosition;
+        arrowBaseCached = true;
+    }
+
+    void RefreshArrowVisualState(bool animate)
+    {
+        if (arrowVisual == null) return;
+        if (spriteRenderer != null && arrowSpriteRenderer != null)
+        {
+            arrowSpriteRenderer.sortingLayerID = spriteRenderer.sortingLayerID;
+            arrowSpriteRenderer.sortingOrder = spriteRenderer.sortingOrder + arrowSortingOrderOffset;
+        }
+
+        bool showArrow = !isCurve;
+        if (arrowVisual.gameObject.activeSelf != showArrow)
+            arrowVisual.gameObject.SetActive(showArrow);
+
+        if (!showArrow)
+        {
+            if (arrowBaseCached)
+                arrowVisual.localPosition = arrowBaseLocalPosition;
+            return;
+        }
+
+        if (!arrowBaseCached)
+            arrowBaseLocalPosition = arrowVisual.localPosition;
+
+        bool shouldAnimate = animate && !isGhost;
+        if (!shouldAnimate)
+        {
+            arrowVisual.localPosition = arrowBaseLocalPosition;
+            return;
+        }
+
+        Vector3 halfTravelOffset = GetArrowHalfTravelLocalOffset();
+        if (halfTravelOffset.sqrMagnitude <= 0.000001f)
+        {
+            arrowVisual.localPosition = arrowBaseLocalPosition;
+            return;
+        }
+
+        float cycleSeconds = GetArrowCycleSeconds();
+        float phaseTime = GetArrowPhaseTime();
+        float progress = Mathf.Repeat(phaseTime / cycleSeconds, 1f);
+        arrowVisual.localPosition = arrowBaseLocalPosition + Vector3.Lerp(-halfTravelOffset, halfTravelOffset, progress);
+    }
+
+    float GetArrowCycleSeconds()
+    {
+        float fallbackSeconds = arrowCycleSeconds > 0.01f ? arrowCycleSeconds : 0.45f;
+        var beltService = BeltSimulationService.Instance;
+        if (beltService != null)
+            return beltService.GetVisualSecondsPerCell(fallbackSeconds);
+        return fallbackSeconds;
+    }
+
+    float GetArrowPhaseTime()
+    {
+        var beltService = BeltSimulationService.Instance;
+        if (beltService != null)
+            return beltService.VisualClock;
+        return Time.time;
+    }
+
+    Vector3 GetArrowHalfTravelLocalOffset()
+    {
+        var parent = arrowVisual != null && arrowVisual.parent != null ? arrowVisual.parent : transform;
+        float halfTravelWorld = GetArrowHalfTravelWorldDistance();
+        if (halfTravelWorld <= 0f) return Vector3.zero;
+
+        return parent.InverseTransformVector(transform.right.normalized * halfTravelWorld);
+    }
+
+    float GetArrowHalfTravelWorldDistance()
+    {
+        float cellSize = 1f;
+        var gs = GetGridService();
+        if (gs != null && gs.CellSize > 0.0001f)
+            cellSize = gs.CellSize;
+
+        float halfCell = cellSize * 0.5f;
+        float padding = Mathf.Max(0f, Mathf.Min(arrowCellPadding, halfCell));
+        float halfArrow = GetArrowHalfExtentWorldAlongConveyor();
+        return Mathf.Max(0f, halfCell - halfArrow - padding);
+    }
+
+    float GetArrowHalfExtentWorldAlongConveyor()
+    {
+        if (arrowSpriteRenderer == null) return 0f;
+
+        var extents = arrowSpriteRenderer.bounds.extents;
+        Vector3 dir = transform.right.normalized;
+        return Mathf.Abs(dir.x) * extents.x
+             + Mathf.Abs(dir.y) * extents.y
+             + Mathf.Abs(dir.z) * extents.z;
     }
 }

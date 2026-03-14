@@ -69,6 +69,9 @@ public class BeltSimulationService : MonoBehaviour
     float lastTickTime;
     float lastTickDurationSec;
     bool tickTimeInitialized;
+    float visualClock;
+
+    public float VisualClock => visualClock;
 
     // lightweight logging
     void DLog(string msg) { if (enableDebugLogs) Debug.Log(msg); }
@@ -220,6 +223,8 @@ public class BeltSimulationService : MonoBehaviour
         HandlePauseTransitions();
         // Skip stepping and visual interpolation while paused
         if (IsPaused()) return;
+
+        visualClock += Time.deltaTime;
 
         if (skipNextStepAfterUnpause)
         {
@@ -672,6 +677,32 @@ public class BeltSimulationService : MonoBehaviour
         }
         catch { }
         return fallback;
+    }
+
+    public float GetVisualSecondsPerCell(float fallback = 0.2f)
+    {
+        float safeFallback = Mathf.Max(1f / 120f, fallback);
+
+        if (visualTiming == VisualTimingMode.TickSynced)
+        {
+            int tps = GetGameTickRateOrDefault(15);
+            if (ticksPerStep > 0 && tps > 0)
+                return Mathf.Max(1f / 120f, (float)ticksPerStep / tps);
+            return safeFallback;
+        }
+
+        float cellsPerSec = visualCellsPerSecond;
+        if (matchTickRate)
+        {
+            int tps = GetGameTickRateOrDefault(15);
+            if (ticksPerStep > 0 && tps > 0)
+                cellsPerSec = (float)tps / ticksPerStep;
+        }
+
+        if (cellsPerSec > 0.01f)
+            return Mathf.Max(1f / 120f, 1f / cellsPerSec);
+
+        return safeFallback;
     }
 
     void UpdateVisuals(float dt)
