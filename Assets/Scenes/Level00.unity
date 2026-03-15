@@ -5967,6 +5967,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: Truck
       objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -6127,6 +6139,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: Truck
       objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.r
+      value: 1
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -6162,7 +6186,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cab33c2784cc9bf46bb089353338a381, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  tutorialEnabled: 1
+  tutorialEnabled: 0
   autoStart: 1
   onlyInTutorialScene: 1
   tutorialSceneBuildIndex: 0
@@ -10231,7 +10255,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 296.73413, y: -120.882965}
+  m_AnchoredPosition: {x: 296.73416, y: -120.882965}
   m_SizeDelta: {x: 41.19113, y: 63.191147}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1310697314
@@ -10696,6 +10720,18 @@ PrefabInstance:
     - target: {fileID: 2678353271812311813, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
       propertyPath: m_Name
       value: Truck
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.b
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.g
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4201051881256447682, guid: e1ec36878896c0e4b99574c6289a4ab2, type: 3}
+      propertyPath: m_Color.r
+      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

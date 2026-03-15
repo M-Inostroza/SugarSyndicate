@@ -108,9 +108,12 @@ MonoBehaviour:
   curveSprite: {fileID: -1797700887772020218, guid: 58584e55e8cf7f847a8b3287d13649bf, type: 3}
   curveBaseCorner: 2
   arrowVisual: {fileID: 1215388316526653859}
+  arrowUseBeltVisualTiming: 1
   arrowCycleSeconds: 0.45
   arrowSortingOrderOffset: 1
   arrowCellPadding: 0.01
+  arrowSpacingMultiplier: 1
+  arrowSpacingWorldDistance: 0
 --- !u!1 &3903966731305617336
 GameObject:
   m_ObjectHideFlags: 0

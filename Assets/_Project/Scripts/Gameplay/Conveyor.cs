@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -12,9 +13,12 @@ public class Conveyor : MonoBehaviour, IConveyor
     [SerializeField] CurveCorner curveBaseCorner = CurveCorner.LeftUp;
     [Header("Arrow Visual")]
     [SerializeField] Transform arrowVisual;
+    [SerializeField] bool arrowUseBeltVisualTiming = true;
     [SerializeField, Min(0.01f)] float arrowCycleSeconds = 0.45f;
     [SerializeField] int arrowSortingOrderOffset = 1;
     [SerializeField, Min(0f)] float arrowCellPadding = 0.01f;
+    [SerializeField, Min(0.1f)] float arrowSpacingMultiplier = 1f;
+    [SerializeField, Min(0f)] float arrowSpacingWorldDistance = 0f;
 
     [System.NonSerialized] bool isCurve;
     [System.NonSerialized] Direction curveFrom = Direction.None;
@@ -25,6 +29,13 @@ public class Conveyor : MonoBehaviour, IConveyor
     SpriteRenderer arrowSpriteRenderer;
     Vector3 arrowBaseLocalPosition;
     bool arrowBaseCached;
+    readonly List<Transform> arrowClones = new();
+    readonly List<SpriteRenderer> arrowCloneSpriteRenderers = new();
+    MaterialPropertyBlock arrowPropertyBlock;
+
+    static readonly int ClipRectId = Shader.PropertyToID("_ClipRect");
+    static Shader arrowClipShader;
+    static Material arrowClipMaterial;
     
     // Flag to mark this conveyor as a ghost (visual only, should not be registered)
     [System.NonSerialized]
@@ -244,6 +255,13 @@ public class Conveyor : MonoBehaviour, IConveyor
 
     void OnDestroy()
     {
+        for (int i = 0; i < arrowClones.Count; i++)
+        {
+            if (arrowClones[i] != null)
+                Destroy(arrowClones[i].gameObject);
+        }
+        arrowClones.Clear();
+        arrowCloneSpriteRenderers.Clear();
         if (Application.isPlaying && !isGhost)
         {
             SetConveyorAtCell(lastCell, null);
@@ -385,15 +403,32 @@ public class Conveyor : MonoBehaviour, IConveyor
             arrowSpriteRenderer.sortingLayerID = spriteRenderer.sortingLayerID;
             arrowSpriteRenderer.sortingOrder = spriteRenderer.sortingOrder + arrowSortingOrderOffset;
         }
+        if (spriteRenderer != null)
+        {
+            for (int i = 0; i < arrowCloneSpriteRenderers.Count; i++)
+            {
+                var cloneRenderer = arrowCloneSpriteRenderers[i];
+                if (cloneRenderer == null) continue;
+                cloneRenderer.sortingLayerID = spriteRenderer.sortingLayerID;
+                cloneRenderer.sortingOrder = spriteRenderer.sortingOrder + arrowSortingOrderOffset;
+            }
+        }
 
         bool showArrow = !isCurve;
         if (arrowVisual.gameObject.activeSelf != showArrow)
             arrowVisual.gameObject.SetActive(showArrow);
+        for (int i = 0; i < arrowClones.Count; i++)
+        {
+            var clone = arrowClones[i];
+            if (clone != null && clone.gameObject.activeSelf != showArrow)
+                clone.gameObject.SetActive(showArrow);
+        }
 
         if (!showArrow)
         {
             if (arrowBaseCached)
                 arrowVisual.localPosition = arrowBaseLocalPosition;
+            ResetArrowClonePositions();
             return;
         }
 
@@ -404,29 +439,53 @@ public class Conveyor : MonoBehaviour, IConveyor
         if (!shouldAnimate)
         {
             arrowVisual.localPosition = arrowBaseLocalPosition;
+            ResetArrowClonePositions();
             return;
         }
 
-        Vector3 halfTravelOffset = GetArrowHalfTravelLocalOffset();
-        if (halfTravelOffset.sqrMagnitude <= 0.000001f)
+        Vector3 startOffset = GetArrowLeadStartLocalOffset();
+        Vector3 repeatOffset = GetArrowRepeatLocalOffset();
+        if (repeatOffset.sqrMagnitude <= 0.000001f)
         {
             arrowVisual.localPosition = arrowBaseLocalPosition;
+            ResetArrowClonePositions();
             return;
         }
+
+        EnsureArrowClones();
+        ApplyArrowClipping();
 
         float cycleSeconds = GetArrowCycleSeconds();
         float phaseTime = GetArrowPhaseTime();
         float progress = Mathf.Repeat(phaseTime / cycleSeconds, 1f);
-        arrowVisual.localPosition = arrowBaseLocalPosition + Vector3.Lerp(-halfTravelOffset, halfTravelOffset, progress);
+        Vector3 offset = startOffset + repeatOffset * progress;
+        arrowVisual.localPosition = arrowBaseLocalPosition + offset;
+
+        for (int i = 0; i < arrowClones.Count; i++)
+        {
+            var clone = arrowClones[i];
+            if (clone == null) continue;
+            clone.localPosition = arrowBaseLocalPosition + startOffset + repeatOffset * (progress - (i + 1));
+        }
     }
 
     float GetArrowCycleSeconds()
     {
-        float fallbackSeconds = arrowCycleSeconds > 0.01f ? arrowCycleSeconds : 0.45f;
-        var beltService = BeltSimulationService.Instance;
-        if (beltService != null)
-            return beltService.GetVisualSecondsPerCell(fallbackSeconds);
-        return fallbackSeconds;
+        float secondsPerCell = arrowCycleSeconds > 0.01f ? arrowCycleSeconds : 0.45f;
+        if (arrowUseBeltVisualTiming)
+        {
+            var beltService = BeltSimulationService.Instance;
+            if (beltService != null)
+                secondsPerCell = beltService.GetVisualSecondsPerCell(secondsPerCell);
+        }
+
+        float cellSize = GetCellHalfExtentWorld() * 2f;
+        float repeatDistance = GetArrowRepeatWorldDistance();
+        if (cellSize <= 0.0001f || repeatDistance <= 0.0001f)
+            return Mathf.Max(1f / 120f, secondsPerCell);
+
+        float repeatRatio = repeatDistance / cellSize;
+        return Mathf.Max(1f / 120f, secondsPerCell * repeatRatio);
     }
 
     float GetArrowPhaseTime()
@@ -437,26 +496,166 @@ public class Conveyor : MonoBehaviour, IConveyor
         return Time.time;
     }
 
-    Vector3 GetArrowHalfTravelLocalOffset()
+    Vector3 GetArrowLeadStartLocalOffset()
     {
         var parent = arrowVisual != null && arrowVisual.parent != null ? arrowVisual.parent : transform;
-        float halfTravelWorld = GetArrowHalfTravelWorldDistance();
-        if (halfTravelWorld <= 0f) return Vector3.zero;
+        float startWorld = GetArrowLeadStartWorldDistanceFromCenter();
+        if (Mathf.Abs(startWorld) <= 0.0001f) return Vector3.zero;
 
-        return parent.InverseTransformVector(transform.right.normalized * halfTravelWorld);
+        return parent.InverseTransformVector(transform.right.normalized * startWorld);
     }
 
-    float GetArrowHalfTravelWorldDistance()
+    Vector3 GetArrowRepeatLocalOffset()
+    {
+        var parent = arrowVisual != null && arrowVisual.parent != null ? arrowVisual.parent : transform;
+        float repeatWorld = GetArrowRepeatWorldDistance();
+        if (repeatWorld <= 0f) return Vector3.zero;
+
+        return parent.InverseTransformVector(transform.right.normalized * repeatWorld);
+    }
+
+    float GetArrowLeadStartWorldDistanceFromCenter()
+    {
+        float halfVisible = GetArrowHalfVisibleWorldDistance();
+        float halfArrow = GetArrowHalfExtentWorldAlongConveyor();
+        if (halfVisible <= 0f || halfArrow <= 0f)
+            return 0f;
+
+        return halfVisible - halfArrow;
+    }
+
+    void EnsureArrowClones()
+    {
+        if (!Application.isPlaying) return;
+        if (arrowVisual == null) return;
+        if (arrowSpriteRenderer == null) return;
+
+        int requiredCloneCount = GetRequiredArrowCloneCount();
+        while (arrowClones.Count < requiredCloneCount)
+        {
+            var cloneGO = Instantiate(arrowVisual.gameObject, arrowVisual.parent);
+            cloneGO.name = $"ArrowClone_{arrowClones.Count + 1}";
+
+            var cloneTransform = cloneGO.transform;
+            var cloneRenderer = cloneTransform.GetComponentInChildren<SpriteRenderer>(true);
+            if (cloneRenderer != null)
+            {
+                cloneRenderer.sortingLayerID = arrowSpriteRenderer.sortingLayerID;
+                cloneRenderer.sortingOrder = arrowSpriteRenderer.sortingOrder;
+            }
+
+            arrowClones.Add(cloneTransform);
+            arrowCloneSpriteRenderers.Add(cloneRenderer);
+        }
+
+        while (arrowClones.Count > requiredCloneCount)
+        {
+            int lastIndex = arrowClones.Count - 1;
+            if (arrowClones[lastIndex] != null)
+                Destroy(arrowClones[lastIndex].gameObject);
+            arrowClones.RemoveAt(lastIndex);
+            arrowCloneSpriteRenderers.RemoveAt(lastIndex);
+        }
+    }
+
+    void ResetArrowClonePositions()
+    {
+        for (int i = 0; i < arrowClones.Count; i++)
+        {
+            var clone = arrowClones[i];
+            if (clone != null)
+                clone.localPosition = arrowBaseLocalPosition;
+        }
+    }
+
+    int GetRequiredArrowCloneCount()
+    {
+        float repeatWorld = GetArrowRepeatWorldDistance();
+        if (repeatWorld <= 0.0001f)
+            return 0;
+
+        float visibleSpanWorld = GetArrowVisibleSpanWorldDistance();
+        return Mathf.Max(1, Mathf.CeilToInt(visibleSpanWorld / repeatWorld));
+    }
+
+    float GetArrowRepeatWorldDistance()
+    {
+        return GetArrowHalfVisibleWorldDistance() * 2f;
+    }
+
+    float GetArrowVisibleSpanWorldDistance()
+    {
+        return GetArrowRepeatWorldDistance() + GetArrowHalfExtentWorldAlongConveyor() * 2f;
+    }
+
+    float GetArrowHalfVisibleWorldDistance()
+    {
+        float halfCell = GetCellHalfExtentWorld();
+        if (halfCell <= 0.0001f)
+            return 0f;
+
+        float maxPadding = Mathf.Max(0f, halfCell - 0.0001f);
+        float padding = Mathf.Clamp(arrowCellPadding, 0f, maxPadding);
+        return halfCell - padding;
+    }
+
+    float GetCellHalfExtentWorld()
     {
         float cellSize = 1f;
         var gs = GetGridService();
         if (gs != null && gs.CellSize > 0.0001f)
             cellSize = gs.CellSize;
+        return cellSize * 0.5f;
+    }
 
-        float halfCell = cellSize * 0.5f;
-        float padding = Mathf.Max(0f, Mathf.Min(arrowCellPadding, halfCell));
-        float halfArrow = GetArrowHalfExtentWorldAlongConveyor();
-        return Mathf.Max(0f, halfCell - halfArrow - padding);
+    void ApplyArrowClipping()
+    {
+        if (!Application.isPlaying) return;
+        if (spriteRenderer == null) return;
+
+        var clipMaterial = GetArrowClipMaterial();
+        if (clipMaterial == null) return;
+
+        if (arrowSpriteRenderer != null && arrowSpriteRenderer.sharedMaterial != clipMaterial)
+            arrowSpriteRenderer.sharedMaterial = clipMaterial;
+        for (int i = 0; i < arrowCloneSpriteRenderers.Count; i++)
+        {
+            var cloneRenderer = arrowCloneSpriteRenderers[i];
+            if (cloneRenderer != null && cloneRenderer.sharedMaterial != clipMaterial)
+                cloneRenderer.sharedMaterial = clipMaterial;
+        }
+
+        var bounds = spriteRenderer.bounds;
+        var clipRect = new Vector4(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
+        ApplyArrowClipRect(arrowSpriteRenderer, clipRect);
+        for (int i = 0; i < arrowCloneSpriteRenderers.Count; i++)
+            ApplyArrowClipRect(arrowCloneSpriteRenderers[i], clipRect);
+    }
+
+    void ApplyArrowClipRect(SpriteRenderer sr, Vector4 clipRect)
+    {
+        if (sr == null) return;
+        if (arrowPropertyBlock == null)
+            arrowPropertyBlock = new MaterialPropertyBlock();
+
+        sr.GetPropertyBlock(arrowPropertyBlock);
+        arrowPropertyBlock.SetVector(ClipRectId, clipRect);
+        sr.SetPropertyBlock(arrowPropertyBlock);
+    }
+
+    Material GetArrowClipMaterial()
+    {
+        if (arrowClipMaterial != null) return arrowClipMaterial;
+        if (arrowClipShader == null)
+            arrowClipShader = Shader.Find("Custom/ConveyorArrowClip");
+        if (arrowClipShader == null)
+            return null;
+
+        arrowClipMaterial = new Material(arrowClipShader)
+        {
+            name = "ConveyorArrowClip (Runtime)"
+        };
+        return arrowClipMaterial;
     }
 
     float GetArrowHalfExtentWorldAlongConveyor()
